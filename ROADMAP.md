@@ -29,8 +29,8 @@ Everything below is scoped to what native Swift + RealityKit + embedded Python/u
 
 - [x] IntermediateScene IR + `AssetImporter` protocol
 - [ ] Native GLB/glTF importer (PBR, KHR subset, Draco, animations)
-- [ ] OBJ/STL/PLY/DAE via ModelIO
-- [ ] Texture pipeline (resize, re-encode, channel handling)
+- [x] OBJ/STL/PLY/DAE via ModelIO
+- [x] Texture pipeline (resize, re-encode, channel handling)
 - [ ] Conversion sheet UI with per-stage options + live log; presets (ecommerce, quicklook-strict, lossless)
 - [ ] Batch converter window + CSV/JSON reports
 - [ ] `dicyanin-usdz` CLI: convert, convert-batch, info, thumbnail

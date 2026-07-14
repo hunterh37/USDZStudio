@@ -88,3 +88,31 @@ struct ConversionPipelineTests {
         }
     }
 }
+
+// MARK: - Standard defaults
+
+@Suite("Standard defaults")
+struct StandardDefaultsTests {
+
+    @Test func standardRegistryCoversAllBuiltInFormats() {
+        let registry = ImporterRegistry.standard
+        #expect(registry.registeredExtensions == ["dae", "glb", "gltf", "obj", "ply", "stl"])
+        #expect(registry.importer(for: URL(fileURLWithPath: "/x.glb")) is GLTFImporter)
+        #expect(registry.importer(for: URL(fileURLWithPath: "/x.obj")) is ModelIOImporter)
+    }
+
+    @Test func standardPipelineRunsEndToEnd() async throws {
+        // Minimal IR through the full standard pipeline: names sanitized,
+        // textures untouched (none), stage authored.
+        var context = ConversionContext(sourceURL: URL(fileURLWithPath: "/tmp/in.obj"))
+        context.scene = IntermediateScene(
+            name: "Scene",
+            rootNodes: [SceneNode(name: "bad name!", meshIndices: [0])],
+            meshes: [MeshData(name: "Tri", positions: [SIMD3(0, 0, 0), SIMD3(1, 0, 0), SIMD3(0, 1, 0)], indices: [0, 1, 2])]
+        )
+        let result = try await ConversionPipeline.standard().run(context)
+        #expect(result.authoredStage != nil)
+        #expect(result.log.count == 3)
+        #expect(result.log.allSatisfy { $0.contains("ok") })
+    }
+}
