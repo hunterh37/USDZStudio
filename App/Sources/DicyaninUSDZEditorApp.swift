@@ -6,9 +6,21 @@ import USDCore
 /// Thin app target: SwiftUI lifecycle + DI wiring only (<200 lines by design,
 /// specs/testing.md). The real document-based architecture arrives with the
 /// Phase 1 viewer; Phase 0 exit criterion is: open a USDZ, see its prim tree.
+/// When launched via `swift run` (no .app bundle), macOS treats the executable
+/// as a background accessory: the window never comes forward. Promoting the
+/// activation policy to `.regular` and activating makes the dev-run behave like
+/// the eventual bundled app. No-op cost for the packaged build.
+final class AppDelegate: NSObject, NSApplicationDelegate {
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        NSApplication.shared.setActivationPolicy(.regular)
+        NSApplication.shared.activate(ignoringOtherApps: true)
+    }
+}
+
 @main
 struct DicyaninUSDZEditorApp: App {
 
+    @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @State private var stage: StageSnapshot?
     @State private var modelURL: URL?
     @State private var openError: String?
