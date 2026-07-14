@@ -1,3 +1,4 @@
+import ConversionKit
 import Foundation
 import USDCore
 import USDBridge
@@ -17,6 +18,8 @@ enum CLIRunner {
     static let usage = """
     usage: dicyanin-usdz <subcommand>
       info <file.usd[z|a|c]>   Print stage metadata and the prim tree.
+      convert <input> <output.usda> [--max-texture-size N] [--jpeg-basecolor]
+                               Convert glTF/GLB/OBJ/STL/PLY/DAE to USD.
     """
 
     static func run(
@@ -47,9 +50,84 @@ enum CLIRunner {
                 }
                 return 1
             }
+        case "convert":
+            return await convert(arguments: Array(arguments.dropFirst()), print: output, printError: printError)
         default:
             printError("unknown subcommand: \(subcommand)\n" + usage)
             return 2
+        }
+    }
+
+    // MARK: - convert
+
+    static func convert(
+        arguments: [String],
+        print output: (String) -> Void,
+        printError: (String) -> Void
+    ) async -> Int32 {
+        var positional: [String] = []
+        var policy = TexturePolicy()
+        var index = 0
+        while index < arguments.count {
+            let argument = arguments[index]
+            switch argument {
+            case "--max-texture-size":
+                guard index + 1 < arguments.count, let size = Int(arguments[index + 1]), size > 0 else {
+                    printError("error: --max-texture-size needs a positive integer")
+                    return 2
+                }
+                policy.maxSize = size
+                index += 2
+            case "--jpeg-basecolor":
+                policy.encodeBaseColorAsJPEG = true
+                index += 1
+            default:
+                if argument.hasPrefix("--") {
+                    printError("error: unknown option \(argument)\n" + usage)
+                    return 2
+                }
+                positional.append(argument)
+                index += 1
+            }
+        }
+        guard positional.count == 2 else {
+            printError(usage)
+            return 2
+        }
+        let inputURL = URL(fileURLWithPath: positional[0])
+        let outputURL = URL(fileURLWithPath: positional[1])
+        guard outputURL.pathExtension.lowercased() == "usda" else {
+            printError("error: only .usda output is supported for now (usdz packaging is coming)")
+            return 2
+        }
+        guard let importer = ImporterRegistry.standard.importer(for: inputURL) else {
+            printError("error: unsupported input format .\(inputURL.pathExtension) (supported: \(ImporterRegistry.standard.registeredExtensions.joined(separator: ", ")))")
+            return 2
+        }
+
+        do {
+            let imported = try await importer.importAsset(at: inputURL, options: ImportOptions(maxTextureSize: policy.maxSize))
+            var context = ConversionContext(sourceURL: inputURL, scene: imported.scene, diagnostics: imported.diagnostics)
+            context.log.append("parse: ok (\(imported.scene.triangleCount) triangles, \(imported.scene.materials.count) materials)")
+            context = try await ConversionPipeline.standard(texturePolicy: policy).run(context)
+
+            guard let stage = context.authoredStage else {
+                // coverage:disable — the standard pipeline always ends in
+                // USDAuthorStage, which populates authoredStage or throws.
+                printError("error: pipeline produced no stage")
+                return 1
+            }
+            try USDASerializer.serialize(stage).data(using: .utf8)!.write(to: outputURL)
+
+            context.log.forEach(output)
+            for diagnostic in context.diagnostics {
+                printError("\(diagnostic.severity.rawValue): [\(diagnostic.stage)] \(diagnostic.message)")
+            }
+            output("wrote \(outputURL.path)")
+            return 0
+        } catch {
+            printError("error: \(error)")
+            return 1
         }
     }
 
