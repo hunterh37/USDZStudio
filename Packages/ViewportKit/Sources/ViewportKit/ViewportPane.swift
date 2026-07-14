@@ -8,12 +8,33 @@ import AppKit
 /// grid + axes, stats HUD. GPU/AppKit glue lives here by design; the math it
 /// drives (OrbitCamera, GridModel, SceneStats) is unit-tested separately.
 // coverage:disable — RealityKit/AppKit rendering glue, verified by golden-image tests (specs/testing.md layer 6)
+
+/// Which camera action a plain left-drag performs. Selectable from the
+/// three-button control in the viewport's top-leading corner; modifier-key and
+/// scroll-wheel shortcuts keep working regardless of the active mode.
+public enum CameraInteractionMode: String, CaseIterable, Identifiable {
+    case rotate, zoom, pan
+
+    public var id: String { rawValue }
+
+    var symbol: String {
+        switch self {
+        case .rotate: "rotate.3d"
+        case .zoom: "plus.magnifyingglass"
+        case .pan: "hand.draw"
+        }
+    }
+
+    var label: String { rawValue.capitalized }
+}
+
 public struct ViewportPane: View {
 
     let modelURL: URL?
     @State private var stats: SceneStats?
     @State private var showStats = true
     @State private var loadError: String?
+    @State private var cameraMode: CameraInteractionMode = .rotate
 
     public init(modelURL: URL?) {
         self.modelURL = modelURL
@@ -21,7 +42,8 @@ public struct ViewportPane: View {
 
     public var body: some View {
         ZStack(alignment: .topTrailing) {
-            ViewportRepresentable(modelURL: modelURL, stats: $stats, loadError: $loadError)
+            ViewportRepresentable(modelURL: modelURL, mode: cameraMode, stats: $stats, loadError: $loadError)
+            cameraModeControl
             if showStats, let stats {
                 VStack(alignment: .trailing, spacing: 2) {
                     Text(stats.countsLine)
@@ -42,6 +64,23 @@ public struct ViewportPane: View {
             }
         }
     }
+
+    /// Three-button camera-mode toggle, pinned top-leading (stats HUD owns
+    /// top-trailing). A plain drag then rotates / zooms / pans accordingly.
+    private var cameraModeControl: some View {
+        Picker("Camera mode", selection: $cameraMode) {
+            ForEach(CameraInteractionMode.allCases) { mode in
+                Image(systemName: mode.symbol)
+                    .help(mode.label)
+                    .tag(mode)
+            }
+        }
+        .pickerStyle(.segmented)
+        .labelsHidden()
+        .fixedSize()
+        .padding(10)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
 }
 
 // MARK: - NSViewRepresentable
@@ -49,6 +88,7 @@ public struct ViewportPane: View {
 struct ViewportRepresentable: NSViewRepresentable {
 
     let modelURL: URL?
+    let mode: CameraInteractionMode
     @Binding var stats: SceneStats?
     @Binding var loadError: String?
 
@@ -59,12 +99,14 @@ struct ViewportRepresentable: NSViewRepresentable {
         context.coordinator.attach(to: view)
         context.coordinator.onStats = { stats = $0 }
         context.coordinator.onError = { loadError = $0 }
+        view.interactionMode = mode
         return view
     }
 
     func updateNSView(_ view: InteractiveARView, context: Context) {
         context.coordinator.onStats = { stats = $0 }
         context.coordinator.onError = { loadError = $0 }
+        view.interactionMode = mode
         context.coordinator.load(url: modelURL)
     }
 }
@@ -230,6 +272,9 @@ final class InteractiveARView: ARView {
     var onDolly: ((Double) -> Void)?
     var onFrame: (() -> Void)?
 
+    /// Camera action a plain drag performs; driven by the top-leading buttons.
+    var interactionMode: CameraInteractionMode = .rotate
+
     override var acceptsFirstResponder: Bool { true }
 
     override func mouseDown(with event: NSEvent) {
@@ -237,10 +282,16 @@ final class InteractiveARView: ARView {
     }
 
     override func mouseDragged(with event: NSEvent) {
-        if event.modifierFlags.contains(.shift) {
-            onPan?(Double(event.deltaX), Double(event.deltaY))
-        } else {
-            onOrbit?(Double(event.deltaX), Double(event.deltaY))
+        let dx = Double(event.deltaX), dy = Double(event.deltaY)
+        // ⇧-drag always pans (power-user shortcut, independent of mode).
+        guard !event.modifierFlags.contains(.shift) else {
+            onPan?(dx, dy)
+            return
+        }
+        switch interactionMode {
+        case .rotate: onOrbit?(dx, dy)
+        case .pan: onPan?(dx, dy)
+        case .zoom: onDolly?(-dy * 0.01)
         }
     }
 

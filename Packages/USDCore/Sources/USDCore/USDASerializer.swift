@@ -56,8 +56,8 @@ public enum USDASerializer {
         }
         var hasTransformOp = false
         for attribute in prim.attributes {
-            if let declaration = declaration(for: attribute) {
-                lines.append(inner + declaration)
+            if let attributeLines = attributeLines(for: attribute, pad: inner) {
+                lines.append(contentsOf: attributeLines)
                 if attribute.name == "xformOp:transform" { hasTransformOp = true }
             } else {
                 lines.append("\(inner)# unsupported attribute \(quoted(attribute.name)) (\(attribute.value.typeLabel)) omitted")
@@ -65,6 +65,12 @@ public enum USDASerializer {
         }
         if hasTransformOp {
             lines.append("\(inner)uniform token[] xformOpOrder = [\"xformOp:transform\"]")
+        }
+        for relationship in prim.relationships {
+            let uniform = relationship.isUniform ? "uniform " : ""
+            let targets = relationship.targets.map { "<\($0.description)>" }
+            let rhs = targets.count == 1 ? targets[0] : "[\(targets.joined(separator: ", "))]"
+            lines.append("\(inner)\(uniform)rel \(relationship.name) = \(rhs)")
         }
         if !prim.metadata.isEmpty {
             lines.append("\(inner)custom string[] dicyanin:metadata = ["
@@ -81,73 +87,126 @@ public enum USDASerializer {
 
     // MARK: - Attributes
 
-    /// One `type name = value` declaration, or nil for `.unsupported`.
-    static func declaration(for attribute: Attribute) -> String? {
-        let name = attribute.name
-        switch attribute.value {
-        case .bool(let value):
-            return "bool \(name) = \(value)"
-        case .int(let value):
-            return "int \(name) = \(value)"
-        case .double(let value):
-            return "\(name.hasPrefix("inputs:") ? "float" : "double") \(name) = \(number(value))"
-        case .string(let value):
-            return "string \(name) = \(quoted(value))"
-        case .token(let value):
-            return "token \(name) = \(quoted(value))"
-        case .asset(let value):
-            return "asset \(name) = @\(value)@"
-        case .vector(let values):
-            guard (2...4).contains(values.count) else { return nil }
-            let type = name.hasPrefix("inputs:") && values.count == 3
-                ? "color3f" : "double\(values.count)"
-            return "\(type) \(name) = \(tuple(values))"
-        case .matrix4(let values):
-            guard values.count == 16 else { return nil }
-            let rows = stride(from: 0, to: 16, by: 4)
-                .map { tuple(Array(values[$0..<($0 + 4)])) }
-                .joined(separator: ", ")
-            return "matrix4d \(name) = ( \(rows) )"
-        case .intArray(let values):
-            return "int[] \(name) = [\(values.map(String.init).joined(separator: ", "))]"
-        case .doubleArray(let values):
-            // Well-known geometry attributes get their schema types so
-            // downstream consumers (RealityKit, usdchecker) see valid data.
-            switch name {
-            case "points": return vectorArray("point3f[]", name, values, arity: 3)
-            case "normals": return vectorArray("normal3f[]", name, values, arity: 3)
-            case "primvars:st": return vectorArray("texCoord2f[]", name, values, arity: 2)
-            default:
-                return "double[] \(name) = [\(values.map(number).joined(separator: ", "))]"
+    /// Full lines for one attribute — honouring `uniform`, `.timeSamples`, and
+    /// attribute metadata — or `nil` for a value type USD can't express (so the
+    /// caller emits an "omitted" comment).
+    static func attributeLines(for attribute: Attribute, pad inner: String) -> [String]? {
+        guard let type = typeToken(for: attribute.value, name: attribute.name) else { return nil }
+        let uniform = attribute.isUniform ? "uniform " : ""
+
+        if attribute.isAnimated, let samples = attribute.timeSamples {
+            var lines = ["\(inner)\(uniform)\(type) \(attribute.name).timeSamples = {"]
+            for sample in samples {
+                guard let literal = valueLiteral(for: sample.value, name: attribute.name) else { continue }
+                lines.append("\(inner)    \(number(sample.time)): \(literal),")
             }
-        case .stringArray(let values):
-            return "string[] \(name) = [\(values.map(quoted).joined(separator: ", "))]"
-        case .tokenArray(let values):
-            return "token[] \(name) = [\(values.map(quoted).joined(separator: ", "))]"
-        case .float3Array(let values):
-            return vectorArray("float3[]", name, values, arity: 3)
-        case .quatfArray(let values):
-            return vectorArray("quatf[]", name, values, arity: 4)
-        case .matrix4dArray(let values):
-            guard !values.isEmpty, values.count % 16 == 0 else { return nil }
-            let matrices = stride(from: 0, to: values.count, by: 16).map { base -> String in
-                let rows = stride(from: base, to: base + 16, by: 4)
-                    .map { tuple(Array(values[$0..<($0 + 4)])) }
-                    .joined(separator: ", ")
-                return "( \(rows) )"
-            }.joined(separator: ", ")
-            return "matrix4d[] \(name) = [\(matrices)]"
-        case .unsupported:
-            return nil
+            lines.append("\(inner)}")
+            return lines
+        }
+
+        guard let literal = valueLiteral(for: attribute.value, name: attribute.name) else { return nil }
+        let head = "\(inner)\(uniform)\(type) \(attribute.name) = \(literal)"
+        guard !attribute.metadata.isEmpty else { return [head] }
+        // Attribute metadata (e.g. `elementSize`, `interpolation`) is authored
+        // verbatim; callers pre-format each value (quoting tokens themselves).
+        var lines = [head + " ("]
+        for key in attribute.metadata.keys.sorted() {
+            lines.append("\(inner)    \(key) = \(attribute.metadata[key]!)")
+        }
+        lines.append("\(inner))")
+        return lines
+    }
+
+    /// One `type name = value` declaration, or nil for `.unsupported`. Retained
+    /// for callers that only need the flat static form (no uniform/metadata).
+    static func declaration(for attribute: Attribute) -> String? {
+        guard let type = typeToken(for: attribute.value, name: attribute.name),
+              let literal = valueLiteral(for: attribute.value, name: attribute.name) else { return nil }
+        return "\(type) \(attribute.name) = \(literal)"
+    }
+
+    /// The leading USD type token for a value (e.g. `float3[]`, `color3f`), or
+    /// nil for `.unsupported` and malformed fixed-arity values.
+    static func typeToken(for value: AttributeValue, name: String) -> String? {
+        switch value {
+        case .bool: return "bool"
+        case .int: return "int"
+        case .double: return name.hasPrefix("inputs:") ? "float" : "double"
+        case .string: return "string"
+        case .token: return "token"
+        case .asset: return "asset"
+        case .vector(let v):
+            guard (2...4).contains(v.count) else { return nil }
+            return name.hasPrefix("inputs:") && v.count == 3 ? "color3f" : "double\(v.count)"
+        case .matrix4(let v): return v.count == 16 ? "matrix4d" : nil
+        case .intArray: return "int[]"
+        case .doubleArray(let v):
+            switch name {
+            case "points": return v.count % 3 == 0 ? "point3f[]" : nil
+            case "normals": return v.count % 3 == 0 ? "normal3f[]" : nil
+            case "primvars:st": return v.count % 2 == 0 ? "texCoord2f[]" : nil
+            default: return "double[]"
+            }
+        case .stringArray: return "string[]"
+        case .tokenArray: return "token[]"
+        case .float3Array(let v): return v.count % 3 == 0 ? "float3[]" : nil
+        case .quatfArray(let v): return v.count % 4 == 0 ? "quatf[]" : nil
+        case .matrix4dArray(let v): return !v.isEmpty && v.count % 16 == 0 ? "matrix4d[]" : nil
+        case .unsupported: return nil
         }
     }
 
-    private static func vectorArray(_ type: String, _ name: String, _ flat: [Double], arity: Int) -> String? {
+    /// The right-hand-side literal for a value, or nil when the type token is
+    /// also nil (kept in lockstep with `typeToken`).
+    static func valueLiteral(for value: AttributeValue, name: String) -> String? {
+        switch value {
+        case .bool(let v): return "\(v)"
+        case .int(let v): return "\(v)"
+        case .double(let v): return number(v)
+        case .string(let v): return quoted(v)
+        case .token(let v): return quoted(v)
+        case .asset(let v): return "@\(v)@"
+        case .vector(let v):
+            guard (2...4).contains(v.count) else { return nil }
+            return tuple(v)
+        case .matrix4(let v):
+            guard v.count == 16 else { return nil }
+            return matrixLiteral(v, base: 0)
+        case .intArray(let v):
+            return "[\(v.map(String.init).joined(separator: ", "))]"
+        case .doubleArray(let v):
+            switch name {
+            case "points", "normals": return vectorArrayLiteral(v, arity: 3)
+            case "primvars:st": return vectorArrayLiteral(v, arity: 2)
+            default: return "[\(v.map(number).joined(separator: ", "))]"
+            }
+        case .stringArray(let v): return "[\(v.map(quoted).joined(separator: ", "))]"
+        case .tokenArray(let v): return "[\(v.map(quoted).joined(separator: ", "))]"
+        case .float3Array(let v): return vectorArrayLiteral(v, arity: 3)
+        case .quatfArray(let v): return vectorArrayLiteral(v, arity: 4)
+        case .matrix4dArray(let v):
+            guard !v.isEmpty, v.count % 16 == 0 else { return nil }
+            let matrices = stride(from: 0, to: v.count, by: 16)
+                .map { matrixLiteral(v, base: $0) }
+                .joined(separator: ", ")
+            return "[\(matrices)]"
+        case .unsupported: return nil
+        }
+    }
+
+    private static func vectorArrayLiteral(_ flat: [Double], arity: Int) -> String? {
         guard flat.count % arity == 0 else { return nil }
         let elements = stride(from: 0, to: flat.count, by: arity)
             .map { tuple(Array(flat[$0..<($0 + arity)])) }
             .joined(separator: ", ")
-        return "\(type) \(name) = [\(elements)]"
+        return "[\(elements)]"
+    }
+
+    private static func matrixLiteral(_ flat: [Double], base: Int) -> String {
+        let rows = stride(from: base, to: base + 16, by: 4)
+            .map { tuple(Array(flat[$0..<($0 + 4)])) }
+            .joined(separator: ", ")
+        return "( \(rows) )"
     }
 
     // MARK: - Lexical helpers
