@@ -10,11 +10,12 @@ import USDCore
 struct DicyaninUSDZEditorApp: App {
 
     @State private var stage: StageSnapshot?
+    @State private var modelURL: URL?
     @State private var openError: String?
 
     var body: some Scene {
         WindowGroup("Dicyanin USDZ Editor") {
-            EditorShellView(stage: stage)
+            EditorShellView(stage: stage, modelURL: modelURL)
                 .frame(minWidth: 1000, minHeight: 620)
                 .alert("Could Not Open File", isPresented: .constant(openError != nil)) {
                     Button("OK") { openError = nil }
@@ -53,6 +54,7 @@ struct DicyaninUSDZEditorApp: App {
                     throw BridgeError.pythonUnavailable(detail: "no Python interpreter found")
                 }
                 stage = try await BridgedStage.open(url: url, executor: executor).snapshot
+                modelURL = url
             } catch {
                 let bridgeError = error as? BridgeError
                 openError = [bridgeError?.errorDescription, bridgeError?.recoverySuggestion]

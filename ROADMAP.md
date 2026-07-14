@@ -4,20 +4,20 @@ Everything below is scoped to what native Swift + RealityKit + embedded Python/u
 
 ## Phase 0 — Foundation (weeks 1–3)
 
-- [ ] SPM workspace with all package stubs + dependency-lint CI
-- [ ] Document-based app shell, split-view chrome, DicyaninDesignSystem tokens + core controls
-- [ ] Embedded Python runtime bootstrapping (build-script fetch, load, `import pxr` smoke test) with graceful-degradation path
-- [ ] `BridgedStage`: open usdz/usda/usdc → prim-tree snapshot
-- [ ] CI: build, unit tests, asset-corpus checkout, per-module coverage gates live from day one (specs/testing.md)
+- [x] SPM workspace with all package stubs + dependency-lint CI
+- [x] Document-based app shell, split-view chrome, DicyaninDesignSystem tokens + core controls
+- [x] Embedded Python runtime bootstrapping (build-script fetch, load, `import pxr` smoke test) with graceful-degradation path
+- [x] `BridgedStage`: open usdz/usda/usdc → prim-tree snapshot
+- [x] CI: build, unit tests, asset-corpus checkout, per-module coverage gates live from day one (specs/testing.md)
 
 **Exit:** open a USDZ, see its prim tree in a native outliner.
 
 ## Phase 1 — Best-in-class Viewer (v0.1, weeks 4–8)
 
-- [ ] RealityKit viewport: fast-path loading, orbit/pan/dolly, frame selection, grid/axes
+- [x] RealityKit viewport: fast-path loading, orbit/pan/dolly, frame selection, grid/axes
 - [ ] IBL presets + custom HDR, exposure, background modes
 - [ ] Outliner (search, visibility, type icons) + read-only inspector (transform, prim, material, stage tabs)
-- [ ] Stats HUD, bounds/AR-scale readout
+- [x] Stats HUD, bounds/AR-scale readout
 - [ ] Animation playback transport
 - [ ] Debug view modes: wireframe, normals, UV checker, matcap
 - [ ] QuickLook thumbnail + preview extension for `.usda`

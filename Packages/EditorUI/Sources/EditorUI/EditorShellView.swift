@@ -1,5 +1,6 @@
 import SwiftUI
 import USDCore
+import ViewportKit
 import DicyaninDesignSystem
 
 extension ColorToken {
@@ -14,18 +15,21 @@ extension ColorToken {
 public struct EditorShellView: View {
 
     let stage: (any USDStageProtocol)?
+    /// Source file for the viewport's RealityKit fast path (Phase 1).
+    let modelURL: URL?
     @State private var selection = Selection.empty
     @State private var searchText = ""
 
-    public init(stage: (any USDStageProtocol)? = nil) {
+    public init(stage: (any USDStageProtocol)? = nil, modelURL: URL? = nil) {
         self.stage = stage
+        self.modelURL = modelURL
     }
 
     public var body: some View {
         HSplitView {
             outliner
                 .frame(minWidth: 220, idealWidth: 260)
-            viewportPlaceholder
+            viewport
                 .frame(minWidth: 400, maxWidth: .infinity, maxHeight: .infinity)
             inspectorPlaceholder
                 .frame(minWidth: 240, idealWidth: 280)
@@ -65,12 +69,17 @@ public struct EditorShellView: View {
         return OutlinerModel.filtered(OutlinerModel.rows(for: stage), searchText: searchText)
     }
 
-    private var viewportPlaceholder: some View {
-        ZStack {
-            Palette.viewportBackground.color
-            Text(stage == nil ? "Open a USDZ to begin" : "Viewport — Phase 1")
-                .font(.system(size: TypeScale.title))
-                .foregroundStyle(Palette.textSecondary.color)
+    @ViewBuilder
+    private var viewport: some View {
+        if let modelURL {
+            ViewportPane(modelURL: modelURL)
+        } else {
+            ZStack {
+                Palette.viewportBackground.color
+                Text("Open a USDZ to begin")
+                    .font(.system(size: TypeScale.title))
+                    .foregroundStyle(Palette.textSecondary.color)
+            }
         }
     }
 
