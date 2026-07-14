@@ -27,7 +27,7 @@ Everything below is scoped to what native Swift + RealityKit + embedded Python/u
 
 ## Phase 2 — Conversion (v0.2, weeks 9–14)
 
-- [ ] IntermediateScene IR + `AssetImporter` protocol
+- [x] IntermediateScene IR + `AssetImporter` protocol
 - [ ] Native GLB/glTF importer (PBR, KHR subset, Draco, animations)
 - [ ] OBJ/STL/PLY/DAE via ModelIO
 - [ ] Texture pipeline (resize, re-encode, channel handling)
