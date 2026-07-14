@@ -1,0 +1,33 @@
+#!/bin/bash
+# Runs every package's test suite; fails on the first red package.
+# Usage: scripts/test-all.sh [--coverage]
+set -euo pipefail
+cd "$(dirname "$0")/.."
+
+COVERAGE_FLAG=""
+if [[ "${1:-}" == "--coverage" ]]; then
+  COVERAGE_FLAG="--enable-code-coverage"
+fi
+
+PACKAGES=(
+  Packages/USDCore
+  Packages/DicyaninDesignSystem
+  Packages/USDBridge
+  Packages/EditingKit
+  Packages/ValidationKit
+  Packages/ConversionKit
+  Packages/ScriptingKit
+  Packages/ViewportKit
+  Packages/EditorUI
+  CLI
+)
+
+for pkg in "${PACKAGES[@]}"; do
+  echo "──── swift test: $pkg"
+  (cd "$pkg" && swift test $COVERAGE_FLAG)
+done
+
+echo "──── swift build: App"
+(cd App && swift build)
+
+echo "All packages green."

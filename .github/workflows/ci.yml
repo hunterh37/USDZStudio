@@ -1,0 +1,28 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  lint:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Dependency lint
+        run: bash scripts/dependency-lint.sh
+
+  test:
+    runs-on: macos-15
+    needs: lint
+    steps:
+      - uses: actions/checkout@v4
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode_16.4.app || true
+      - name: Fetch Python runtime (usd-core)
+        run: bash scripts/fetch-python-runtime.sh
+      - name: Test all packages (with coverage)
+        run: bash scripts/test-all.sh --coverage
+      # Per-module xccov coverage floors (specs/testing.md) are wired in as
+      # modules gain measurable surface; tracked in ROADMAP Phase 0.

@@ -1,0 +1,48 @@
+{
+  "metadata": {
+    "upAxis": "Y",
+    "metersPerUnit": 0.01,
+    "defaultPrim": "Car",
+    "customLayerData": {"creator": "fixture"}
+  },
+  "prims": [
+    {
+      "path": "/Car",
+      "type": "Xform",
+      "active": true,
+      "visibility": "inherited",
+      "metadata": {"kind": "assembly"},
+      "variantSets": [
+        {"name": "color", "variants": ["red", "blue"], "selection": "red"}
+      ],
+      "attributes": [
+        {"name": "xformOp:translate", "type": "vector", "doubles": [0, 0.5, 0]},
+        {"name": "xformOpOrder", "type": "string[]", "strings": ["xformOp:translate"]},
+        {"name": "customFlag", "type": "bool", "bool": true},
+        {"name": "count", "type": "int", "int": 4},
+        {"name": "mass", "type": "double", "double": 1200.5},
+        {"name": "label", "type": "string", "string": "car"},
+        {"name": "purpose", "type": "token", "string": "default"},
+        {"name": "tex", "type": "asset", "string": "textures/body.png"},
+        {"name": "xf", "type": "matrix4d", "doubles": [1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1]},
+        {"name": "indices", "type": "int[]", "ints": [0, 1, 2]},
+        {"name": "weights", "type": "double[]", "doubles": [0.5, 0.5]},
+        {"name": "weird", "type": "unsupported:matrix2d"}
+      ],
+      "children": [
+        {
+          "path": "/Car/Wheel",
+          "type": "Mesh",
+          "active": true,
+          "visibility": "invisible",
+          "children": []
+        },
+        {
+          "path": "/Car/Antenna",
+          "type": "Mesh",
+          "active": false
+        }
+      ]
+    }
+  ]
+}

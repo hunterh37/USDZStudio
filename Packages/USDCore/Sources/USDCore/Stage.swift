@@ -1,0 +1,90 @@
+import Foundation
+
+/// Stage up-axis. RealityKit expects Y-up output; Z-up input is surfaced so
+/// the unit/axis fixer can correct it (PRD §5.3).
+public enum UpAxis: String, Hashable, Sendable, Codable {
+    case y = "Y"
+    case z = "Z"
+}
+
+/// Root-layer metadata (PRD §5.3 "Edit stage/root metadata").
+public struct StageMetadata: Hashable, Sendable {
+    public var upAxis: UpAxis
+    public var metersPerUnit: Double
+    public var defaultPrim: String?
+    public var customLayerData: [String: String]
+
+    public init(
+        upAxis: UpAxis = .y,
+        metersPerUnit: Double = 1.0,
+        defaultPrim: String? = nil,
+        customLayerData: [String: String] = [:]
+    ) {
+        self.upAxis = upAxis
+        self.metersPerUnit = metersPerUnit
+        self.defaultPrim = defaultPrim
+        self.customLayerData = customLayerData
+    }
+}
+
+/// Read-only view of a USD stage — the seam between USDBridge (the only
+/// module that talks to Python/usd-core) and everything downstream.
+public protocol USDStageProtocol: Sendable {
+    var sourceURL: URL? { get }
+    var metadata: StageMetadata { get }
+    var rootPrims: [Prim] { get }
+}
+
+extension USDStageProtocol {
+    /// Depth-first list of every prim on the stage.
+    public func allPrims() -> [Prim] {
+        rootPrims.flatMap { $0.flattened() }
+    }
+
+    /// Total prim count.
+    public var primCount: Int { allPrims().count }
+
+    /// Looks up a prim by absolute path.
+    public func prim(at path: PrimPath) -> Prim? {
+        for root in rootPrims {
+            if let found = root.prim(at: path) { return found }
+        }
+        return nil
+    }
+
+    /// All prims whose name matches `name` exactly.
+    public func prims(named name: String) -> [Prim] {
+        allPrims().filter { $0.name == name }
+    }
+}
+
+/// An immutable, value-typed stage snapshot. USDBridge produces these; the
+/// outliner, inspector, and viewport consume them.
+public struct StageSnapshot: USDStageProtocol, Hashable {
+    public var sourceURL: URL?
+    public var metadata: StageMetadata
+    public var rootPrims: [Prim]
+
+    public init(sourceURL: URL? = nil, metadata: StageMetadata = StageMetadata(), rootPrims: [Prim] = []) {
+        self.sourceURL = sourceURL
+        self.metadata = metadata
+        self.rootPrims = rootPrims
+    }
+}
+
+/// Mutation seam for EditingKit commands (Phase 3). Declared here so the
+/// command protocol can compile against USDCore without importing the bridge.
+public protocol USDStageMutable: USDStageProtocol {
+    func apply(_ mutation: StageMutation) throws
+}
+
+/// The closed set of stage mutations the editor authors (Phase 3 scope;
+/// enumerated now so the command layer has a stable vocabulary).
+public enum StageMutation: Hashable, Sendable {
+    case setAttribute(path: PrimPath, attribute: Attribute)
+    case setVisibility(path: PrimPath, visibility: Visibility)
+    case setActive(path: PrimPath, isActive: Bool)
+    case renamePrim(path: PrimPath, newName: String)
+    case removePrim(path: PrimPath)
+    case setStageMetadata(StageMetadata)
+}
