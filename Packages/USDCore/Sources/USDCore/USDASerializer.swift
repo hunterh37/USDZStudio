@@ -13,6 +13,15 @@ public enum USDASerializer {
         }
         lines.append("    metersPerUnit = \(number(metadata.metersPerUnit))")
         lines.append("    upAxis = \(quoted(metadata.upAxis.rawValue))")
+        if let tcps = metadata.timeCodesPerSecond {
+            lines.append("    timeCodesPerSecond = \(number(tcps))")
+        }
+        if let start = metadata.startTimeCode {
+            lines.append("    startTimeCode = \(number(start))")
+        }
+        if let end = metadata.endTimeCode {
+            lines.append("    endTimeCode = \(number(end))")
+        }
         if !metadata.customLayerData.isEmpty {
             lines.append("    customLayerData = {")
             for key in metadata.customLayerData.keys.sorted() {
@@ -113,6 +122,21 @@ public enum USDASerializer {
             }
         case .stringArray(let values):
             return "string[] \(name) = [\(values.map(quoted).joined(separator: ", "))]"
+        case .tokenArray(let values):
+            return "token[] \(name) = [\(values.map(quoted).joined(separator: ", "))]"
+        case .float3Array(let values):
+            return vectorArray("float3[]", name, values, arity: 3)
+        case .quatfArray(let values):
+            return vectorArray("quatf[]", name, values, arity: 4)
+        case .matrix4dArray(let values):
+            guard !values.isEmpty, values.count % 16 == 0 else { return nil }
+            let matrices = stride(from: 0, to: values.count, by: 16).map { base -> String in
+                let rows = stride(from: base, to: base + 16, by: 4)
+                    .map { tuple(Array(values[$0..<($0 + 4)])) }
+                    .joined(separator: ", ")
+                return "( \(rows) )"
+            }.joined(separator: ", ")
+            return "matrix4d[] \(name) = [\(matrices)]"
         case .unsupported:
             return nil
         }

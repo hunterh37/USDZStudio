@@ -19,6 +19,7 @@ public struct EditorShellView: View {
     let modelURL: URL?
     @State private var selection = Selection.empty
     @State private var searchText = ""
+    @State private var collapsed: Set<PrimPath> = []
 
     public init(stage: (any USDStageProtocol)? = nil, modelURL: URL? = nil) {
         self.stage = stage
@@ -43,30 +44,79 @@ public struct EditorShellView: View {
                 .textFieldStyle(.roundedBorder)
                 .padding(Spacing.xs)
             List(filteredRows) { row in
-                HStack(spacing: Spacing.xxs) {
-                    Text(row.path.name)
-                        .font(.system(size: TypeScale.body))
-                        .foregroundStyle(row.isActive
-                            ? Palette.textPrimary.color
-                            : Palette.textSecondary.color)
-                    Spacer()
-                    if row.visibility == .invisible {
-                        Image(systemName: "eye.slash")
-                            .foregroundStyle(Palette.textSecondary.color)
-                    }
-                }
-                .padding(.leading, Double(row.depth) * Spacing.sm)
-                .contentShape(Rectangle())
-                .onTapGesture { selection = selection.selecting(row.path) }
+                outlinerRow(row)
             }
             .listStyle(.sidebar)
         }
         .background(Palette.panelBackground.color)
     }
 
+    /// A single outliner row: disclosure chevron (for rows with children),
+    /// name, and a visibility indicator. The whole row is tappable to select,
+    /// and highlights when it's part of the current selection.
+    @ViewBuilder
+    private func outlinerRow(_ row: OutlinerModel.Row) -> some View {
+        let isSelected = selection.contains(row.path)
+        HStack(spacing: Spacing.xxs) {
+            // Indentation grows with depth so nested levels read as a tree.
+            Color.clear
+                .frame(width: Double(row.depth) * Spacing.md, height: 1)
+
+            // Disclosure triangle only where there's a subtree to fold.
+            if row.hasChildren {
+                Button {
+                    toggleCollapsed(row.path)
+                } label: {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: TypeScale.caption, weight: .semibold))
+                        .rotationEffect(.degrees(collapsed.contains(row.path) ? 0 : 90))
+                        .foregroundStyle(Palette.textSecondary.color)
+                        .frame(width: 14, height: 14)
+                }
+                .buttonStyle(.plain)
+            } else {
+                Color.clear.frame(width: 14, height: 14)
+            }
+
+            Text(row.path.name)
+                .font(.system(size: TypeScale.body))
+                .foregroundStyle(row.isActive
+                    ? Palette.textPrimary.color
+                    : Palette.textSecondary.color)
+                .lineLimit(1)
+            Spacer(minLength: 0)
+            if row.visibility == .invisible {
+                Image(systemName: "eye.slash")
+                    .foregroundStyle(Palette.textSecondary.color)
+            }
+        }
+        .padding(.vertical, Spacing.xxs)
+        .padding(.horizontal, Spacing.xs)
+        .background(
+            RoundedRectangle(cornerRadius: 5)
+                .fill(isSelected ? Palette.accent.color.opacity(0.25) : .clear)
+        )
+        .contentShape(Rectangle())
+        .onTapGesture { selection = selection.selecting(row.path) }
+    }
+
+    private func toggleCollapsed(_ path: PrimPath) {
+        if collapsed.contains(path) {
+            collapsed.remove(path)
+        } else {
+            collapsed.insert(path)
+        }
+    }
+
     private var filteredRows: [OutlinerModel.Row] {
         guard let stage else { return [] }
-        return OutlinerModel.filtered(OutlinerModel.rows(for: stage), searchText: searchText)
+        // While filtering, show the full matching tree (ignore collapse) so
+        // matches are never hidden inside a folded parent.
+        let query = searchText.trimmingCharacters(in: .whitespaces)
+        let rows = query.isEmpty
+            ? OutlinerModel.rows(for: stage, collapsed: collapsed)
+            : OutlinerModel.rows(for: stage)
+        return OutlinerModel.filtered(rows, searchText: searchText)
     }
 
     @ViewBuilder

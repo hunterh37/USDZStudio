@@ -13,18 +13,33 @@ public struct StageMetadata: Hashable, Sendable {
     public var metersPerUnit: Double
     public var defaultPrim: String?
     public var customLayerData: [String: String]
+    /// Playback rate; `nil` when the stage carries no animation. When set, the
+    /// transport bar (specs/viewport.md) honours it.
+    public var timeCodesPerSecond: Double?
+    /// Inclusive animation time-code range; `nil` on a static stage.
+    public var startTimeCode: Double?
+    public var endTimeCode: Double?
 
     public init(
         upAxis: UpAxis = .y,
         metersPerUnit: Double = 1.0,
         defaultPrim: String? = nil,
-        customLayerData: [String: String] = [:]
+        customLayerData: [String: String] = [:],
+        timeCodesPerSecond: Double? = nil,
+        startTimeCode: Double? = nil,
+        endTimeCode: Double? = nil
     ) {
         self.upAxis = upAxis
         self.metersPerUnit = metersPerUnit
         self.defaultPrim = defaultPrim
         self.customLayerData = customLayerData
+        self.timeCodesPerSecond = timeCodesPerSecond
+        self.startTimeCode = startTimeCode
+        self.endTimeCode = endTimeCode
     }
+
+    /// `true` when the stage declares an animation time range.
+    public var isAnimated: Bool { startTimeCode != nil && endTimeCode != nil }
 }
 
 /// Read-only view of a USD stage — the seam between USDBridge (the only

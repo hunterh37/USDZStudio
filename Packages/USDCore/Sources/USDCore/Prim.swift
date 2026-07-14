@@ -39,6 +39,8 @@ public struct Prim: Hashable, Sendable {
     public var isActive: Bool
     public var visibility: Visibility
     public var attributes: [Attribute]
+    /// USD relationships authored on this prim (e.g. `skel:skeleton`).
+    public var relationships: [Relationship]
     public var metadata: [String: String]
     public var variantSets: [VariantSet]
     public var children: [Prim]
@@ -49,6 +51,7 @@ public struct Prim: Hashable, Sendable {
         isActive: Bool = true,
         visibility: Visibility = .inherited,
         attributes: [Attribute] = [],
+        relationships: [Relationship] = [],
         metadata: [String: String] = [:],
         variantSets: [VariantSet] = [],
         children: [Prim] = []
@@ -58,6 +61,7 @@ public struct Prim: Hashable, Sendable {
         self.isActive = isActive
         self.visibility = visibility
         self.attributes = attributes
+        self.relationships = relationships
         self.metadata = metadata
         self.variantSets = variantSets
         self.children = children
