@@ -50,8 +50,8 @@ Everything below is scoped to what native Swift + RealityKit + embedded Python/u
 - [ ] Material editing (full PreviewSurface params, texture replace/resize)
 - [ ] Material binding edits + create material
 - [ ] Recolor Tier A: solid-color part recolor with live preview, auto material uniquing, GeomSubset-level selection (specs/recoloring.md)
-- [x] Variant set switching (undoable) — `setVariantSelection` mutation + `SetVariantSelectionCommand` (captures prior selection for undo); InMemoryStage applies it, unknown-set throws. Surfaced on `EditorDocument` (`variantSets(at:)` + `setVariantSelection(_:set:to:)`, no-op on unchanged/missing set); inspector picker view TODO
-- [x] Scale/units fixer — `ScaleFixer.command(for:targetMetersPerUnit:)` normalizes metersPerUnit and bakes a compensating `old/target` uniform scale into each root prim, preserving real-world size, as one undoable `CompositeCommand`. Surfaced on `EditorDocument.fixScale(targetMetersPerUnit:)` (no-op when already normalized); toolbar/menu button TODO
+- [x] Variant set switching (undoable) — `setVariantSelection` mutation + `SetVariantSelectionCommand` (captures prior selection for undo); InMemoryStage applies it, unknown-set throws. Surfaced on `EditorDocument` (`variantSets(at:)` + `setVariantSelection(_:set:to:)`, no-op on unchanged/missing set); inspector Variant Sets picker (per-set `VariantPicker` with a clear-to-None sentinel) drives it undoably
+- [x] Scale/units fixer — `ScaleFixer.command(for:targetMetersPerUnit:)` normalizes metersPerUnit and bakes a compensating `old/target` uniform scale into each root prim, preserving real-world size, as one undoable `CompositeCommand`. Surfaced on `EditorDocument.fixScale(targetMetersPerUnit:)` (no-op when already normalized); inspector Stage tab shows a "Normalize to meters" button next to Meters/unit whenever it isn't 1
 - [ ] Save/Save As (.usdz/.usda/.usdc), flattened export, round-trip diff test in CI
 - [ ] Crash-safe command journal
 

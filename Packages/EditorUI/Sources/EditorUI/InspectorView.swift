@@ -108,9 +108,15 @@ struct InspectorView: View {
             }
             if !prim.variantSets.isEmpty {
                 PanelSection(title: "Variant Sets") {
-                    ForEach(prim.variantSets, id: \.name) { vs in
-                        FieldRow(label: vs.name,
-                                 value: (vs.selection ?? "—") + "  {\(vs.variants.joined(separator: ", "))}")
+                    VStack(alignment: .leading, spacing: Spacing.xs) {
+                        ForEach(prim.variantSets, id: \.name) { vs in
+                            LabeledField(label: vs.name) {
+                                VariantPicker(variantSet: vs) { newSelection in
+                                    document.setVariantSelection(
+                                        prim.path, set: vs.name, to: newSelection)
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -214,6 +220,15 @@ struct InspectorView: View {
                         DoubleField(value: m.metersPerUnit) { new in
                             var copy = m; copy.metersPerUnit = new
                             document.setStageMetadata(copy)
+                        }
+                    }
+                    if m.metersPerUnit != 1.0 {
+                        LabeledField(label: "") {
+                            Button("Normalize to meters") { document.fixScale() }
+                                .buttonStyle(.link)
+                                .font(.system(size: TypeScale.body))
+                                .help("Set meters/unit to 1 and bake a compensating "
+                                      + "scale into each root prim, preserving real-world size.")
                         }
                     }
                     LabeledField(label: "Default prim") {
@@ -354,6 +369,27 @@ private struct DoubleField: View {
     }
 
     static func format(_ v: Double) -> String { String(format: "%g", v) }
+}
+
+/// A picker over a variant set's authored variants, committing the active
+/// selection through the document as one undoable `SetVariantSelectionCommand`.
+/// An explicit "None" tag surfaces (and lets the user clear) an unset selection.
+private struct VariantPicker: View {
+    let variantSet: VariantSet
+    let commit: (String?) -> Void
+
+    private let noneTag = "\u{0}none"   // sentinel distinct from any variant name
+
+    var body: some View {
+        Picker("", selection: Binding(
+            get: { variantSet.selection ?? noneTag },
+            set: { commit($0 == noneTag ? nil : $0) })) {
+            Text("None").tag(noneTag)
+            ForEach(variantSet.variants, id: \.self) { Text($0).tag($0) }
+        }
+        .labelsHidden()
+        .frame(maxWidth: 160)
+    }
 }
 
 /// Editable T/R/S for a prim, committed as one undoable `SetTransformCommand`
