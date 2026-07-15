@@ -16,6 +16,20 @@ public extension USDStageProtocol {
         }
         return TRS.from(matrix: m)
     }
+
+    /// The prim's world matrix: its local transform composed up the ancestor
+    /// chain to the root (row-vector convention, `world = local · parentWorld`).
+    /// The root layer's frame is identity.
+    func worldMatrix(at path: PrimPath) -> [Double] {
+        var m = Matrix4.identity
+        var p = path
+        while !p.isRoot {
+            let local = prim(at: p) != nil ? transform(at: p).toMatrix() : Matrix4.identity
+            m = Matrix4.multiply(m, local)
+            p = p.parent
+        }
+        return m
+    }
 }
 
 /// Authors a prim's local transform, capturing the prior attribute for undo.

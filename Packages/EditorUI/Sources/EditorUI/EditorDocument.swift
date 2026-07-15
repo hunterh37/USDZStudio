@@ -108,6 +108,36 @@ public final class EditorDocument {
         if selection.contains(path) { selection = .empty }
     }
 
+    // MARK: Structural edits
+
+    /// Duplicates a prim as a sibling and selects the copy.
+    public func duplicate(_ path: PrimPath) {
+        guard let command = DuplicatePrimCommand.make(path: path, in: snapshot) else { return }
+        guard run(command) != nil else { return }
+        selection = selection.selecting(command.duplicatePath)
+    }
+
+    /// Moves a prim under `newParent` (root when `nil`), preserving its world
+    /// transform, and follows it with the selection.
+    public func reparent(_ path: PrimPath, under newParent: PrimPath?) {
+        guard let command = ReparentPrimCommand.make(path: path, under: newParent, in: snapshot) else { return }
+        guard run(command) != nil else { return }
+        if selection.contains(path) { selection = selection.selecting(command.moved.path) }
+    }
+
+    /// Groups sibling prims under a new `Xform` and selects the group.
+    public func group(_ paths: [PrimPath], named name: String = "Group") {
+        guard let command = GroupPrimsCommand.make(paths: paths, named: name, in: snapshot) else { return }
+        guard run(command) != nil else { return }
+        selection = Selection([command.groupPath])
+    }
+
+    /// Groups the current multi-selection (a no-op for < 2 prims or mixed parents).
+    public func groupSelection(named name: String = "Group") {
+        guard selection.paths.count >= 1 else { return }
+        group(selection.paths, named: name)
+    }
+
     // MARK: Transform edits
 
     /// The prim's local transform as an editable TRS.

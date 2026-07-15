@@ -115,6 +115,31 @@ struct EditorDocumentTests {
         #expect(doc.snapshot.metadata.upAxis == .y)
     }
 
+    @Test func duplicateSelectsTheCopy() {
+        let doc = carDocument()
+        doc.duplicate(wheel)
+        let copy = PrimPath("/Car/Wheel_1")!
+        #expect(doc.snapshot.prim(at: copy) != nil)
+        #expect(doc.selection.primary == copy)
+        doc.undo()
+        #expect(doc.snapshot.prim(at: copy) == nil)
+    }
+
+    @Test func groupSelectionNestsAndSelectsGroup() {
+        let a = Prim(path: PrimPath("/Root/A")!, typeName: "Mesh")
+        let b = Prim(path: PrimPath("/Root/B")!, typeName: "Mesh")
+        let root = Prim(path: PrimPath("/Root")!, typeName: "Xform", children: [a, b])
+        let doc = EditorDocument(snapshot: StageSnapshot(rootPrims: [root]))
+        doc.selection = Selection([PrimPath("/Root/A")!, PrimPath("/Root/B")!])
+
+        doc.groupSelection()
+        #expect(doc.selection.primary == PrimPath("/Root/Group")!)
+        #expect(doc.snapshot.prim(at: PrimPath("/Root/Group/A")!) != nil)
+
+        doc.undo()
+        #expect(doc.snapshot.prim(at: PrimPath("/Root")!)?.children.map(\.name) == ["A", "B"])
+    }
+
     @Test func revisionAdvancesOnEachChange() {
         let doc = carDocument()
         let start = doc.revision
