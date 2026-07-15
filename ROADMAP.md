@@ -51,7 +51,7 @@ Everything below is scoped to what native Swift + RealityKit + embedded Python/u
 - [ ] Material binding edits + create material
 - [ ] Recolor Tier A: solid-color part recolor with live preview, auto material uniquing, GeomSubset-level selection (specs/recoloring.md)
 - [x] Variant set switching (undoable) — `setVariantSelection` mutation + `SetVariantSelectionCommand` (captures prior selection for undo); InMemoryStage applies it, unknown-set throws. Outliner/inspector UI surfacing TODO
-- [ ] Scale/units fixer
+- [x] Scale/units fixer — `ScaleFixer.command(for:targetMetersPerUnit:)` normalizes metersPerUnit and bakes a compensating `old/target` uniform scale into each root prim, preserving real-world size, as one undoable `CompositeCommand`. Toolbar/menu surfacing TODO
 - [ ] Save/Save As (.usdz/.usda/.usdc), flattened export, round-trip diff test in CI
 - [ ] Crash-safe command journal
 
