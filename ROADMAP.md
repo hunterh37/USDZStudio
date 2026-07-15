@@ -28,7 +28,7 @@ Everything below is scoped to what native Swift + RealityKit + embedded Python/u
 ## Phase 2 — Conversion (v0.2, weeks 9–14)
 
 - [x] IntermediateScene IR + `AssetImporter` protocol
-- [ ] Native GLB/glTF importer (PBR, KHR subset, Draco, animations)
+- [ ] Native GLB/glTF importer — PBR ✓, KHR subset ✓, skinning + animations ✓ (UsdSkel); Draco decode still TODO
 - [x] OBJ/STL/PLY/DAE via ModelIO
 - [x] Texture pipeline (resize, re-encode, channel handling)
 - [ ] Conversion sheet UI with per-stage options + live log; presets (ecommerce, quicklook-strict, lossless)
