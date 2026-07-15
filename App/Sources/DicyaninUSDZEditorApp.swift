@@ -21,13 +21,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 struct DicyaninUSDZEditorApp: App {
 
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
-    @State private var stage: StageSnapshot?
-    @State private var modelURL: URL?
+    @State private var document: EditorDocument?
     @State private var openError: String?
 
     var body: some Scene {
         WindowGroup("Dicyanin USDZ Editor") {
-            EditorShellView(stage: stage, modelURL: modelURL)
+            EditorShellView(document: document)
                 .frame(minWidth: 1000, minHeight: 620)
                 .alert("Could Not Open File", isPresented: .constant(openError != nil)) {
                     Button("OK") { openError = nil }
@@ -37,7 +36,7 @@ struct DicyaninUSDZEditorApp: App {
                 .onOpenURL(perform: open)
                 .onDrop(of: [.fileURL], isTargeted: nil) { providers in
                     _ = providers.first?.loadObject(ofClass: URL.self) { url, _ in
-                        if let url { open(url) }
+                        if let url { Task { @MainActor in open(url) } }
                     }
                     return true
                 }
@@ -47,6 +46,18 @@ struct DicyaninUSDZEditorApp: App {
                 Button("Open…") { presentOpenPanel() }
                     .keyboardShortcut("o")
             }
+            // Drive undo/redo straight through the document's CommandStack. The
+            // package's UndoManagerBridge stays available for the eventual
+            // NSDocument architecture; here a single explicit path keeps ⌘Z
+            // deterministic in the windowed dev app.
+            CommandGroup(replacing: .undoRedo) {
+                Button("Undo") { document?.undo() }
+                    .keyboardShortcut("z")
+                    .disabled(document == nil)
+                Button("Redo") { document?.redo() }
+                    .keyboardShortcut("z", modifiers: [.command, .shift])
+                    .disabled(document == nil)
+            }
             CommandMenu("Convert") {
                 Button("Convert File…") { postMenu(.convert) }
                     .keyboardShortcut("k")
@@ -55,7 +66,7 @@ struct DicyaninUSDZEditorApp: App {
                 Divider()
                 Button("Validate Stage") { postMenu(.validate) }
                     .keyboardShortcut("u")
-                    .disabled(stage == nil)
+                    .disabled(document == nil)
                 Button("Scripts…") { postMenu(.scripts) }
             }
         }
@@ -81,8 +92,8 @@ struct DicyaninUSDZEditorApp: App {
                 guard let executor = ProcessBridgeExecutor(scriptPath: Self.snapshotScriptPath) else {
                     throw BridgeError.pythonUnavailable(detail: "no Python interpreter found")
                 }
-                stage = try await BridgedStage.open(url: url, executor: executor).snapshot
-                modelURL = url
+                let snapshot = try await BridgedStage.open(url: url, executor: executor).snapshot
+                document = EditorDocument(snapshot: snapshot, modelURL: url)
             } catch {
                 let bridgeError = error as? BridgeError
                 openError = [bridgeError?.errorDescription, bridgeError?.recoverySuggestion]

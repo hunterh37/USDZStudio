@@ -10,12 +10,21 @@ import DicyaninDesignSystem
 /// (`ColorToken.color` now lives in Styling.swift, shared across panels.)
 public struct EditorShellView: View {
 
-    let stage: (any USDStageProtocol)?
-    /// Source file for the viewport's RealityKit fast path (Phase 1).
-    let modelURL: URL?
-    @State private var selection = Selection.empty
+    /// The live editing document (nil before a file is opened). Selection and
+    /// all mutations flow through it so edits are undoable.
+    let document: EditorDocument?
     @State private var searchText = ""
     @State private var collapsed: Set<PrimPath> = []
+
+    /// Read-only stage view for the panels that only display state.
+    private var stage: (any USDStageProtocol)? { document?.snapshot }
+    /// Source file for the viewport's RealityKit fast path (Phase 1).
+    private var modelURL: URL? { document?.modelURL }
+    private var selection: Selection { document?.selection ?? .empty }
+
+    private func select(_ path: PrimPath, additive: Bool = false) {
+        document?.selection = selection.selecting(path, additive: additive)
+    }
 
     @State private var showValidation = false
     @State private var activeSheet: Sheet?
@@ -32,9 +41,8 @@ public struct EditorShellView: View {
         public static let notification = Notification.Name("EditorUI.MenuCommand")
     }
 
-    public init(stage: (any USDStageProtocol)? = nil, modelURL: URL? = nil) {
-        self.stage = stage
-        self.modelURL = modelURL
+    public init(document: EditorDocument? = nil) {
+        self.document = document
     }
 
     public var body: some View {
@@ -46,7 +54,7 @@ public struct EditorShellView: View {
                     .frame(minWidth: 220, idealWidth: 260)
                 centerColumn
                     .frame(minWidth: 400, maxWidth: .infinity, maxHeight: .infinity)
-                InspectorView(stage: stage, selection: selection)
+                InspectorView(document: document)
                     .frame(minWidth: 260, idealWidth: 300)
             }
         }
@@ -123,7 +131,7 @@ public struct EditorShellView: View {
             if showValidation {
                 ValidationDrawer(
                     stage: stage,
-                    onSelectPrim: { selection = selection.selecting($0) },
+                    onSelectPrim: { select($0) },
                     onClose: { showValidation = false })
                     .frame(minHeight: 140, idealHeight: 200, maxHeight: 320)
             }
@@ -191,7 +199,7 @@ public struct EditorShellView: View {
                 .fill(isSelected ? Palette.accent.color.opacity(0.25) : .clear)
         )
         .contentShape(Rectangle())
-        .onTapGesture { selection = selection.selecting(row.path) }
+        .onTapGesture { select(row.path) }
     }
 
     private func toggleCollapsed(_ path: PrimPath) {

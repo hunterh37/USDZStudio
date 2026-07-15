@@ -1,13 +1,15 @@
 import SwiftUI
 import USDCore
+import EditingKit
 import DicyaninDesignSystem
 
-/// The read-only inspector (Phase 1). Replaces the Phase 0 placeholder with a
-/// tabbed view over the selected prim and the stage. Editing lands in Phase 3;
-/// the seams (attributes, relationships, metadata) are already surfaced.
+/// The inspector. Read-only surfacing landed in Phase 1; Phase 3 makes the
+/// prim, transform, and stage tabs *editable*, routing every change through the
+/// document's `CommandStack` so edits are undoable. Material editing stays
+/// read-only until its own roadmap slice.
 struct InspectorView: View {
-    let stage: (any USDStageProtocol)?
-    let selection: Selection
+    /// nil when no file is open — the tabs then render empty states.
+    let document: EditorDocument?
 
     enum Tab: String, CaseIterable, Identifiable {
         case prim = "Prim"
@@ -18,6 +20,9 @@ struct InspectorView: View {
     }
 
     @State private var tab: Tab = .prim
+
+    private var stage: (any USDStageProtocol)? { document?.snapshot }
+    private var selection: Selection { document?.selection ?? .empty }
 
     private var prim: Prim? {
         guard let stage, let path = selection.primary else { return nil }
@@ -55,13 +60,33 @@ struct InspectorView: View {
 
     @ViewBuilder
     private var primTab: some View {
-        if let prim {
+        if let document, let prim {
             PanelSection(title: "Prim") {
-                VStack(alignment: .leading, spacing: Spacing.xxs) {
+                VStack(alignment: .leading, spacing: Spacing.xs) {
+                    LabeledField(label: "Name") {
+                        NameField(name: prim.name) { document.rename(prim.path, to: $0) }
+                    }
                     FieldRow(label: "Path", value: prim.path.description)
                     FieldRow(label: "Type", value: prim.typeName.isEmpty ? "(typeless)" : prim.typeName)
-                    FieldRow(label: "Active", value: prim.isActive ? "true" : "false")
-                    FieldRow(label: "Visibility", value: prim.visibility.rawValue)
+                    LabeledField(label: "Active") {
+                        Toggle("", isOn: Binding(
+                            get: { prim.isActive },
+                            set: { document.setActive(prim.path, $0) }))
+                            .labelsHidden()
+                            .toggleStyle(.switch)
+                            .controlSize(.mini)
+                    }
+                    LabeledField(label: "Visibility") {
+                        Picker("", selection: Binding(
+                            get: { prim.visibility },
+                            set: { document.setVisibility(prim.path, $0) })) {
+                            ForEach([Visibility.inherited, .invisible], id: \.self) {
+                                Text($0.rawValue).tag($0)
+                            }
+                        }
+                        .labelsHidden()
+                        .frame(maxWidth: 140)
+                    }
                     FieldRow(label: "Children", value: String(prim.children.count))
                 }
             }
@@ -127,24 +152,15 @@ struct InspectorView: View {
 
     @ViewBuilder
     private var transformTab: some View {
-        if let prim {
-            let xformAttrs = prim.attributes.filter { $0.name.hasPrefix("xformOp") }
-            if xformAttrs.isEmpty {
-                emptyState("No transform ops authored on this prim.")
-            } else {
-                PanelSection(title: "Transform Ops") {
-                    ForEach(xformAttrs, id: \.name) { attr in
-                        FieldRow(label: attr.name.replacingOccurrences(of: "xformOp:", with: ""),
-                                 value: ValueFormatter.string(attr.value))
-                    }
-                }
-            }
+        if let document, let prim {
+            TransformEditor(document: document, path: prim.path)
+                .id(prim.path)
         } else {
             emptyState("No selection")
         }
     }
 
-    // MARK: Material
+    // MARK: Material (read-only until its own slice)
 
     @ViewBuilder
     private var materialTab: some View {
@@ -177,14 +193,36 @@ struct InspectorView: View {
 
     @ViewBuilder
     private var stageTab: some View {
-        if let stage {
+        if let document, let stage {
             let m = stage.metadata
             PanelSection(title: "Stage") {
-                VStack(alignment: .leading, spacing: Spacing.xxs) {
+                VStack(alignment: .leading, spacing: Spacing.xs) {
                     FieldRow(label: "Source", value: stage.sourceURL?.lastPathComponent ?? "—")
-                    FieldRow(label: "Up axis", value: m.upAxis.rawValue)
-                    FieldRow(label: "Meters/unit", value: String(format: "%g", m.metersPerUnit))
-                    FieldRow(label: "Default prim", value: m.defaultPrim ?? "—")
+                    LabeledField(label: "Up axis") {
+                        Picker("", selection: Binding(
+                            get: { m.upAxis },
+                            set: { new in
+                                var copy = m; copy.upAxis = new
+                                document.setStageMetadata(copy)
+                            })) {
+                            ForEach([UpAxis.y, UpAxis.z], id: \.self) { Text($0.rawValue).tag($0) }
+                        }
+                        .labelsHidden()
+                        .frame(maxWidth: 100)
+                    }
+                    LabeledField(label: "Meters/unit") {
+                        DoubleField(value: m.metersPerUnit) { new in
+                            var copy = m; copy.metersPerUnit = new
+                            document.setStageMetadata(copy)
+                        }
+                    }
+                    LabeledField(label: "Default prim") {
+                        NameField(name: m.defaultPrim ?? "", allowEmpty: true) { new in
+                            var copy = m
+                            copy.defaultPrim = new.isEmpty ? nil : new
+                            document.setStageMetadata(copy)
+                        }
+                    }
                     FieldRow(label: "Prims", value: String(stage.primCount))
                 }
             }
@@ -225,5 +263,144 @@ struct InspectorView: View {
             .font(.system(size: TypeScale.body))
             .foregroundStyle(Palette.textSecondary.color)
             .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+// MARK: - Editable field building blocks
+
+/// A label + trailing editor laid out like `FieldRow`, for interactive controls.
+private struct LabeledField<Content: View>: View {
+    let label: String
+    @ViewBuilder var content: Content
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: Spacing.sm) {
+            Text(label)
+                .font(.system(size: TypeScale.body))
+                .foregroundStyle(Palette.textSecondary.color)
+                .frame(width: 96, alignment: .leading)
+            content
+            Spacer(minLength: 0)
+        }
+    }
+}
+
+/// A text field that commits a (validated) name on submit or focus loss, and
+/// reverts to the source value if left blank (unless `allowEmpty`).
+private struct NameField: View {
+    let name: String
+    var allowEmpty: Bool = false
+    let commit: (String) -> Void
+
+    @State private var text: String
+    @FocusState private var focused: Bool
+
+    init(name: String, allowEmpty: Bool = false, commit: @escaping (String) -> Void) {
+        self.name = name
+        self.allowEmpty = allowEmpty
+        self.commit = commit
+        _text = State(initialValue: name)
+    }
+
+    var body: some View {
+        TextField("", text: $text)
+            .textFieldStyle(.roundedBorder)
+            .font(.system(size: TypeScale.inspectorField, design: .monospaced))
+            .frame(maxWidth: 160)
+            .focused($focused)
+            .onSubmit(commitIfChanged)
+            .onChange(of: focused) { _, isFocused in if !isFocused { commitIfChanged() } }
+            .onChange(of: name) { _, new in text = new }   // external rename/undo
+    }
+
+    private func commitIfChanged() {
+        let trimmed = text.trimmingCharacters(in: .whitespaces)
+        if trimmed.isEmpty && !allowEmpty { text = name; return }
+        if trimmed != name { commit(trimmed) }
+    }
+}
+
+/// A numeric text field committing a Double on submit/blur; reverts on garbage.
+private struct DoubleField: View {
+    let value: Double
+    let commit: (Double) -> Void
+
+    @State private var text: String
+    @FocusState private var focused: Bool
+
+    init(value: Double, commit: @escaping (Double) -> Void) {
+        self.value = value
+        self.commit = commit
+        _text = State(initialValue: Self.format(value))
+    }
+
+    var body: some View {
+        TextField("", text: $text)
+            .textFieldStyle(.roundedBorder)
+            .font(.system(size: TypeScale.inspectorField, design: .monospaced))
+            .frame(maxWidth: 90)
+            .multilineTextAlignment(.trailing)
+            .focused($focused)
+            .onSubmit(commitIfChanged)
+            .onChange(of: focused) { _, isFocused in if !isFocused { commitIfChanged() } }
+            .onChange(of: value) { _, new in text = Self.format(new) }
+    }
+
+    private func commitIfChanged() {
+        guard let parsed = Double(text.trimmingCharacters(in: .whitespaces)) else {
+            text = Self.format(value); return
+        }
+        if parsed != value { commit(parsed) }
+    }
+
+    static func format(_ v: Double) -> String { String(format: "%g", v) }
+}
+
+/// Editable T/R/S for a prim, committed as one undoable `SetTransformCommand`
+/// per field edit. Seeded from the prim's current transform; `.id(path)` in the
+/// parent re-seeds it when the selection changes.
+private struct TransformEditor: View {
+    let document: EditorDocument
+    let path: PrimPath
+
+    private let axes = ["X", "Y", "Z"]
+
+    var body: some View {
+        let trs = document.transform(at: path)
+        VStack(alignment: .leading, spacing: Spacing.lg) {
+            vectorSection("Translate", values: trs.translation) { axis, v in
+                var next = trs; next.translation[axis] = v
+                document.setTransform(path, to: next, verb: "Move")
+            }
+            vectorSection("Rotate (°)", values: trs.rotationEulerDegrees) { axis, v in
+                var next = trs; next.rotationEulerDegrees[axis] = v
+                document.setTransform(path, to: next, verb: "Rotate")
+            }
+            vectorSection("Scale", values: trs.scale) { axis, v in
+                var next = trs; next.scale[axis] = v
+                document.setTransform(path, to: next, verb: "Scale")
+            }
+            Button("Reset to identity") {
+                document.setTransform(path, to: .identity, verb: "Reset Transform")
+            }
+            .buttonStyle(.link)
+            .font(.system(size: TypeScale.body))
+        }
+    }
+
+    private func vectorSection(_ title: String, values: [Double],
+                               set: @escaping (Int, Double) -> Void) -> some View {
+        PanelSection(title: title) {
+            HStack(spacing: Spacing.xs) {
+                ForEach(axes.indices, id: \.self) { axis in
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(axes[axis])
+                            .font(.system(size: TypeScale.caption, weight: .semibold))
+                            .foregroundStyle(Palette.textSecondary.color)
+                        DoubleField(value: values[axis]) { set(axis, $0) }
+                    }
+                }
+            }
+        }
     }
 }

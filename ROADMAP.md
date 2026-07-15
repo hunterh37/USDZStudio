@@ -42,7 +42,7 @@ Everything below is scoped to what native Swift + RealityKit + embedded Python/u
 
 - [x] EditingKit command layer + undo/redo bridged to NSUndoManager — `CommandStack` + `InMemoryStage` + full command set (visibility/active/rename/remove/set-attr/composite) + `UndoManagerBridge`
 - [ ] Transform gizmos (translate/rotate/scale, snapping, coalesced undo) — edit backbone done (`TRS`↔matrix compose/decompose, `SnapSettings`, `TransformDragSession` → one coalesced `SetTransformCommand`); viewport gizmo overlay TODO
-- [ ] Editable inspector: transforms, prim metadata, stage metadata
+- [x] Editable inspector: transforms, prim metadata, stage metadata — `EditorDocument` (observable, `InMemoryStage` + `CommandStack`) drives editable T/R/S fields (snapped), prim rename/active/visibility, and stage up-axis/meters-per-unit/default-prim through undoable commands; `SetStageMetadataCommand` added; App menu Undo/Redo wired (material editing stays in its own slice)
 - [ ] Part-level editing (flagship): drill-down/walk-up viewport selection, breadcrumb, move any child prim at any depth
 - [ ] Hide (visibility) vs. Disable (active) vs. Delete part semantics with clear UI
 - [ ] Isolate mode (session-layer, non-dirtying)
