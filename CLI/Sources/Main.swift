@@ -27,6 +27,11 @@ enum CLIRunner {
                                Convert every row of a CSV manifest (columns:
                                input[,output]); prints a summary, exits 1 if
                                any job failed.
+      run <script[.py]> <file.usd[z|a|c]> [script flags...]
+                               Run a Python script (bundled name or path)
+                               headless against a stage. Remaining flags pass
+                               through to the script (see its --help). Exit code
+                               is the script's own.
 
       --preset NAME            Base texture settings before other flags apply.
                                NAME is one of: quicklook-strict (default),
@@ -65,6 +70,8 @@ enum CLIRunner {
             return await convert(arguments: Array(arguments.dropFirst()), print: output, printError: printError)
         case "convert-batch":
             return await convertBatch(arguments: Array(arguments.dropFirst()), print: output, printError: printError)
+        case "run":
+            return runScript(arguments: Array(arguments.dropFirst()), printError: printError)
         default:
             printError("unknown subcommand: \(subcommand)\n" + usage)
             return 2
@@ -261,6 +268,136 @@ enum CLIRunner {
 
         output("batch: \(report.succeededCount) ok, \(report.failedCount) failed, \(report.skippedCount) skipped (\(jobs.count) total)")
         return report.hasFailures ? 1 : 0
+    }
+
+    // MARK: - run
+
+    /// A fully-resolved script invocation: which interpreter, the argv to hand
+    /// it (`script model [flags...]`), and the directories that must be on
+    /// `PYTHONPATH` so `from _harness import …` resolves.
+    struct RunInvocation: Equatable {
+        var python: String
+        var arguments: [String]
+        var pythonPath: [String]
+    }
+
+    enum RunResolution: Equatable {
+        case invocation(RunInvocation)
+        case fail(Int32)
+    }
+
+    /// Pure, testable resolution of a `run` command: locates the script (by
+    /// path or bundled name), the interpreter, and the `_harness` search path.
+    /// Does *not* touch the model file — the harness opens and validates it,
+    /// reporting its own errors.
+    static func resolveRun(
+        arguments: [String],
+        locatePython: () -> String?,
+        fileExists: (String) -> Bool,
+        bundledScriptsDir: () -> String?,
+        printError: (String) -> Void
+    ) -> RunResolution {
+        guard arguments.count >= 2 else {
+            printError("error: run needs a script and a file\n" + usage)
+            return .fail(2)
+        }
+        let scriptArg = arguments[0]
+        let passthrough = Array(arguments.dropFirst())  // model + script flags
+
+        let scriptsDir = bundledScriptsDir()
+        // Candidate resolutions, in priority order: exact path, path+.py, then
+        // the same two under the bundled scripts directory.
+        var candidates = [scriptArg, scriptArg + ".py"]
+        if let scriptsDir {
+            let base = URL(fileURLWithPath: scriptsDir)
+            candidates.append(base.appendingPathComponent(scriptArg).path)
+            candidates.append(base.appendingPathComponent(scriptArg + ".py").path)
+        }
+        guard let resolved = candidates.first(where: fileExists) else {
+            printError("error: script not found: \(scriptArg)")
+            return .fail(2)
+        }
+
+        guard let python = locatePython() else {
+            printError("error: no Python interpreter found (set DICYANIN_PYTHON)")
+            return .fail(1)
+        }
+
+        // `_harness` lives beside the bundled scripts; also expose the resolved
+        // script's own directory so a user script sitting elsewhere can import
+        // its own siblings.
+        var pythonPath = [URL(fileURLWithPath: resolved).deletingLastPathComponent().path]
+        if let scriptsDir, !pythonPath.contains(scriptsDir) {
+            pythonPath.append(scriptsDir)
+        }
+
+        return .invocation(RunInvocation(
+            python: python,
+            arguments: [resolved] + passthrough,
+            pythonPath: pythonPath))
+    }
+
+    static func runScript(
+        arguments: [String],
+        printError: (String) -> Void,
+        spawn: (RunInvocation) -> Int32 = defaultSpawn
+    ) -> Int32 {
+        let locator = PythonRuntimeLocator()
+        let resolution = resolveRun(
+            arguments: arguments,
+            locatePython: { locator.locate() },
+            fileExists: { FileManager.default.fileExists(atPath: $0) },
+            bundledScriptsDir: { try? scriptsDirectoryPath() },
+            printError: printError)
+        switch resolution {
+        case .fail(let code): return code
+        case .invocation(let invocation): return spawn(invocation)
+        }
+    }
+
+    /// Runs the interpreter, inheriting stdio so the script's stdout/stderr and
+    /// exit code flow straight through. Prepends our search dirs to any
+    /// inherited `PYTHONPATH`.
+    static func defaultSpawn(_ invocation: RunInvocation) -> Int32 {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: invocation.python)
+        process.arguments = invocation.arguments
+        var environment = ProcessInfo.processInfo.environment
+        let existing = environment["PYTHONPATH"]
+        environment["PYTHONPATH"] = (invocation.pythonPath + (existing.map { [$0] } ?? []))
+            .joined(separator: ":")
+        process.environment = environment
+        do {
+            try process.run()
+        } catch {
+            FileHandle.standardError.write(Data("error: could not launch \(invocation.python): \(error)\n".utf8))
+            return 1
+        }
+        process.waitUntilExit()
+        return process.terminationStatus
+    }
+
+    /// Locates the bundled `Resources/Python/scripts` directory the same way
+    /// `snapshotScriptPath` finds the snapshot script: a `DICYANIN_SCRIPTS_DIR`
+    /// override, else a walk up from the cwd.
+    static func scriptsDirectoryPath(
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        startingAt directory: String = FileManager.default.currentDirectoryPath
+    ) throws -> String {
+        if let override = environment["DICYANIN_SCRIPTS_DIR"], !override.isEmpty {
+            return override
+        }
+        var dir = URL(fileURLWithPath: directory)
+        for _ in 0..<6 {
+            let candidate = dir.appendingPathComponent("Resources/Python/scripts")
+            var isDirectory: ObjCBool = false
+            if FileManager.default.fileExists(atPath: candidate.path, isDirectory: &isDirectory),
+               isDirectory.boolValue {
+                return candidate.path
+            }
+            dir.deleteLastPathComponent()
+        }
+        throw BridgeError.pythonUnavailable(detail: "Resources/Python/scripts not found; set DICYANIN_SCRIPTS_DIR")
     }
 
     // MARK: - shared texture-policy options
