@@ -59,7 +59,7 @@ Everything below is scoped to what native Swift + RealityKit + embedded Python/u
 
 ## Phase 4 — Validation & Scripting (v0.4, weeks 23–28)
 
-- [ ] ValidationRule engine + v1 rule catalog, live diagnostics drawer (engine ✓; catalog: scale/upAxis/defaultPrim/duplicate-name/mesh-topology/empty/unbound/normals ✓; drawer ✓; quick-fixes TODO)
+- [ ] ValidationRule engine + v1 rule catalog, live diagnostics drawer (engine ✓; catalog: scale/upAxis/defaultPrim/duplicate-name/mesh-topology/empty/unbound/normals ✓; drawer ✓; quick-fixes: `QuickFixRegistry` maps diagnostics → undoable `EditCommand`s for metersPerUnit (reuses ScaleFixer) and defaultPrim, wired to a per-row "Fix" button in the drawer via `EditorDocument.applyQuickFix`; duplicate-name/topology/normals/unbound intentionally have no auto-fix — see QuickFix.swift)
 - [ ] ComplianceChecker (ARKit profile) integration, export gating
 - [ ] Python console (REPL, injected `stage`/`selection`/`app`, single-undo script runs)
 - [x] Script library panel + bundled starter scripts (panel + source preview ✓; REPL execution TODO)

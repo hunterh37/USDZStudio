@@ -141,6 +141,8 @@ public struct EditorShellView: View {
                 ValidationDrawer(
                     stage: stage,
                     onSelectPrim: { select($0) },
+                    quickFix: { document?.quickFix(for: $0) },
+                    onApplyFix: { document?.applyQuickFix(for: $0) },
                     onClose: { showValidation = false })
                     .frame(minHeight: 140, idealHeight: 200, maxHeight: 320)
             }

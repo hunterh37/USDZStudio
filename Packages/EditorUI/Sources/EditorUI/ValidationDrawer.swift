@@ -1,6 +1,7 @@
 import SwiftUI
 import USDCore
 import ValidationKit
+import EditingKit
 import DicyaninDesignSystem
 
 /// Live diagnostics drawer (Phase 4). Runs the ARKit-profile `ValidationEngine`
@@ -10,6 +11,12 @@ struct ValidationDrawer: View {
     let stage: (any USDStageProtocol)?
     /// Selecting a diagnostic's prim drives the shared selection.
     let onSelectPrim: (PrimPath) -> Void
+    /// A quick-fix for the diagnostic, or `nil` when none is available (read-only
+    /// preview, or a rule with no automatic remedy).
+    let quickFix: (Diagnostic) -> QuickFix?
+    /// Applies a diagnostic's quick-fix (one undoable command), then re-runs
+    /// validation so the list reflects the repaired stage.
+    let onApplyFix: (Diagnostic) -> Void
     let onClose: () -> Void
 
     @State private var report: ValidationReport?
@@ -98,6 +105,13 @@ struct ValidationDrawer: View {
                 .foregroundStyle(Palette.textSecondary.color)
             }
             Spacer(minLength: 0)
+            if let fix = quickFix(diag) {
+                Button(fix.title) { onApplyFix(diag); revalidate() }
+                    .buttonStyle(.borderless)
+                    .font(.system(size: TypeScale.caption, weight: .semibold))
+                    .foregroundStyle(Palette.accent.color)
+                    .help(fix.title)
+            }
         }
         .padding(.vertical, 2)
     }

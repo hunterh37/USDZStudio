@@ -2,6 +2,7 @@ import Foundation
 import Observation
 import USDCore
 import EditingKit
+import ValidationKit
 
 /// The editor's live, mutable document — the single source of truth once a file
 /// is open.
@@ -168,6 +169,21 @@ public final class EditorDocument {
     public func setStageMetadata(_ metadata: StageMetadata) {
         guard metadata != snapshot.metadata else { return }
         run(SetStageMetadataCommand(newMetadata: metadata, oldMetadata: snapshot.metadata))
+    }
+
+    // MARK: Validation quick-fixes
+
+    /// The quick-fix for a diagnostic against the live stage, if one exists.
+    public func quickFix(for diagnostic: Diagnostic) -> QuickFix? {
+        QuickFixRegistry.quickFix(for: diagnostic, in: snapshot)
+    }
+
+    /// Applies a diagnostic's quick-fix as one undoable command. Returns `true`
+    /// when a fix was available and ran.
+    @discardableResult
+    public func applyQuickFix(for diagnostic: Diagnostic) -> Bool {
+        guard let fix = quickFix(for: diagnostic) else { return false }
+        return run(fix.command) != nil
     }
 
     // MARK: Private

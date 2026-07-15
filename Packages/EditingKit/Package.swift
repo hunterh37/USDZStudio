@@ -8,10 +8,11 @@ let package = Package(
         .library(name: "EditingKit", targets: ["EditingKit"])
     ],
     dependencies: [
-        .package(path: "../USDCore")
+        .package(path: "../USDCore"),
+        .package(path: "../ValidationKit")
     ],
     targets: [
-        .target(name: "EditingKit", dependencies: ["USDCore"], path: "Sources/EditingKit"),
+        .target(name: "EditingKit", dependencies: ["USDCore", "ValidationKit"], path: "Sources/EditingKit"),
         .testTarget(name: "EditingKitTests", dependencies: ["EditingKit"], path: "Tests/EditingKitTests"),
     ]
 )

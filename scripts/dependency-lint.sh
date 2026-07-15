@@ -35,7 +35,7 @@ check Packages/USDCore/Sources                ""
 check Packages/USDBridge/Sources             "USDCore"
 check Packages/ConversionKit/Sources         "USDCore"
 check Packages/ViewportKit/Sources           "USDCore"
-check Packages/EditingKit/Sources            "USDCore"
+check Packages/EditingKit/Sources            "USDCore ValidationKit"  # QuickFixRegistry maps Diagnostics -> undoable commands
 check Packages/ValidationKit/Sources         "USDCore"
 check Packages/ScriptingKit/Sources          "USDCore"
 check Packages/DicyaninDesignSystem/Sources  ""
