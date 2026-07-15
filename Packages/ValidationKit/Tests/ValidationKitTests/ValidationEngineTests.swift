@@ -108,6 +108,81 @@ struct MeshPresenceRuleTests {
     }
 }
 
+@Suite("Duplicate prim name rule")
+struct DuplicatePrimNameRuleTests {
+    private let rule = DuplicatePrimNameRule()
+
+    @Test func uniqueSiblingsPass() {
+        let root = Prim(path: PrimPath("/Root")!, typeName: "Xform", children: [
+            Prim(path: PrimPath("/Root/A")!), Prim(path: PrimPath("/Root/B")!),
+        ])
+        #expect(rule.evaluate(stage: stage(prims: [root])).isEmpty)
+    }
+
+    @Test func duplicateChildrenAreOneError() {
+        let root = Prim(path: PrimPath("/Root")!, typeName: "Xform", children: [
+            Prim(path: PrimPath("/Root/Wheel")!),
+            Prim(path: PrimPath("/Root/Wheel")!),
+            Prim(path: PrimPath("/Root/Wheel")!),  // three copies → still one diagnostic
+        ])
+        let diag = rule.evaluate(stage: stage(prims: [root]))
+        #expect(diag.count == 1)
+        #expect(diag[0].severity == .error)
+        #expect(diag[0].ruleID == "prim.duplicateName")
+        #expect(diag[0].message.contains("'Wheel'"))
+        #expect(diag[0].primPath == PrimPath("/Root/Wheel"))
+    }
+
+    @Test func duplicateRootPrimsAreCaught() {
+        let diag = rule.evaluate(stage: stage(prims: [
+            Prim(path: PrimPath("/Dup")!), Prim(path: PrimPath("/Dup")!),
+        ]))
+        #expect(diag.count == 1)
+        #expect(diag[0].message.contains("the stage root"))
+    }
+}
+
+@Suite("Unbound mesh rule")
+struct UnboundMeshRuleTests {
+    private let rule = UnboundMeshRule()
+
+    private func boundMesh(_ name: String) -> Prim {
+        var prim = mesh(name)
+        prim.relationships = [Relationship(name: "material:binding", targets: [PrimPath("/Mats/M")!])]
+        return prim
+    }
+
+    @Test func unboundMeshIsInfo() {
+        let diag = rule.evaluate(stage: stage(prims: [mesh("M")]))
+        #expect(diag.count == 1)
+        #expect(diag[0].severity == .info)
+        #expect(diag[0].ruleID == "mesh.unbound")
+        #expect(diag[0].primPath == PrimPath("/M"))
+    }
+
+    @Test func boundMeshPasses() {
+        #expect(rule.evaluate(stage: stage(prims: [boundMesh("M")])).isEmpty)
+    }
+
+    @Test func purposeSpecificBindingCounts() {
+        var prim = mesh("M")
+        prim.relationships = [Relationship(name: "material:binding:preview", targets: [PrimPath("/Mats/M")!])]
+        #expect(rule.evaluate(stage: stage(prims: [prim])).isEmpty)
+    }
+
+    @Test func emptyBindingTargetsStillUnbound() {
+        var prim = mesh("M")
+        prim.relationships = [Relationship(name: "material:binding", targets: [])]
+        #expect(rule.evaluate(stage: stage(prims: [prim])).count == 1)
+    }
+
+    @Test func emptyMeshIsNotFlagged() {
+        // No points → EmptyMeshRule's job, not ours.
+        let empty = mesh("E", points: nil, counts: nil, indices: nil)
+        #expect(rule.evaluate(stage: stage(prims: [empty])).isEmpty)
+    }
+}
+
 // Engine ----------------------------------------------------------------------
 
 @Suite("ValidationEngine")

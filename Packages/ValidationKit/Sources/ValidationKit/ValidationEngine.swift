@@ -40,8 +40,10 @@ public struct ValidationEngine: Sendable {
             MetersPerUnitRule(),
             UpAxisRule(),
             DefaultPrimRule(),
+            DuplicatePrimNameRule(),
             MeshTopologyRule(),
             EmptyMeshRule(),
+            UnboundMeshRule(),
             MissingNormalsRule(),
         ])
     }

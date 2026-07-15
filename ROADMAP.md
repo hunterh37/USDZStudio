@@ -59,7 +59,7 @@ Everything below is scoped to what native Swift + RealityKit + embedded Python/u
 
 ## Phase 4 — Validation & Scripting (v0.4, weeks 23–28)
 
-- [ ] ValidationRule engine + v1 rule catalog, live diagnostics drawer (drawer ✓; quick-fixes TODO)
+- [ ] ValidationRule engine + v1 rule catalog, live diagnostics drawer (engine ✓; catalog: scale/upAxis/defaultPrim/duplicate-name/mesh-topology/empty/unbound/normals ✓; drawer ✓; quick-fixes TODO)
 - [ ] ComplianceChecker (ARKit profile) integration, export gating
 - [ ] Python console (REPL, injected `stage`/`selection`/`app`, single-undo script runs)
 - [x] Script library panel + bundled starter scripts (panel + source preview ✓; REPL execution TODO)

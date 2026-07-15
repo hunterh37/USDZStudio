@@ -108,6 +108,68 @@ public struct EmptyMeshRule: ValidationRule {
     }
 }
 
+/// Two sibling prims sharing a name compose to the same path, so one silently
+/// shadows the other — AR QuickLook loads whichever wins and the rest vanish.
+/// A hard error; the fix is to rename (sanitize) the duplicates.
+public struct DuplicatePrimNameRule: ValidationRule {
+    public let id = "prim.duplicateName"
+    public let severity = DiagnosticSeverity.error
+
+    public init() {}
+
+    public func evaluate(stage: any USDStageProtocol) -> [Diagnostic] {
+        var diagnostics = check(siblings: stage.rootPrims, parentLabel: "the stage root")
+        for prim in stage.allPrims() where !prim.children.isEmpty {
+            diagnostics += check(siblings: prim.children, parentLabel: "'\(prim.name)'")
+        }
+        return diagnostics
+    }
+
+    /// Emits one diagnostic per name that appears more than once among a set of
+    /// siblings, anchored to the first offending prim so the row can select it.
+    private func check(siblings: [Prim], parentLabel: String) -> [Diagnostic] {
+        var seen: [String: Prim] = [:]
+        var flagged: Set<String> = []
+        var diagnostics: [Diagnostic] = []
+        for prim in siblings {
+            if let first = seen[prim.name] {
+                if flagged.insert(prim.name).inserted {
+                    diagnostics.append(Diagnostic(
+                        ruleID: id, severity: severity,
+                        message: "Duplicate prim name '\(prim.name)' under \(parentLabel); names must be unique among siblings.",
+                        primPath: first.path))
+                }
+            } else {
+                seen[prim.name] = prim
+            }
+        }
+        return diagnostics
+    }
+}
+
+/// A mesh with no bound material renders with RealityKit's default gray, which
+/// is rarely intended. Informational — the geometry still shows.
+public struct UnboundMeshRule: ValidationRule {
+    public let id = "mesh.unbound"
+    public let severity = DiagnosticSeverity.info
+
+    public init() {}
+
+    public func evaluate(stage: any USDStageProtocol) -> [Diagnostic] {
+        stage.allPrims()
+            .filter { $0.typeName == "Mesh" && MeshTopologyRule.pointCount($0) > 0 && !Self.hasMaterialBinding($0) }
+            .map { Diagnostic(ruleID: id, severity: severity, message: "\($0.name): no material bound; renders with the default material.", primPath: $0.path) }
+    }
+
+    /// True when the prim authors a non-empty `material:binding` relationship
+    /// (the `material:binding:*` purpose-specific variants count too).
+    static func hasMaterialBinding(_ prim: Prim) -> Bool {
+        prim.relationships.contains {
+            ($0.name == "material:binding" || $0.name.hasPrefix("material:binding:")) && !$0.targets.isEmpty
+        }
+    }
+}
+
 /// Meshes without authored normals fall back to faceted shading in RealityKit,
 /// which looks wrong on smooth surfaces. Informational — still renders.
 public struct MissingNormalsRule: ValidationRule {
