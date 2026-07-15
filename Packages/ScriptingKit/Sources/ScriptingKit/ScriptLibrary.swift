@@ -29,9 +29,13 @@ public enum ScriptLibrary {
         }
     }
 
-    /// Keeps only `.py` files.
+    /// Keeps only `.py` files, excluding `_`-prefixed private helpers (e.g.
+    /// `_harness.py`) which are shared modules, not runnable scripts.
     public static func scripts(from urls: [URL], bundled: Bool) -> [ScriptEntry] {
-        urls.filter { $0.pathExtension.lowercased() == "py" }
-            .map { ScriptEntry(url: $0, isBundled: bundled) }
+        urls.filter {
+            $0.pathExtension.lowercased() == "py"
+                && !$0.lastPathComponent.hasPrefix("_")
+        }
+        .map { ScriptEntry(url: $0, isBundled: bundled) }
     }
 }

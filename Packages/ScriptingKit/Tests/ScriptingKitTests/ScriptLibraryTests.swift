@@ -13,6 +13,13 @@ struct ScriptLibraryTests {
         #expect(entries.allSatisfy { !$0.isBundled })
     }
 
+    @Test func excludesUnderscorePrefixedHelpers() {
+        let urls = [URL(fileURLWithPath: "/s/batch_rename.py"),
+                    URL(fileURLWithPath: "/s/_harness.py")]
+        let entries = ScriptLibrary.scripts(from: urls, bundled: true)
+        #expect(entries.map(\.displayName) == ["batch_rename"])
+    }
+
     @Test func sortsBundledFirstThenAlphabetical() {
         let entries = [
             ScriptEntry(url: URL(fileURLWithPath: "/u/zeta.py"), isBundled: false),
