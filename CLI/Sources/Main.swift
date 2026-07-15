@@ -2,10 +2,12 @@ import ConversionKit
 import Foundation
 import USDCore
 import USDBridge
+import ValidationKit
 
 /// Phase 0 CLI: `dicyanin-usdz info <file>` prints the prim tree.
-/// `convert`, `validate`, `run` subcommands arrive in Phases 2/4
-/// (specs/scripting.md). Exit codes: 0 ok, 1 runtime failure, 2 usage.
+/// `convert`, `run`, and `validate` add Phase 2/4 pipeline capabilities
+/// (specs/scripting.md, specs/validation.md). Exit codes: 0 ok, 1 runtime
+/// failure / validation gate failure, 2 usage.
 @main
 struct Main {
     static func main() async {
@@ -32,6 +34,11 @@ enum CLIRunner {
                                headless against a stage. Remaining flags pass
                                through to the script (see its --help). Exit code
                                is the script's own.
+      validate <file.usd[z|a|c]> [--strict]
+                               Run the AR QuickLook / ARKit rule catalog and
+                               print diagnostics (most-severe first). Exits 1 if
+                               any error is found; with --strict, warnings fail
+                               the gate too.
 
       --preset NAME            Base texture settings before other flags apply.
                                NAME is one of: quicklook-strict (default),
@@ -72,6 +79,10 @@ enum CLIRunner {
             return await convertBatch(arguments: Array(arguments.dropFirst()), print: output, printError: printError)
         case "run":
             return runScript(arguments: Array(arguments.dropFirst()), printError: printError)
+        case "validate":
+            return await validate(
+                arguments: Array(arguments.dropFirst()),
+                openStage: openStage, print: output, printError: printError)
         default:
             printError("unknown subcommand: \(subcommand)\n" + usage)
             return 2
@@ -398,6 +409,67 @@ enum CLIRunner {
             dir.deleteLastPathComponent()
         }
         throw BridgeError.pythonUnavailable(detail: "Resources/Python/scripts not found; set DICYANIN_SCRIPTS_DIR")
+    }
+
+    // MARK: - validate
+
+    static func validate(
+        arguments: [String],
+        openStage: (URL) async throws -> any USDStageProtocol,
+        print output: (String) -> Void,
+        printError: (String) -> Void
+    ) async -> Int32 {
+        var positional: [String] = []
+        var strict = false
+        for argument in arguments {
+            switch argument {
+            case "--strict":
+                strict = true
+            default:
+                if argument.hasPrefix("--") {
+                    printError("error: unknown option \(argument)\n" + usage)
+                    return 2
+                }
+                positional.append(argument)
+            }
+        }
+        guard positional.count == 1 else {
+            printError(usage)
+            return 2
+        }
+
+        let stage: any USDStageProtocol
+        do {
+            stage = try await openStage(URL(fileURLWithPath: positional[0]))
+        } catch {
+            let bridgeError = error as? BridgeError
+            printError("error: \(bridgeError?.errorDescription ?? error.localizedDescription)")
+            if let suggestion = bridgeError?.recoverySuggestion {
+                printError(suggestion)
+            }
+            return 1
+        }
+
+        let report = ValidationEngine.arkitProfile.validate(stage)
+        renderReport(report, print: output)
+
+        // Errors always fail the gate; --strict escalates warnings too.
+        let failed = !report.isCompliant || (strict && report.warningCount > 0)
+        return failed ? 1 : 0
+    }
+
+    /// Renders a `ValidationReport` as one line per diagnostic (already sorted
+    /// most-severe first by the engine) followed by a summary line.
+    static func renderReport(_ report: ValidationReport, print output: (String) -> Void) {
+        for diagnostic in report.diagnostics {
+            let location = diagnostic.primPath.map { " (\($0))" } ?? ""
+            output("\(diagnostic.severity.rawValue): [\(diagnostic.ruleID)] \(diagnostic.message)\(location)")
+        }
+        let summary = "\(report.errorCount) error\(report.errorCount == 1 ? "" : "s"), "
+            + "\(report.warningCount) warning\(report.warningCount == 1 ? "" : "s"), "
+            + "\(report.infoCount) info"
+        let verdict = report.isCompliant ? "AR-compliant" : "not AR-compliant"
+        output("\(summary) — \(verdict)")
     }
 
     // MARK: - shared texture-policy options

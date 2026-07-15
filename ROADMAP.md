@@ -63,7 +63,7 @@ Everything below is scoped to what native Swift + RealityKit + embedded Python/u
 - [ ] ComplianceChecker (ARKit profile) integration, export gating
 - [ ] Python console (REPL, injected `stage`/`selection`/`app`, single-undo script runs)
 - [x] Script library panel + bundled starter scripts (panel + source preview ✓; REPL execution TODO)
-- [ ] CLI: `validate` TODO; `run` ✓ (bundled-name or path resolution, `_harness` on PYTHONPATH, script flags + exit code pass through)
+- [ ] CLI: `validate` ✓ (ARKit-profile catalog, most-severe-first diagnostics, `--strict` gates on warnings, exit 1 on failure); `run` ✓ (bundled-name or path resolution, `_harness` on PYTHONPATH, script flags + exit code pass through)
 - [ ] FBX support via checksum-verified FBX2glTF download flow
 
 **Exit:** the "will it work in AR?" answer machine + platform for power users.

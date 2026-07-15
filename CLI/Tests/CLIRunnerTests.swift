@@ -3,6 +3,7 @@ import Foundation
 import ConversionKit
 import USDCore
 import USDBridge
+import ValidationKit
 @testable import dicyanin_usdz
 
 private func fixtureStage() -> StageSnapshot {
@@ -333,6 +334,86 @@ struct CLIConvertBatchTests {
         ])
         #expect(result.code == 2)
         #expect(result.err.first?.contains("unknown preset 'bogus'") == true)
+    }
+}
+
+// MARK: - validate
+
+@Suite("CLI validate")
+struct CLIValidateTests {
+
+    /// A stage that passes every ARKit-profile rule: real-world scale, a
+    /// defaultPrim that resolves, and no problem meshes.
+    private func compliantStage() -> StageSnapshot {
+        let car = Prim(path: PrimPath("/Car")!, typeName: "Xform")
+        return StageSnapshot(metadata: StageMetadata(metersPerUnit: 1.0, defaultPrim: "Car"), rootPrims: [car])
+    }
+
+    /// defaultPrim names a prim that does not exist → hard error.
+    private func erroringStage() -> StageSnapshot {
+        let car = Prim(path: PrimPath("/Car")!, typeName: "Xform")
+        return StageSnapshot(metadata: StageMetadata(metersPerUnit: 1.0, defaultPrim: "Ghost"), rootPrims: [car])
+    }
+
+    private func run(_ args: [String], open: @escaping (URL) async throws -> any USDStageProtocol)
+    async -> (code: Int32, out: [String], err: [String]) {
+        var out: [String] = []
+        var err: [String] = []
+        let code = await CLIRunner.run(
+            arguments: args, openStage: open,
+            print: { out.append($0) }, printError: { err.append($0) })
+        return (code, out, err)
+    }
+
+    @Test func compliantStageExitsZero() async {
+        let result = await run(["validate", "/tmp/ok.usdz"]) { _ in compliantStage() }
+        #expect(result.code == 0)
+        #expect(result.out.last?.contains("0 errors, 0 warnings, 0 info — AR-compliant") == true)
+    }
+
+    @Test func errorStageExitsOneAndPrintsDiagnostic() async {
+        let result = await run(["validate", "/tmp/bad.usdz"]) { _ in erroringStage() }
+        #expect(result.code == 1)
+        let output = result.out.joined(separator: "\n")
+        #expect(output.contains("error: [stage.defaultPrim]"))
+        #expect(output.contains("not AR-compliant"))
+    }
+
+    @Test func warningStageIsCompliantButStrictFails() async {
+        // fixtureStage's Wheel mesh has no points → one warning, no errors.
+        let lax = await run(["validate", "/tmp/warn.usdz"]) { _ in fixtureStage() }
+        #expect(lax.code == 0)
+        #expect(lax.out.contains { $0.contains("warning: [mesh.empty]") })
+        #expect(lax.out.last?.contains("AR-compliant") == true)
+
+        let strict = await run(["validate", "--strict", "/tmp/warn.usdz"]) { _ in fixtureStage() }
+        #expect(strict.code == 1)
+    }
+
+    @Test func diagnosticLineIncludesPrimPath() async {
+        let result = await run(["validate", "/tmp/warn.usdz"]) { _ in fixtureStage() }
+        #expect(result.out.contains { $0.contains("(/Car/Wheel)") })
+    }
+
+    @Test func missingFileArgumentIsUsageError() async {
+        let result = await run(["validate"]) { _ in fixtureStage() }
+        #expect(result.code == 2)
+        #expect(result.err.first?.contains("usage") == true)
+    }
+
+    @Test func unknownOptionIsUsageError() async {
+        let result = await run(["validate", "--frob", "/tmp/x.usdz"]) { _ in fixtureStage() }
+        #expect(result.code == 2)
+        #expect(result.err.first?.contains("unknown option") == true)
+    }
+
+    @Test func openFailureIsRuntimeError() async {
+        let result = await run(["validate", "/tmp/x.usdz"]) { _ in
+            throw BridgeError.pythonUnavailable(detail: "nope")
+        }
+        #expect(result.code == 1)
+        #expect(result.err.first?.contains("Python runtime unavailable") == true)
+        #expect(result.err.count == 2)
     }
 }
 
