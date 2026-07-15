@@ -18,13 +18,19 @@ enum CLIRunner {
     static let usage = """
     usage: dicyanin-usdz <subcommand>
       info <file.usd[z|a|c]>   Print stage metadata and the prim tree.
-      convert <input> <output.usda> [--max-texture-size N] [--jpeg-basecolor]
+      convert <input> <output.usda> [--preset NAME] [--max-texture-size N]
+                     [--jpeg-basecolor]
                                Convert glTF/GLB/OBJ/STL/PLY/DAE to USD.
       convert-batch <manifest.csv> [--out-dir DIR] [--report FILE.{csv,json}]
-                     [--max-texture-size N] [--jpeg-basecolor] [--no-overwrite]
+                     [--preset NAME] [--max-texture-size N] [--jpeg-basecolor]
+                     [--no-overwrite]
                                Convert every row of a CSV manifest (columns:
                                input[,output]); prints a summary, exits 1 if
                                any job failed.
+
+      --preset NAME            Base texture settings before other flags apply.
+                               NAME is one of: quicklook-strict (default),
+                               ecommerce, lossless.
     """
 
     static func run(
@@ -73,29 +79,15 @@ enum CLIRunner {
         printError: (String) -> Void
     ) async -> Int32 {
         var positional: [String] = []
-        var policy = TexturePolicy()
-        var index = 0
-        while index < arguments.count {
-            let argument = arguments[index]
-            switch argument {
-            case "--max-texture-size":
-                guard index + 1 < arguments.count, let size = Int(arguments[index + 1]), size > 0 else {
-                    printError("error: --max-texture-size needs a positive integer")
-                    return 2
-                }
-                policy.maxSize = size
-                index += 2
-            case "--jpeg-basecolor":
-                policy.encodeBaseColorAsJPEG = true
-                index += 1
-            default:
-                if argument.hasPrefix("--") {
-                    printError("error: unknown option \(argument)\n" + usage)
-                    return 2
-                }
-                positional.append(argument)
-                index += 1
-            }
+        var overrides = PolicyOverrides()
+        switch overrides.parse(&positional, arguments: arguments, printError: printError) {
+        case .fail(let code): return code
+        case .ok: break
+        }
+        let policy: TexturePolicy
+        switch overrides.resolve(printError: printError) {
+        case .fail(let code): return code
+        case .policy(let resolved): policy = resolved
         }
         guard positional.count == 2 else {
             printError(usage)
@@ -154,24 +146,19 @@ enum CLIRunner {
         printError: (String) -> Void
     ) async -> Int32 {
         var positional: [String] = []
-        var policy = TexturePolicy()
+        var overrides = PolicyOverrides()
         var outDir: String?
         var reportPath: String?
         var overwrite = true
         var index = 0
         while index < arguments.count {
             let argument = arguments[index]
+            switch overrides.consume(arguments, at: index, printError: printError) {
+            case .error(let code): return code
+            case .consumed(let count): index += count; continue
+            case .notHandled: break
+            }
             switch argument {
-            case "--max-texture-size":
-                guard index + 1 < arguments.count, let size = Int(arguments[index + 1]), size > 0 else {
-                    printError("error: --max-texture-size needs a positive integer")
-                    return 2
-                }
-                policy.maxSize = size
-                index += 2
-            case "--jpeg-basecolor":
-                policy.encodeBaseColorAsJPEG = true
-                index += 1
             case "--out-dir":
                 guard index + 1 < arguments.count else {
                     printError("error: --out-dir needs a directory path")
@@ -201,6 +188,11 @@ enum CLIRunner {
         guard positional.count == 1 else {
             printError(usage)
             return 2
+        }
+        let policy: TexturePolicy
+        switch overrides.resolve(printError: printError) {
+        case .fail(let code): return code
+        case .policy(let resolved): policy = resolved
         }
         if let reportPath, !["csv", "json"].contains((reportPath as NSString).pathExtension.lowercased()) {
             printError("error: --report must end in .csv or .json")
@@ -269,6 +261,105 @@ enum CLIRunner {
 
         output("batch: \(report.succeededCount) ok, \(report.failedCount) failed, \(report.skippedCount) skipped (\(jobs.count) total)")
         return report.hasFailures ? 1 : 0
+    }
+
+    // MARK: - shared texture-policy options
+
+    /// Collects the texture-policy command-line options shared by `convert`
+    /// and `convert-batch`: a `--preset` base plus `--max-texture-size` /
+    /// `--jpeg-basecolor` overrides that win over whatever the preset set,
+    /// regardless of argument order.
+    struct PolicyOverrides {
+        var presetID: String?
+        var maxSize: Int?
+        var jpeg: Bool?
+
+        enum Consumed {
+            case consumed(Int)
+            case notHandled
+            case error(Int32)
+        }
+
+        enum ParseOutcome {
+            case ok
+            case fail(Int32)
+        }
+
+        enum ResolveOutcome {
+            case policy(TexturePolicy)
+            case fail(Int32)
+        }
+
+        /// Handles a single argument if it's a texture-policy option.
+        mutating func consume(
+            _ arguments: [String],
+            at index: Int,
+            printError: (String) -> Void
+        ) -> Consumed {
+            switch arguments[index] {
+            case "--preset":
+                guard index + 1 < arguments.count else {
+                    printError("error: --preset needs a name (\(ConversionPreset.identifiers))")
+                    return .error(2)
+                }
+                presetID = arguments[index + 1]
+                return .consumed(2)
+            case "--max-texture-size":
+                guard index + 1 < arguments.count, let size = Int(arguments[index + 1]), size > 0 else {
+                    printError("error: --max-texture-size needs a positive integer")
+                    return .error(2)
+                }
+                maxSize = size
+                return .consumed(2)
+            case "--jpeg-basecolor":
+                jpeg = true
+                return .consumed(1)
+            default:
+                return .notHandled
+            }
+        }
+
+        /// Full-argument parse for subcommands with no options of their own
+        /// (`convert`): texture-policy flags are consumed, anything else is a
+        /// positional, and an unknown `--flag` is an error.
+        mutating func parse(
+            _ positional: inout [String],
+            arguments: [String],
+            printError: (String) -> Void
+        ) -> ParseOutcome {
+            var index = 0
+            while index < arguments.count {
+                switch consume(arguments, at: index, printError: printError) {
+                case .error(let code): return .fail(code)
+                case .consumed(let count): index += count
+                case .notHandled:
+                    let argument = arguments[index]
+                    if argument.hasPrefix("--") {
+                        printError("error: unknown option \(argument)\n" + usage)
+                        return .fail(2)
+                    }
+                    positional.append(argument)
+                    index += 1
+                }
+            }
+            return .ok
+        }
+
+        /// Applies the preset (if named) then layers explicit flag overrides
+        /// on top. An unknown preset name is a usage error.
+        func resolve(printError: (String) -> Void) -> ResolveOutcome {
+            var policy = TexturePolicy()
+            if let presetID {
+                guard let preset = ConversionPreset.named(presetID) else {
+                    printError("error: unknown preset '\(presetID)' (choices: \(ConversionPreset.identifiers))")
+                    return .fail(2)
+                }
+                policy = preset.texturePolicy
+            }
+            if let maxSize { policy.maxSize = maxSize }
+            if let jpeg { policy.encodeBaseColorAsJPEG = jpeg }
+            return .policy(policy)
+        }
     }
 
     static func render(_ stage: any USDStageProtocol) -> String {

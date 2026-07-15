@@ -316,4 +316,71 @@ struct CLIConvertBatchTests {
         let result = await run(["convert-batch"])
         #expect(result.code == 2)
     }
+
+    @Test func honorsPresetInterleavedWithOwnOptions() async throws {
+        let dir = try makeWorkspace(manifest: "a.obj\n")
+        let result = await run([
+            "convert-batch", dir.appendingPathComponent("manifest.csv").path,
+            "--preset", "ecommerce", "--no-overwrite",
+        ])
+        #expect(result.code == 0)
+    }
+
+    @Test func unknownPresetIsUsageError() async throws {
+        let dir = try makeWorkspace(manifest: "a.obj\n")
+        let result = await run([
+            "convert-batch", dir.appendingPathComponent("manifest.csv").path, "--preset", "bogus",
+        ])
+        #expect(result.code == 2)
+        #expect(result.err.first?.contains("unknown preset 'bogus'") == true)
+    }
+}
+
+// MARK: - shared texture-policy options
+
+@Suite("CLI texture presets")
+struct CLIPolicyOverridesTests {
+
+    private func resolve(_ overrides: CLIRunner.PolicyOverrides) -> TexturePolicy? {
+        switch overrides.resolve(printError: { _ in }) {
+        case .policy(let p): return p
+        case .fail: return nil
+        }
+    }
+
+    @Test func presetSuppliesBasePolicy() {
+        var overrides = CLIRunner.PolicyOverrides()
+        overrides.presetID = "ecommerce"
+        let policy = resolve(overrides)
+        #expect(policy?.maxSize == 1024)
+        #expect(policy?.encodeBaseColorAsJPEG == true)
+    }
+
+    @Test func explicitFlagsOverridePreset() {
+        // --max-texture-size wins over the ecommerce preset's 1024 regardless
+        // of which knob the preset set.
+        var overrides = CLIRunner.PolicyOverrides()
+        overrides.presetID = "ecommerce"
+        overrides.maxSize = 4096
+        let policy = resolve(overrides)
+        #expect(policy?.maxSize == 4096)
+        #expect(policy?.encodeBaseColorAsJPEG == true)  // preset value retained
+    }
+
+    @Test func noPresetIsDefaultPolicy() {
+        #expect(resolve(CLIRunner.PolicyOverrides()) == TexturePolicy())
+    }
+
+    @Test func unknownPresetFails() {
+        var overrides = CLIRunner.PolicyOverrides()
+        overrides.presetID = "nope"
+        #expect(resolve(overrides) == nil)
+    }
+
+    @Test func presetWithoutNameIsError() {
+        var overrides = CLIRunner.PolicyOverrides()
+        var positional: [String] = []
+        let outcome = overrides.parse(&positional, arguments: ["--preset"], printError: { _ in })
+        if case .fail(let code) = outcome { #expect(code == 2) } else { Issue.record("expected failure") }
+    }
 }

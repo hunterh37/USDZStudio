@@ -31,9 +31,9 @@ Everything below is scoped to what native Swift + RealityKit + embedded Python/u
 - [ ] Native GLB/glTF importer — PBR ✓, KHR subset ✓, skinning + animations ✓ (UsdSkel); Draco decode still TODO
 - [x] OBJ/STL/PLY/DAE via ModelIO
 - [x] Texture pipeline (resize, re-encode, channel handling)
-- [ ] Conversion sheet UI with per-stage options + live log; presets (ecommerce, quicklook-strict, lossless)
+- [ ] Conversion sheet UI with per-stage options + live log; presets (ecommerce, quicklook-strict, lossless) — preset model + CLI `--preset` ✓; sheet UI + live log TODO
 - [ ] Batch converter window + CSV/JSON reports — engine + CSV/JSON reports ✓ (BatchConverter); window UI TODO
-- [ ] `dicyanin-usdz` CLI: convert ✓, convert-batch ✓, info ✓, thumbnail TODO
+- [ ] `dicyanin-usdz` CLI: convert ✓ (with `--preset`), convert-batch ✓ (with `--preset`), info ✓, thumbnail TODO
 - [ ] glTF sample-model corpus in CI with success-rate gate
 
 **Exit:** drop a GLB, get a validated USDZ. CLI usable in pipelines.
