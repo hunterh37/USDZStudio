@@ -60,7 +60,7 @@ Everything below is scoped to what native Swift + RealityKit + embedded Python/u
 ## Phase 4 — Validation & Scripting (v0.4, weeks 23–28)
 
 - [ ] ValidationRule engine + v1 rule catalog, live diagnostics drawer (engine ✓; catalog: scale/upAxis/defaultPrim/duplicate-name/mesh-topology/empty/unbound/normals ✓; drawer ✓; quick-fixes: `QuickFixRegistry` maps diagnostics → undoable `EditCommand`s for metersPerUnit (reuses ScaleFixer) and defaultPrim, wired to a per-row "Fix" button in the drawer via `EditorDocument.applyQuickFix`; duplicate-name/topology/normals/unbound intentionally have no auto-fix — see QuickFix.swift)
-- [ ] ComplianceChecker (ARKit profile) integration, export gating
+- [x] ComplianceChecker (ARKit profile) integration, export gating — `ValidationProfile` (named catalog + `blockingSeverity`): `.arkit` (blocks on error), `.arkitStrict` (blocks on warning); `ComplianceChecker` runs a profile → `ComplianceResult` with `isExportAllowed`/`blockingDiagnostics`/`summary` for the export path. CLI `validate` now takes `--profile NAME` (arkit|arkit-strict) with `--strict` as shorthand and conflict-guarded, gating exit code on the profile's decision. Drawer still reads the engine directly; app export flow lands with Phase 3 Save/Save As
 - [ ] Python console (REPL, injected `stage`/`selection`/`app`, single-undo script runs)
 - [x] Script library panel + bundled starter scripts (panel + source preview ✓; REPL execution TODO)
 - [ ] CLI: `validate` ✓ (ARKit-profile catalog, most-severe-first diagnostics, `--strict` gates on warnings, exit 1 on failure); `run` ✓ (bundled-name or path resolution, `_harness` on PYTHONPATH, script flags + exit code pass through)

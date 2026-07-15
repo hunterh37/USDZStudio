@@ -368,7 +368,7 @@ struct CLIValidateTests {
     @Test func compliantStageExitsZero() async {
         let result = await run(["validate", "/tmp/ok.usdz"]) { _ in compliantStage() }
         #expect(result.code == 0)
-        #expect(result.out.last?.contains("0 errors, 0 warnings, 0 info — AR-compliant") == true)
+        #expect(result.out.last?.contains("[arkit] 0 errors, 0 warnings, 0 info — export allowed") == true)
     }
 
     @Test func errorStageExitsOneAndPrintsDiagnostic() async {
@@ -376,18 +376,38 @@ struct CLIValidateTests {
         #expect(result.code == 1)
         let output = result.out.joined(separator: "\n")
         #expect(output.contains("error: [stage.defaultPrim]"))
-        #expect(output.contains("not AR-compliant"))
+        #expect(output.contains("export blocked"))
     }
 
-    @Test func warningStageIsCompliantButStrictFails() async {
+    @Test func warningStageIsAllowedButStrictFails() async {
         // fixtureStage's Wheel mesh has no points → one warning, no errors.
         let lax = await run(["validate", "/tmp/warn.usdz"]) { _ in fixtureStage() }
         #expect(lax.code == 0)
         #expect(lax.out.contains { $0.contains("warning: [mesh.empty]") })
-        #expect(lax.out.last?.contains("AR-compliant") == true)
+        #expect(lax.out.last?.contains("export allowed") == true)
 
         let strict = await run(["validate", "--strict", "/tmp/warn.usdz"]) { _ in fixtureStage() }
         #expect(strict.code == 1)
+        #expect(strict.out.last?.contains("[arkit-strict]") == true)
+        #expect(strict.out.last?.contains("export blocked") == true)
+    }
+
+    @Test func explicitStrictProfileMatchesStrictFlag() async {
+        let result = await run(["validate", "--profile", "arkit-strict", "/tmp/warn.usdz"]) { _ in fixtureStage() }
+        #expect(result.code == 1)
+        #expect(result.out.last?.contains("[arkit-strict]") == true)
+    }
+
+    @Test func unknownProfileIsUsageError() async {
+        let result = await run(["validate", "--profile", "bogus", "/tmp/warn.usdz"]) { _ in fixtureStage() }
+        #expect(result.code == 2)
+        #expect(result.err.contains { $0.contains("unknown profile 'bogus'") })
+    }
+
+    @Test func strictWithExplicitArkitProfileConflicts() async {
+        let result = await run(["validate", "--profile", "arkit", "--strict", "/tmp/warn.usdz"]) { _ in fixtureStage() }
+        #expect(result.code == 2)
+        #expect(result.err.contains { $0.contains("conflicts") })
     }
 
     @Test func diagnosticLineIncludesPrimPath() async {

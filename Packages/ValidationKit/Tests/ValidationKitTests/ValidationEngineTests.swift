@@ -215,3 +215,42 @@ struct ValidationEngineTests {
         #expect(report.diagnostics[0].ruleID == "stage.upAxis")
     }
 }
+
+// ComplianceChecker -----------------------------------------------------------
+
+@Suite("ComplianceChecker")
+struct ComplianceCheckerTests {
+    @Test func arkitAllowsCleanStage() {
+        let root = Prim(path: PrimPath("/Root")!, typeName: "Xform", children: [mesh("Cube")])
+        let result = ComplianceChecker(profile: .arkit).check(stage(prims: [root]))
+        #expect(result.isExportAllowed)
+        #expect(result.blockingDiagnostics.isEmpty)
+        #expect(result.profileID == "arkit")
+    }
+
+    @Test func arkitBlocksOnError() {
+        let broken = mesh("Bad", indices: [0, 1, 42])
+        let result = ComplianceChecker(profile: .arkit).check(stage(prims: [broken]))
+        #expect(!result.isExportAllowed)
+        #expect(result.blockingDiagnostics.allSatisfy { $0.severity == .error })
+        #expect(result.summary.contains("export blocked"))
+    }
+
+    @Test func arkitAllowsWarningsButStrictBlocks() {
+        // Z-up is a warning, no errors.
+        let root = Prim(path: PrimPath("/Root")!, typeName: "Xform", children: [mesh("Cube")])
+        let warnStage = stage(upAxis: .z, prims: [root])
+
+        #expect(ComplianceChecker(profile: .arkit).check(warnStage).isExportAllowed)
+
+        let strict = ComplianceChecker(profile: .arkitStrict).check(warnStage)
+        #expect(!strict.isExportAllowed)
+        #expect(strict.blockingDiagnostics.contains { $0.ruleID == "stage.upAxis" })
+    }
+
+    @Test func namedLookupIsCaseInsensitive() {
+        #expect(ValidationProfile.named("ARKit")?.id == "arkit")
+        #expect(ValidationProfile.named("arkit-strict")?.blockingSeverity == .warning)
+        #expect(ValidationProfile.named("nope") == nil)
+    }
+}

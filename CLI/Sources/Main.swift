@@ -34,11 +34,13 @@ enum CLIRunner {
                                headless against a stage. Remaining flags pass
                                through to the script (see its --help). Exit code
                                is the script's own.
-      validate <file.usd[z|a|c]> [--strict]
-                               Run the AR QuickLook / ARKit rule catalog and
-                               print diagnostics (most-severe first). Exits 1 if
-                               any error is found; with --strict, warnings fail
-                               the gate too.
+      validate <file.usd[z|a|c]> [--profile NAME] [--strict]
+                               Run a compliance profile's rule catalog and print
+                               diagnostics (most-severe first) with an export
+                               gate verdict. --profile is one of: arkit
+                               (default), arkit-strict. Exits 1 when export is
+                               blocked; --strict is shorthand for the strict
+                               gate (warnings block too).
 
       --preset NAME            Base texture settings before other flags apply.
                                NAME is one of: quicklook-strict (default),
@@ -421,21 +423,51 @@ enum CLIRunner {
     ) async -> Int32 {
         var positional: [String] = []
         var strict = false
-        for argument in arguments {
+        var profileID: String?
+        var index = 0
+        while index < arguments.count {
+            let argument = arguments[index]
             switch argument {
             case "--strict":
                 strict = true
+                index += 1
+            case "--profile":
+                guard index + 1 < arguments.count else {
+                    printError("error: --profile needs a name (\(ValidationProfile.identifiers))")
+                    return 2
+                }
+                profileID = arguments[index + 1]
+                index += 2
             default:
                 if argument.hasPrefix("--") {
                     printError("error: unknown option \(argument)\n" + usage)
                     return 2
                 }
                 positional.append(argument)
+                index += 1
             }
         }
         guard positional.count == 1 else {
             printError(usage)
             return 2
+        }
+
+        // Resolve the profile: an explicit --profile wins; otherwise --strict
+        // selects the strict gate and the default is plain arkit. Combining an
+        // explicit --profile with --strict is contradictory, so reject it.
+        let profile: ValidationProfile
+        if let profileID {
+            guard let named = ValidationProfile.named(profileID) else {
+                printError("error: unknown profile '\(profileID)' (choices: \(ValidationProfile.identifiers))")
+                return 2
+            }
+            if strict && named.blockingSeverity != .warning {
+                printError("error: --strict conflicts with --profile \(named.id); pass one or the other")
+                return 2
+            }
+            profile = named
+        } else {
+            profile = strict ? .arkitStrict : .arkit
         }
 
         let stage: any USDStageProtocol
@@ -450,26 +482,21 @@ enum CLIRunner {
             return 1
         }
 
-        let report = ValidationEngine.arkitProfile.validate(stage)
-        renderReport(report, print: output)
+        let result = ComplianceChecker(profile: profile).check(stage)
+        renderResult(result, print: output)
 
-        // Errors always fail the gate; --strict escalates warnings too.
-        let failed = !report.isCompliant || (strict && report.warningCount > 0)
-        return failed ? 1 : 0
+        // The profile's gate decides: export blocked → exit 1.
+        return result.isExportAllowed ? 0 : 1
     }
 
-    /// Renders a `ValidationReport` as one line per diagnostic (already sorted
-    /// most-severe first by the engine) followed by a summary line.
-    static func renderReport(_ report: ValidationReport, print output: (String) -> Void) {
-        for diagnostic in report.diagnostics {
+    /// Renders a `ComplianceResult` as one line per diagnostic (already sorted
+    /// most-severe first by the engine) followed by the gate summary line.
+    static func renderResult(_ result: ComplianceResult, print output: (String) -> Void) {
+        for diagnostic in result.report.diagnostics {
             let location = diagnostic.primPath.map { " (\($0))" } ?? ""
             output("\(diagnostic.severity.rawValue): [\(diagnostic.ruleID)] \(diagnostic.message)\(location)")
         }
-        let summary = "\(report.errorCount) error\(report.errorCount == 1 ? "" : "s"), "
-            + "\(report.warningCount) warning\(report.warningCount == 1 ? "" : "s"), "
-            + "\(report.infoCount) info"
-        let verdict = report.isCompliant ? "AR-compliant" : "not AR-compliant"
-        output("\(summary) — \(verdict)")
+        output(result.summary)
     }
 
     // MARK: - shared texture-policy options
