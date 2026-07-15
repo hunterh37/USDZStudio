@@ -20,6 +20,11 @@ enum CLIRunner {
       info <file.usd[z|a|c]>   Print stage metadata and the prim tree.
       convert <input> <output.usda> [--max-texture-size N] [--jpeg-basecolor]
                                Convert glTF/GLB/OBJ/STL/PLY/DAE to USD.
+      convert-batch <manifest.csv> [--out-dir DIR] [--report FILE.{csv,json}]
+                     [--max-texture-size N] [--jpeg-basecolor] [--no-overwrite]
+                               Convert every row of a CSV manifest (columns:
+                               input[,output]); prints a summary, exits 1 if
+                               any job failed.
     """
 
     static func run(
@@ -52,6 +57,8 @@ enum CLIRunner {
             }
         case "convert":
             return await convert(arguments: Array(arguments.dropFirst()), print: output, printError: printError)
+        case "convert-batch":
+            return await convertBatch(arguments: Array(arguments.dropFirst()), print: output, printError: printError)
         default:
             printError("unknown subcommand: \(subcommand)\n" + usage)
             return 2
@@ -100,27 +107,17 @@ enum CLIRunner {
             printError("error: only .usda output is supported for now (usdz packaging is coming)")
             return 2
         }
-        guard let importer = ImporterRegistry.standard.importer(for: inputURL) else {
+        guard ImporterRegistry.standard.importer(for: inputURL) != nil else {
             printError("error: unsupported input format .\(inputURL.pathExtension) (supported: \(ImporterRegistry.standard.registeredExtensions.joined(separator: ", ")))")
             return 2
         }
 
         do {
-            let imported = try await importer.importAsset(at: inputURL, options: ImportOptions(maxTextureSize: policy.maxSize))
-            var context = ConversionContext(sourceURL: inputURL, scene: imported.scene, diagnostics: imported.diagnostics)
-            context.log.append("parse: ok (\(imported.scene.triangleCount) triangles, \(imported.scene.materials.count) materials)")
-            context = try await ConversionPipeline.standard(texturePolicy: policy).run(context)
+            let outcome = try await SingleFileConverter.convert(input: inputURL, texturePolicy: policy)
+            try Data(outcome.usda.utf8).write(to: outputURL)
 
-            guard let stage = context.authoredStage else {
-                // coverage:disable — the standard pipeline always ends in
-                // USDAuthorStage, which populates authoredStage or throws.
-                printError("error: pipeline produced no stage")
-                return 1
-            }
-            try USDASerializer.serialize(stage).data(using: .utf8)!.write(to: outputURL)
-
-            context.log.forEach(output)
-            for diagnostic in context.diagnostics {
+            outcome.log.forEach(output)
+            for diagnostic in outcome.diagnostics {
                 printError("\(diagnostic.severity.rawValue): [\(diagnostic.stage)] \(diagnostic.message)")
             }
             output("wrote \(outputURL.path)")
@@ -129,6 +126,149 @@ enum CLIRunner {
             printError("error: \(error)")
             return 1
         }
+    }
+
+    // MARK: - convert-batch
+
+    /// A CSV manifest row: `input` (required) and an optional explicit
+    /// `output`. A leading `input,output` header row is tolerated.
+    static func parseManifest(_ text: String) -> [(input: String, output: String?)] {
+        var rows: [(String, String?)] = []
+        for rawLine in text.split(whereSeparator: \.isNewline) {
+            let line = rawLine.trimmingCharacters(in: .whitespaces)
+            if line.isEmpty || line.hasPrefix("#") { continue }
+            let cells = line.split(separator: ",", omittingEmptySubsequences: false)
+                .map { $0.trimmingCharacters(in: .whitespaces) }
+            let input = cells[0]
+            if input.isEmpty { continue }
+            if input.caseInsensitiveCompare("input") == .orderedSame { continue }  // header
+            let output = cells.count > 1 && !cells[1].isEmpty ? cells[1] : nil
+            rows.append((input, output))
+        }
+        return rows
+    }
+
+    static func convertBatch(
+        arguments: [String],
+        print output: (String) -> Void,
+        printError: (String) -> Void
+    ) async -> Int32 {
+        var positional: [String] = []
+        var policy = TexturePolicy()
+        var outDir: String?
+        var reportPath: String?
+        var overwrite = true
+        var index = 0
+        while index < arguments.count {
+            let argument = arguments[index]
+            switch argument {
+            case "--max-texture-size":
+                guard index + 1 < arguments.count, let size = Int(arguments[index + 1]), size > 0 else {
+                    printError("error: --max-texture-size needs a positive integer")
+                    return 2
+                }
+                policy.maxSize = size
+                index += 2
+            case "--jpeg-basecolor":
+                policy.encodeBaseColorAsJPEG = true
+                index += 1
+            case "--out-dir":
+                guard index + 1 < arguments.count else {
+                    printError("error: --out-dir needs a directory path")
+                    return 2
+                }
+                outDir = arguments[index + 1]
+                index += 2
+            case "--report":
+                guard index + 1 < arguments.count else {
+                    printError("error: --report needs a file path")
+                    return 2
+                }
+                reportPath = arguments[index + 1]
+                index += 2
+            case "--no-overwrite":
+                overwrite = false
+                index += 1
+            default:
+                if argument.hasPrefix("--") {
+                    printError("error: unknown option \(argument)\n" + usage)
+                    return 2
+                }
+                positional.append(argument)
+                index += 1
+            }
+        }
+        guard positional.count == 1 else {
+            printError(usage)
+            return 2
+        }
+        if let reportPath, !["csv", "json"].contains((reportPath as NSString).pathExtension.lowercased()) {
+            printError("error: --report must end in .csv or .json")
+            return 2
+        }
+
+        let manifestURL = URL(fileURLWithPath: positional[0])
+        guard let manifestText = try? String(contentsOf: manifestURL, encoding: .utf8) else {
+            printError("error: could not read manifest \(manifestURL.path)")
+            return 1
+        }
+        let rows = parseManifest(manifestText)
+        guard !rows.isEmpty else {
+            printError("error: manifest has no input rows")
+            return 2
+        }
+
+        // Resolve relative paths against the manifest's directory; default
+        // outputs land next to inputs (or in --out-dir) with a .usda suffix.
+        let manifestDir = manifestURL.deletingLastPathComponent()
+        let outDirURL = outDir.map { URL(fileURLWithPath: $0) }
+        var jobs: [BatchJob] = []
+        for row in rows {
+            let inputURL = URL(fileURLWithPath: row.input, relativeTo: manifestDir).standardizedFileURL
+            let outputURL: URL
+            if let explicit = row.output {
+                outputURL = URL(fileURLWithPath: explicit, relativeTo: manifestDir).standardizedFileURL
+            } else {
+                let name = inputURL.deletingPathExtension().lastPathComponent + ".usda"
+                outputURL = (outDirURL ?? inputURL.deletingLastPathComponent())
+                    .appendingPathComponent(name)
+            }
+            jobs.append(BatchJob(input: inputURL, output: outputURL))
+        }
+
+        let converter = BatchConverter(texturePolicy: policy, overwrite: overwrite)
+        let report = await converter.run(jobs) { item in
+            let mark: String
+            switch item.status {
+            case .succeeded: mark = "ok  "
+            case .failed: mark = "FAIL"
+            case .skipped: mark = "skip"
+            }
+            var line = "[\(mark)] \(item.input)"
+            if item.status == .succeeded {
+                line += " → \(item.output) (\(item.triangleCount) tris, \(item.warningCount) warn)"
+            } else if let message = item.message {
+                line += " — \(message)"
+            }
+            output(line)
+        }
+
+        if let reportPath {
+            let reportURL = URL(fileURLWithPath: reportPath)
+            do {
+                let data = (reportURL.pathExtension.lowercased() == "json")
+                    ? try report.jsonData()
+                    : Data(report.csv.utf8)
+                try data.write(to: reportURL)
+                output("report: \(reportURL.path)")
+            } catch {
+                printError("error: could not write report — \(error)")
+                return 1
+            }
+        }
+
+        output("batch: \(report.succeededCount) ok, \(report.failedCount) failed, \(report.skippedCount) skipped (\(jobs.count) total)")
+        return report.hasFailures ? 1 : 0
     }
 
     static func render(_ stage: any USDStageProtocol) -> String {

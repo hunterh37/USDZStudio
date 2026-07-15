@@ -32,8 +32,8 @@ Everything below is scoped to what native Swift + RealityKit + embedded Python/u
 - [x] OBJ/STL/PLY/DAE via ModelIO
 - [x] Texture pipeline (resize, re-encode, channel handling)
 - [ ] Conversion sheet UI with per-stage options + live log; presets (ecommerce, quicklook-strict, lossless)
-- [ ] Batch converter window + CSV/JSON reports
-- [ ] `dicyanin-usdz` CLI: convert, convert-batch, info, thumbnail
+- [ ] Batch converter window + CSV/JSON reports — engine + CSV/JSON reports ✓ (BatchConverter); window UI TODO
+- [ ] `dicyanin-usdz` CLI: convert ✓, convert-batch ✓, info ✓, thumbnail TODO
 - [ ] glTF sample-model corpus in CI with success-rate gate
 
 **Exit:** drop a GLB, get a validated USDZ. CLI usable in pipelines.

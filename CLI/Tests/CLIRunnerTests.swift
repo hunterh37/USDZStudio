@@ -1,5 +1,6 @@
 import Testing
 import Foundation
+import ConversionKit
 import USDCore
 import USDBridge
 @testable import dicyanin_usdz
@@ -180,5 +181,139 @@ struct CLIConvertTests {
         let result = await run(["convert", input.path, dir.appendingPathComponent("out.usda").path])
         #expect(result.code == 0)
         #expect(result.err.contains { $0.hasPrefix("warning: [textures]") && $0.contains("could not be read") })
+    }
+}
+
+// MARK: - convert-batch
+
+@Suite("CLI convert-batch")
+struct CLIConvertBatchTests {
+
+    private func run(_ args: [String]) async -> (code: Int32, out: [String], err: [String]) {
+        var out: [String] = []
+        var err: [String] = []
+        let code = await CLIRunner.run(
+            arguments: args, openStage: { _ in fixtureStage() },
+            print: { out.append($0) }, printError: { err.append($0) })
+        return (code, out, err)
+    }
+
+    /// A temp dir holding two OBJ triangles and a CSV manifest referencing them.
+    private func makeWorkspace(manifest: String) throws -> URL {
+        let dir = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("CLIBatchTests-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let obj = "v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n"
+        try Data(obj.utf8).write(to: dir.appendingPathComponent("a.obj"))
+        try Data(obj.utf8).write(to: dir.appendingPathComponent("b.obj"))
+        try Data(manifest.utf8).write(to: dir.appendingPathComponent("manifest.csv"))
+        return dir
+    }
+
+    @Test func parsesManifestToleratingHeaderBlanksAndComments() {
+        let rows = CLIRunner.parseManifest("""
+        input,output
+        a.glb, out/a.usda
+        # a comment
+
+        b.glb
+        """)
+        #expect(rows.count == 2)
+        #expect(rows[0].input == "a.glb")
+        #expect(rows[0].output == "out/a.usda")
+        #expect(rows[1].input == "b.glb")
+        #expect(rows[1].output == nil)
+    }
+
+    @Test func convertsAllRowsAndDefaultsOutputNextToInput() async throws {
+        let dir = try makeWorkspace(manifest: "a.obj\nb.obj\n")
+        let result = await run(["convert-batch", dir.appendingPathComponent("manifest.csv").path])
+        #expect(result.code == 0)
+        #expect(result.out.last?.contains("2 ok, 0 failed") == true)
+        #expect(FileManager.default.fileExists(atPath: dir.appendingPathComponent("a.usda").path))
+        #expect(FileManager.default.fileExists(atPath: dir.appendingPathComponent("b.usda").path))
+    }
+
+    @Test func honorsOutDirAndExplicitOutputColumn() async throws {
+        let dir = try makeWorkspace(manifest: "a.obj\nb.obj,custom/bb.usda\n")
+        let result = await run([
+            "convert-batch", dir.appendingPathComponent("manifest.csv").path,
+            "--out-dir", dir.appendingPathComponent("built").path,
+        ])
+        #expect(result.code == 0)
+        #expect(FileManager.default.fileExists(atPath: dir.appendingPathComponent("built/a.usda").path))
+        #expect(FileManager.default.fileExists(atPath: dir.appendingPathComponent("custom/bb.usda").path))
+    }
+
+    @Test func failedRowGivesExitOneButOthersStillConvert() async throws {
+        let dir = try makeWorkspace(manifest: "a.obj\nmissing.obj\n")
+        let result = await run(["convert-batch", dir.appendingPathComponent("manifest.csv").path])
+        #expect(result.code == 1)
+        #expect(result.out.contains { $0.contains("[FAIL]") })
+        #expect(result.out.last?.contains("1 ok, 1 failed") == true)
+        #expect(FileManager.default.fileExists(atPath: dir.appendingPathComponent("a.usda").path))
+    }
+
+    @Test func writesJSONReport() async throws {
+        let dir = try makeWorkspace(manifest: "a.obj\n")
+        let reportURL = dir.appendingPathComponent("report.json")
+        let result = await run([
+            "convert-batch", dir.appendingPathComponent("manifest.csv").path,
+            "--report", reportURL.path,
+        ])
+        #expect(result.code == 0)
+        let data = try Data(contentsOf: reportURL)
+        let report = try JSONDecoder().decode(BatchReport.self, from: data)
+        #expect(report.succeededCount == 1)
+    }
+
+    @Test func writesCSVReport() async throws {
+        let dir = try makeWorkspace(manifest: "a.obj\n")
+        let reportURL = dir.appendingPathComponent("report.csv")
+        let result = await run([
+            "convert-batch", dir.appendingPathComponent("manifest.csv").path,
+            "--report", reportURL.path,
+        ])
+        #expect(result.code == 0)
+        let csv = try String(contentsOf: reportURL, encoding: .utf8)
+        #expect(csv.hasPrefix("input,output,status"))
+    }
+
+    @Test func noOverwriteSkipsExistingOutputs() async throws {
+        let dir = try makeWorkspace(manifest: "a.obj\n")
+        try Data("stale".utf8).write(to: dir.appendingPathComponent("a.usda"))
+        let result = await run([
+            "convert-batch", dir.appendingPathComponent("manifest.csv").path, "--no-overwrite",
+        ])
+        #expect(result.code == 0)
+        #expect(result.out.contains { $0.contains("[skip]") })
+        #expect(try String(contentsOf: dir.appendingPathComponent("a.usda"), encoding: .utf8) == "stale")
+    }
+
+    @Test func missingManifestIsRuntimeError() async {
+        let result = await run(["convert-batch", "/nonexistent/manifest.csv"])
+        #expect(result.code == 1)
+        #expect(result.err.first?.contains("could not read manifest") == true)
+    }
+
+    @Test func emptyManifestIsUsageError() async throws {
+        let dir = try makeWorkspace(manifest: "# just a comment\n")
+        let result = await run(["convert-batch", dir.appendingPathComponent("manifest.csv").path])
+        #expect(result.code == 2)
+        #expect(result.err.first?.contains("no input rows") == true)
+    }
+
+    @Test func badReportExtensionIsUsageError() async throws {
+        let dir = try makeWorkspace(manifest: "a.obj\n")
+        let result = await run([
+            "convert-batch", dir.appendingPathComponent("manifest.csv").path, "--report", "out.txt",
+        ])
+        #expect(result.code == 2)
+        #expect(result.err.first?.contains(".csv or .json") == true)
+    }
+
+    @Test func missingManifestArgumentIsUsageError() async {
+        let result = await run(["convert-batch"])
+        #expect(result.code == 2)
     }
 }
