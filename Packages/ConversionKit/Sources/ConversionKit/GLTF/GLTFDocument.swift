@@ -17,6 +17,8 @@ struct GLTFDocument: Decodable {
         var name: String?
         var children: [Int]?
         var mesh: Int?
+        /// Index into `skins` when this node instantiates a skinned mesh.
+        var skin: Int?
         /// Column-major 16 floats; mutually exclusive with TRS.
         var matrix: [Float]?
         var translation: [Float]?
@@ -93,6 +95,32 @@ struct GLTFDocument: Decodable {
         var doubleSided: Bool?
     }
 
+    struct Skin: Decodable {
+        var name: String?
+        var joints: [Int]
+        var inverseBindMatrices: Int?
+        var skeleton: Int?
+    }
+
+    struct Animation: Decodable {
+        struct Sampler: Decodable {
+            var input: Int   // accessor of key times (SCALAR float)
+            var output: Int  // accessor of values
+            var interpolation: String?  // LINEAR (default), STEP, CUBICSPLINE
+        }
+        struct Channel: Decodable {
+            struct Target: Decodable {
+                var node: Int?
+                var path: String  // translation | rotation | scale | weights
+            }
+            var sampler: Int
+            var target: Target
+        }
+        var name: String?
+        var channels: [Channel]
+        var samplers: [Sampler]
+    }
+
     var asset: Asset
     var scene: Int?
     var scenes: [Scene]?
@@ -104,6 +132,8 @@ struct GLTFDocument: Decodable {
     var images: [Image]?
     var textures: [Texture]?
     var materials: [Material]?
+    var skins: [Skin]?
+    var animations: [Animation]?
     var extensionsUsed: [String]?
     var extensionsRequired: [String]?
 }

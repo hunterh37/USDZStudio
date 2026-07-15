@@ -147,7 +147,114 @@ public struct GLTFImporter: AssetImporter {
                 ? document.scenes?[sceneIndex].nodes : nil)
                 ?? Array((document.nodes ?? []).indices)
             scene.rootNodes = try rootIndices.map { try buildNode($0, meshRanges: meshRanges, visited: []) }
+            scene.skins = try buildSkins()
+            scene.animations = buildAnimations()
             return scene
+        }
+
+        // MARK: Skins & animations
+
+        private mutating func buildSkins() throws -> [Skin] {
+            try (document.skins ?? []).enumerated().map { index, skin in
+                var result = Skin(name: skin.name ?? "Skin_\(index)", joints: skin.joints, skeletonRoot: skin.skeleton)
+                if let ibm = skin.inverseBindMatrices {
+                    result.inverseBindMatrices = try mat4(accessor: ibm)
+                    if result.inverseBindMatrices.count != skin.joints.count {
+                        diagnostics.append(Diagnostic(
+                            severity: .warning, stage: "parse",
+                            message: "\(result.name): inverseBindMatrices count \(result.inverseBindMatrices.count) ≠ joint count \(skin.joints.count)"))
+                    }
+                }
+                return result
+            }
+        }
+
+        private mutating func buildAnimations() -> [Animation] {
+            (document.animations ?? []).enumerated().map { index, anim in
+                buildAnimation(anim, index: index)
+            }
+        }
+
+        private mutating func buildAnimation(_ anim: GLTFDocument.Animation, index: Int) -> Animation {
+            let name = anim.name ?? "Animation_\(index)"
+            var samplers: [AnimationSampler] = []
+            var remap: [Int: Int] = [:]  // glTF sampler index → IR sampler index
+            var channels: [AnimationChannel] = []
+            for channel in anim.channels {
+                guard let node = channel.target.node else {
+                    warn(name, "channel without target node skipped")
+                    continue
+                }
+                let path: AnimationPath
+                switch channel.target.path {
+                case "translation": path = .translation
+                case "rotation": path = .rotation
+                case "scale": path = .scale
+                case "weights": path = .weights
+                default:
+                    warn(name, "channel path \(channel.target.path) unsupported; skipped")
+                    continue
+                }
+                guard anim.samplers.indices.contains(channel.sampler) else {
+                    warn(name, "channel references missing sampler \(channel.sampler); skipped")
+                    continue
+                }
+                let irIndex: Int
+                if let existing = remap[channel.sampler] {
+                    irIndex = existing
+                } else if let decoded = decodeSampler(anim.samplers[channel.sampler], path: path, animName: name) {
+                    irIndex = samplers.count
+                    samplers.append(decoded)
+                    remap[channel.sampler] = irIndex
+                } else {
+                    continue
+                }
+                channels.append(AnimationChannel(targetNodeID: node, path: path, samplerIndex: irIndex))
+            }
+            return Animation(name: name, channels: channels, samplers: samplers)
+        }
+
+        private mutating func decodeSampler(
+            _ sampler: GLTFDocument.Animation.Sampler, path: AnimationPath, animName: String
+        ) -> AnimationSampler? {
+            do {
+                var interpolation = Interpolation(rawValue: sampler.interpolation ?? "LINEAR") ?? .linear
+                let times = try scalarFloats(accessor: sampler.input)
+                // CUBICSPLINE stores (in-tangent, value, out-tangent) per key; we
+                // keep the value and drop tangents (warned once), so it degrades
+                // to LINEAR rather than being silently lost.
+                let stride = interpolation == .cubicSpline ? 3 : 1
+                if interpolation == .cubicSpline {
+                    warn(animName, "CUBICSPLINE tangents dropped; keys sampled as LINEAR")
+                }
+                let output: AnimationSampler.Output
+                switch path {
+                case .translation, .scale:
+                    let raw = try floatVectors(accessor: sampler.output, components: 3).map { SIMD3($0[0], $0[1], $0[2]) }
+                    output = .vec3(pickValues(raw, stride: stride))
+                case .rotation:
+                    let raw = try floatVectors(accessor: sampler.output, components: 4).map { SIMD4($0[0], $0[1], $0[2], $0[3]) }
+                    output = .rotation(pickValues(raw, stride: stride))
+                case .weights:
+                    output = .scalar(try scalarFloats(accessor: sampler.output))
+                }
+                if interpolation == .cubicSpline { interpolation = .linear }
+                return AnimationSampler(input: times, interpolation: interpolation, output: output)
+            } catch {
+                warn(animName, "sampler decode failed (\(error)); skipped")
+                return nil
+            }
+        }
+
+        /// For CUBICSPLINE (stride 3) picks the middle (value) element of each
+        /// tangent triple; otherwise returns the array unchanged.
+        private func pickValues<T>(_ values: [T], stride: Int) -> [T] {
+            guard stride > 1 else { return values }
+            return Swift.stride(from: 1, to: values.count, by: stride).map { values[$0] }
+        }
+
+        private mutating func warn(_ animName: String, _ message: String) {
+            diagnostics.append(Diagnostic(severity: .warning, stage: "parse", message: "\(animName): \(message)"))
         }
 
         // MARK: Nodes
@@ -158,6 +265,8 @@ public struct GLTFImporter: AssetImporter {
             }
             let node = nodes[index]
             var result = SceneNode(name: node.name ?? "Node_\(index)")
+            result.id = index
+            result.skinIndex = node.skin
             result.transform = Self.transform(of: node)
             if let mesh = node.mesh {
                 guard meshRanges.indices.contains(mesh) else {
@@ -212,8 +321,14 @@ public struct GLTFImporter: AssetImporter {
             if let uv = primitive.attributes["TEXCOORD_0"] {
                 mesh.uvs = try floatVectors(accessor: uv, components: 2).map { SIMD2($0[0], $0[1]) }
             }
-            for attribute in primitive.attributes.keys.sorted()
-            where !["POSITION", "NORMAL", "TEXCOORD_0"].contains(attribute) {
+            if let joints = primitive.attributes["JOINTS_0"] {
+                mesh.jointIndices = try jointIndices(accessor: joints)
+            }
+            if let weights = primitive.attributes["WEIGHTS_0"] {
+                mesh.jointWeights = try floatVectors(accessor: weights, components: 4).map { SIMD4($0[0], $0[1], $0[2], $0[3]) }
+            }
+            let handled: Set = ["POSITION", "NORMAL", "TEXCOORD_0", "JOINTS_0", "WEIGHTS_0"]
+            for attribute in primitive.attributes.keys.sorted() where !handled.contains(attribute) {
                 diagnostics.append(Diagnostic(
                     severity: .warning, stage: "parse",
                     message: "\(name): vertex attribute \(attribute) not yet supported; dropped"))
@@ -236,10 +351,10 @@ public struct GLTFImporter: AssetImporter {
             return accessors[index]
         }
 
-        /// Reads a float VEC2/VEC3 accessor (componentType 5126), honoring byteStride.
+        /// Reads a float VEC2/VEC3/VEC4 accessor (componentType 5126), honoring byteStride.
         private mutating func floatVectors(accessor index: Int, components: Int) throws -> [[Float]] {
             let accessor = try self.accessor(index)
-            let expectedType = components == 2 ? "VEC2" : "VEC3"
+            let expectedType = ["VEC2", "VEC3", "VEC4"][components - 2]
             guard accessor.componentType == 5126, accessor.type == expectedType else {
                 throw GLTFError.unsupportedAccessor("accessor \(index): \(accessor.type)/\(accessor.componentType), expected \(expectedType)/float")
             }
@@ -248,6 +363,57 @@ public struct GLTFImporter: AssetImporter {
                 (0..<components).map { component in
                     bytes.data.readFloat(at: bytes.start + element * bytes.stride + component * 4)
                 }
+            }
+        }
+
+        /// Reads a float SCALAR accessor (5126) — animation key times, weights.
+        private mutating func scalarFloats(accessor index: Int) throws -> [Float] {
+            let accessor = try self.accessor(index)
+            guard accessor.componentType == 5126, accessor.type == "SCALAR" else {
+                throw GLTFError.unsupportedAccessor("scalar accessor \(index): \(accessor.type)/\(accessor.componentType), expected SCALAR/float")
+            }
+            let bytes = try viewData(for: accessor, elementSize: 4)
+            return (0..<accessor.count).map { bytes.data.readFloat(at: bytes.start + $0 * bytes.stride) }
+        }
+
+        /// Reads a MAT4 float accessor (5126) — inverse bind matrices. glTF
+        /// matrices are column-major, matching `simd_float4x4(columns:)`.
+        private mutating func mat4(accessor index: Int) throws -> [simd_float4x4] {
+            let accessor = try self.accessor(index)
+            guard accessor.componentType == 5126, accessor.type == "MAT4" else {
+                throw GLTFError.unsupportedAccessor("matrix accessor \(index): \(accessor.type)/\(accessor.componentType), expected MAT4/float")
+            }
+            let bytes = try viewData(for: accessor, elementSize: 64)
+            return (0..<accessor.count).map { element in
+                let base = bytes.start + element * bytes.stride
+                let m = (0..<16).map { bytes.data.readFloat(at: base + $0 * 4) }
+                return simd_float4x4(columns: (
+                    SIMD4(m[0], m[1], m[2], m[3]), SIMD4(m[4], m[5], m[6], m[7]),
+                    SIMD4(m[8], m[9], m[10], m[11]), SIMD4(m[12], m[13], m[14], m[15])))
+            }
+        }
+
+        /// Reads a VEC4 joint-index accessor: ubyte(5121) or ushort(5123).
+        private mutating func jointIndices(accessor index: Int) throws -> [SIMD4<UInt16>] {
+            let accessor = try self.accessor(index)
+            let size: Int
+            switch accessor.componentType {
+            case 5121: size = 1
+            case 5123: size = 2
+            default:
+                throw GLTFError.unsupportedAccessor("joints accessor \(index): componentType \(accessor.componentType)")
+            }
+            guard accessor.type == "VEC4" else {
+                throw GLTFError.unsupportedAccessor("joints accessor \(index): type \(accessor.type), expected VEC4")
+            }
+            let bytes = try viewData(for: accessor, elementSize: size * 4)
+            return (0..<accessor.count).map { element in
+                let base = bytes.start + element * bytes.stride
+                let comps = (0..<4).map { component -> UInt16 in
+                    let at = base + component * size
+                    return size == 1 ? UInt16(bytes.data[bytes.data.startIndex + at]) : bytes.data.readUInt16(at: at)
+                }
+                return SIMD4(comps[0], comps[1], comps[2], comps[3])
             }
         }
 

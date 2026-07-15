@@ -96,6 +96,74 @@ enum GLTFFixtures {
         """
     }
 
+    static func ubytes(_ values: [UInt8]) -> Data { Data(values) }
+
+    // MARK: Skinned + animated fixture
+
+    static let identityMat4: [Float] = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]
+
+    /// A skinned triangle bound to a 2-joint skeleton (Hips → Spine), with a
+    /// rotation animation on the Spine joint (identity → 90° about Z at t=1).
+    /// Node 0 is the skinned mesh; nodes 1,2 are the joints.
+    static func skinnedAnimatedGLB() -> Data {
+        // BIN sections, all float sections first (4-byte aligned by construction).
+        let weights: [Float] = [1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0]
+        let ibm: [Float] = identityMat4 + identityMat4
+        let animInput: [Float] = [0, 1]
+        let animOutput: [Float] = [0, 0, 0, 1, /* identity xyzw */ 0, 0, 0.7071068, 0.7071068]
+
+        var bin = floats(trianglePositions)   // 0, 36
+        bin.append(floats(weights))           // 36, 48
+        bin.append(floats(ibm))               // 84, 128
+        bin.append(floats(animInput))         // 212, 8
+        bin.append(floats(animOutput))        // 220, 32
+        bin.append(ubytes([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]))  // joints 252, 12
+        bin.append(uint16s([0, 1, 2]))        // indices 264, 6
+
+        let json = """
+        {
+          "asset": {"version": "2.0"},
+          "scene": 0,
+          "scenes": [{"name": "Scene", "nodes": [0, 1]}],
+          "nodes": [
+            {"name": "SkinnedNode", "mesh": 0, "skin": 0},
+            {"name": "Hips", "children": [2], "translation": [0, 0, 0]},
+            {"name": "Spine", "translation": [0, 1, 0]}
+          ],
+          "meshes": [{"name": "Skin", "primitives": [{
+            "attributes": {"POSITION": 0, "JOINTS_0": 5, "WEIGHTS_0": 1},
+            "indices": 6
+          }]}],
+          "skins": [{"name": "Rig", "joints": [1, 2], "inverseBindMatrices": 2, "skeleton": 1}],
+          "animations": [{"name": "Wiggle", "channels": [
+            {"sampler": 0, "target": {"node": 2, "path": "rotation"}}
+          ], "samplers": [
+            {"input": 3, "output": 4, "interpolation": "LINEAR"}
+          ]}],
+          "buffers": [{"byteLength": 270}],
+          "bufferViews": [
+            {"buffer": 0, "byteOffset": 0, "byteLength": 36},
+            {"buffer": 0, "byteOffset": 36, "byteLength": 48},
+            {"buffer": 0, "byteOffset": 84, "byteLength": 128},
+            {"buffer": 0, "byteOffset": 212, "byteLength": 8},
+            {"buffer": 0, "byteOffset": 220, "byteLength": 32},
+            {"buffer": 0, "byteOffset": 252, "byteLength": 12},
+            {"buffer": 0, "byteOffset": 264, "byteLength": 6}
+          ],
+          "accessors": [
+            {"bufferView": 0, "componentType": 5126, "count": 3, "type": "VEC3"},
+            {"bufferView": 1, "componentType": 5126, "count": 3, "type": "VEC4"},
+            {"bufferView": 2, "componentType": 5126, "count": 2, "type": "MAT4"},
+            {"bufferView": 3, "componentType": 5126, "count": 2, "type": "SCALAR"},
+            {"bufferView": 4, "componentType": 5126, "count": 2, "type": "VEC4"},
+            {"bufferView": 5, "componentType": 5121, "count": 3, "type": "VEC4"},
+            {"bufferView": 6, "componentType": 5123, "count": 3, "type": "SCALAR"}
+          ]
+        }
+        """
+        return glb(json: json, bin: bin)
+    }
+
     /// Writes data to a unique temp file and returns its URL.
     static func write(_ data: Data, name: String) throws -> URL {
         let dir = FileManager.default.temporaryDirectory

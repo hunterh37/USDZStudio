@@ -106,6 +106,11 @@ public struct MeshData: Hashable, Sendable {
     public var indices: [UInt32]
     /// Index into `IntermediateScene.materials`, or nil for the default material.
     public var materialIndex: Int?
+    /// Per-vertex skinning influences (glTF JOINTS_0). Each element holds up to
+    /// four joint indices into the binding skin's `joints`. Empty when unskinned.
+    public var jointIndices: [SIMD4<UInt16>]
+    /// Per-vertex skinning weights (glTF WEIGHTS_0), parallel to `jointIndices`.
+    public var jointWeights: [SIMD4<Float>]
 
     public init(
         name: String = "Mesh",
@@ -113,7 +118,9 @@ public struct MeshData: Hashable, Sendable {
         normals: [SIMD3<Float>] = [],
         uvs: [SIMD2<Float>] = [],
         indices: [UInt32] = [],
-        materialIndex: Int? = nil
+        materialIndex: Int? = nil,
+        jointIndices: [SIMD4<UInt16>] = [],
+        jointWeights: [SIMD4<Float>] = []
     ) {
         self.name = name
         self.positions = positions
@@ -121,9 +128,14 @@ public struct MeshData: Hashable, Sendable {
         self.uvs = uvs
         self.indices = indices
         self.materialIndex = materialIndex
+        self.jointIndices = jointIndices
+        self.jointWeights = jointWeights
     }
 
     public var triangleCount: Int { indices.count / 3 }
+
+    /// `true` when the mesh carries per-vertex skinning influences.
+    public var isSkinned: Bool { !jointIndices.isEmpty }
 }
 
 /// A node in the scene hierarchy. Value-typed tree, like `Prim`.
@@ -134,17 +146,27 @@ public struct SceneNode: Hashable, Sendable {
     /// Indices into `IntermediateScene.meshes`.
     public var meshIndices: [Int]
     public var children: [SceneNode]
+    /// Stable importer-assigned identity (glTF node index). Animation channels
+    /// and skin joints target nodes by this id; `nil` for synthesized nodes.
+    public var id: Int?
+    /// Index into `IntermediateScene.skins` when this node instantiates a
+    /// skinned mesh (glTF `node.skin`); `nil` otherwise.
+    public var skinIndex: Int?
 
     public init(
         name: String = "Node",
         transform: simd_float4x4 = matrix_identity_float4x4,
         meshIndices: [Int] = [],
-        children: [SceneNode] = []
+        children: [SceneNode] = [],
+        id: Int? = nil,
+        skinIndex: Int? = nil
     ) {
         self.name = name
         self.transform = transform
         self.meshIndices = meshIndices
         self.children = children
+        self.id = id
+        self.skinIndex = skinIndex
     }
 
     /// Depth-first traversal of this node and all descendants.
@@ -169,17 +191,31 @@ public struct IntermediateScene: Hashable, Sendable {
     public var rootNodes: [SceneNode]
     public var meshes: [MeshData]
     public var materials: [PBRMaterial]
+    public var skins: [Skin]
+    public var animations: [Animation]
 
     public init(
         name: String = "Scene",
         rootNodes: [SceneNode] = [],
         meshes: [MeshData] = [],
-        materials: [PBRMaterial] = []
+        materials: [PBRMaterial] = [],
+        skins: [Skin] = [],
+        animations: [Animation] = []
     ) {
         self.name = name
         self.rootNodes = rootNodes
         self.meshes = meshes
         self.materials = materials
+        self.skins = skins
+        self.animations = animations
+    }
+
+    /// Every node in the scene keyed by its importer id, for channel/joint
+    /// resolution during authoring.
+    public func nodesByID() -> [Int: SceneNode] {
+        var map: [Int: SceneNode] = [:]
+        for node in allNodes() where node.id != nil { map[node.id!] = node }
+        return map
     }
 
     /// Every node in the scene, depth-first.
@@ -190,5 +226,104 @@ public struct IntermediateScene: Hashable, Sendable {
     /// Total triangles across all meshes (batch-report metric).
     public var triangleCount: Int {
         meshes.reduce(0) { $0 + $1.triangleCount }
+    }
+}
+
+// MARK: - Skinning & animation
+
+/// A skin binds a set of joint nodes and their inverse bind matrices to skinned
+/// meshes (glTF `skin` → UsdSkel `Skeleton`).
+public struct Skin: Hashable, Sendable {
+    public var name: String
+    /// Node ids (see `SceneNode.id`) of the joints, in binding order. A mesh's
+    /// per-vertex `jointIndices` index into this array.
+    public var joints: [Int]
+    /// One inverse-bind matrix per joint (column-major), or empty when the glTF
+    /// omitted the accessor (identity implied).
+    public var inverseBindMatrices: [simd_float4x4]
+    /// Node id of the common skeleton root, if the glTF declared one.
+    public var skeletonRoot: Int?
+
+    public init(
+        name: String = "Skin",
+        joints: [Int] = [],
+        inverseBindMatrices: [simd_float4x4] = [],
+        skeletonRoot: Int? = nil
+    ) {
+        self.name = name
+        self.joints = joints
+        self.inverseBindMatrices = inverseBindMatrices
+        self.skeletonRoot = skeletonRoot
+    }
+}
+
+/// Keyframe interpolation mode for an animation sampler (glTF sampler
+/// `interpolation`). CUBICSPLINE tangents are not authored; the importer warns
+/// and treats such samplers as LINEAR (no silent drop).
+public enum Interpolation: String, Hashable, Sendable {
+    case linear = "LINEAR"
+    case step = "STEP"
+    case cubicSpline = "CUBICSPLINE"
+}
+
+/// Which node property an animation channel drives.
+public enum AnimationPath: Hashable, Sendable {
+    case translation
+    case rotation
+    case scale
+    /// Morph-target weights — parsed for completeness but not yet authored as
+    /// UsdSkel BlendShapes (the author stage warns).
+    case weights
+}
+
+/// The time-indexed output of one channel: input times paired with typed
+/// outputs. Translations/scales are vec3; rotations are quaternions (xyzw);
+/// weights are scalars flattened per keyframe.
+public struct AnimationSampler: Hashable, Sendable {
+    public enum Output: Hashable, Sendable {
+        case vec3([SIMD3<Float>])
+        case rotation([SIMD4<Float>])  // quaternion xyzw
+        case scalar([Float])
+    }
+
+    public var input: [Float]  // key times, seconds
+    public var interpolation: Interpolation
+    public var output: Output
+
+    public init(input: [Float], interpolation: Interpolation, output: Output) {
+        self.input = input
+        self.interpolation = interpolation
+        self.output = output
+    }
+}
+
+/// A single channel: sampler → (target node, property).
+public struct AnimationChannel: Hashable, Sendable {
+    public var targetNodeID: Int
+    public var path: AnimationPath
+    public var samplerIndex: Int
+
+    public init(targetNodeID: Int, path: AnimationPath, samplerIndex: Int) {
+        self.targetNodeID = targetNodeID
+        self.path = path
+        self.samplerIndex = samplerIndex
+    }
+}
+
+/// A named animation clip (glTF `animation`): channels reference samplers.
+public struct Animation: Hashable, Sendable {
+    public var name: String
+    public var channels: [AnimationChannel]
+    public var samplers: [AnimationSampler]
+
+    public init(name: String = "Animation", channels: [AnimationChannel] = [], samplers: [AnimationSampler] = []) {
+        self.name = name
+        self.channels = channels
+        self.samplers = samplers
+    }
+
+    /// The largest key time across all samplers (clip duration, seconds).
+    public var duration: Float {
+        samplers.flatMap(\.input).max() ?? 0
     }
 }
