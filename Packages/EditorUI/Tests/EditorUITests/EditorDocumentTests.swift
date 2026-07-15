@@ -140,6 +140,58 @@ struct EditorDocumentTests {
         #expect(doc.snapshot.prim(at: PrimPath("/Root")!)?.children.map(\.name) == ["A", "B"])
     }
 
+    // MARK: Variants
+
+    @Test func setVariantSelectionIsUndoable() {
+        let colorSet = VariantSet(name: "color", variants: ["red", "blue"], selection: "red")
+        let body = Prim(path: PrimPath("/Car/Body")!, typeName: "Mesh", variantSets: [colorSet])
+        let root = Prim(path: PrimPath("/Car")!, typeName: "Xform", children: [body])
+        let doc = EditorDocument(snapshot: StageSnapshot(rootPrims: [root]))
+        let bodyPath = PrimPath("/Car/Body")!
+
+        #expect(doc.variantSets(at: bodyPath).first?.selection == "red")
+        doc.setVariantSelection(bodyPath, set: "color", to: "blue")
+        #expect(doc.variantSets(at: bodyPath).first?.selection == "blue")
+
+        doc.undo()
+        #expect(doc.variantSets(at: bodyPath).first?.selection == "red")
+    }
+
+    @Test func setVariantSelectionNoOpsWhenUnchangedOrMissing() {
+        let colorSet = VariantSet(name: "color", variants: ["red", "blue"], selection: "red")
+        let body = Prim(path: PrimPath("/Car/Body")!, typeName: "Mesh", variantSets: [colorSet])
+        let doc = EditorDocument(snapshot: StageSnapshot(rootPrims: [body]))
+        let bodyPath = PrimPath("/Car/Body")!
+
+        doc.setVariantSelection(bodyPath, set: "color", to: "red")   // unchanged
+        doc.setVariantSelection(bodyPath, set: "finish", to: "matte") // missing set
+        #expect(!doc.canUndo)
+    }
+
+    // MARK: Scale fix
+
+    @Test func fixScaleNormalizesUnitsAndPreservesSize() {
+        // 1 unit = 1 cm; a 100-unit root prim should stay 1 m wide after the fix.
+        let metadata = StageMetadata(metersPerUnit: 0.01)
+        let root = Prim(path: PrimPath("/Model")!, typeName: "Xform")
+        let doc = EditorDocument(snapshot: StageSnapshot(metadata: metadata, rootPrims: [root]))
+        let modelPath = PrimPath("/Model")!
+
+        #expect(doc.fixScale())
+        #expect(doc.snapshot.metadata.metersPerUnit == 1.0)
+        // Compensating scale of 0.01 / 1.0 = 0.01 baked into the root.
+        #expect(doc.transform(at: modelPath).scale == [0.01, 0.01, 0.01])
+
+        doc.undo()
+        #expect(doc.snapshot.metadata.metersPerUnit == 0.01)
+    }
+
+    @Test func fixScaleNoOpsWhenAlreadyNormalized() {
+        let doc = carDocument()
+        #expect(!doc.fixScale())
+        #expect(!doc.canUndo)
+    }
+
     @Test func revisionAdvancesOnEachChange() {
         let doc = carDocument()
         let start = doc.revision

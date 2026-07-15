@@ -171,6 +171,38 @@ public final class EditorDocument {
         run(SetStageMetadataCommand(newMetadata: metadata, oldMetadata: snapshot.metadata))
     }
 
+    // MARK: Variant edits
+
+    /// The variant sets authored on `path` (empty when the prim has none), for
+    /// the inspector's variant picker.
+    public func variantSets(at path: PrimPath) -> [VariantSet] {
+        snapshot.prim(at: path)?.variantSets ?? []
+    }
+
+    /// Switches the active variant of a named set on `path` as one undoable
+    /// command. No-op when the prim has no such set or the selection is
+    /// unchanged.
+    public func setVariantSelection(_ path: PrimPath, set setName: String, to selection: String?) {
+        guard let prim = snapshot.prim(at: path),
+              let variantSet = prim.variantSets.first(where: { $0.name == setName }),
+              variantSet.selection != selection else { return }
+        run(SetVariantSelectionCommand(
+            path: path, setName: setName,
+            newSelection: selection, oldSelection: variantSet.selection))
+    }
+
+    // MARK: Scale / units
+
+    /// Normalizes the stage's `metersPerUnit` to `target`, preserving real-world
+    /// size by baking a compensating scale into each root prim — the toolbar/menu
+    /// surface for `ScaleFixer`, as one undoable command. Returns `true` when a
+    /// fix ran (a no-op when already normalized or `target` is invalid).
+    @discardableResult
+    public func fixScale(targetMetersPerUnit target: Double = 1.0) -> Bool {
+        guard let command = ScaleFixer.command(for: stage, targetMetersPerUnit: target) else { return false }
+        return run(command) != nil
+    }
+
     // MARK: Validation quick-fixes
 
     /// The quick-fix for a diagnostic against the live stage, if one exists.
