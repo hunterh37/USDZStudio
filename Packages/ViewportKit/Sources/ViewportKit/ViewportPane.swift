@@ -31,18 +31,39 @@ public enum CameraInteractionMode: String, CaseIterable, Identifiable {
 public struct ViewportPane: View {
 
     let modelURL: URL?
+    /// Live component-edit geometry replacing the file-loaded model for one
+    /// prim (Phase 6). `nil` = plain file rendering.
+    let editedMesh: EditedMeshData?
+    /// Called with the picked face index (authored order) on a click while
+    /// `editedMesh` is active.
+    let onPickFace: ((Int) -> Void)?
+    /// Live hover preview: highlight the face under the cursor (the one a
+    /// click / op would target). Reported up so the HUD can name it.
+    let hoverPreview: Bool
+    let onHoverFace: ((Int?) -> Void)?
     @State private var stats: SceneStats?
     @State private var showStats = true
     @State private var loadError: String?
     @State private var cameraMode: CameraInteractionMode = .rotate
 
-    public init(modelURL: URL?) {
+    public init(modelURL: URL?,
+                editedMesh: EditedMeshData? = nil,
+                onPickFace: ((Int) -> Void)? = nil,
+                hoverPreview: Bool = false,
+                onHoverFace: ((Int?) -> Void)? = nil) {
         self.modelURL = modelURL
+        self.editedMesh = editedMesh
+        self.onPickFace = onPickFace
+        self.hoverPreview = hoverPreview
+        self.onHoverFace = onHoverFace
     }
 
     public var body: some View {
         ZStack(alignment: .topTrailing) {
-            ViewportRepresentable(modelURL: modelURL, mode: cameraMode, stats: $stats, loadError: $loadError)
+            ViewportRepresentable(modelURL: modelURL, mode: cameraMode,
+                                  editedMesh: editedMesh, onPickFace: onPickFace,
+                                  hoverPreview: hoverPreview, onHoverFace: onHoverFace,
+                                  stats: $stats, loadError: $loadError)
             cameraModeControl
             if showStats, let stats {
                 VStack(alignment: .trailing, spacing: 2) {
@@ -89,6 +110,10 @@ struct ViewportRepresentable: NSViewRepresentable {
 
     let modelURL: URL?
     let mode: CameraInteractionMode
+    let editedMesh: EditedMeshData?
+    let onPickFace: ((Int) -> Void)?
+    let hoverPreview: Bool
+    let onHoverFace: ((Int?) -> Void)?
     @Binding var stats: SceneStats?
     @Binding var loadError: String?
 
@@ -108,6 +133,8 @@ struct ViewportRepresentable: NSViewRepresentable {
         context.coordinator.onError = { loadError = $0 }
         view.interactionMode = mode
         context.coordinator.load(url: modelURL)
+        context.coordinator.applyEditedMesh(editedMesh, onPickFace: onPickFace,
+                                            hoverPreview: hoverPreview, onHoverFace: onHoverFace)
     }
 }
 
@@ -191,6 +218,131 @@ final class ViewportCoordinator {
         try Entity.load(contentsOf: url)
     }
 
+    // MARK: Component-edit rendering + picking (Phase 6)
+
+    private let editAnchor = AnchorEntity(world: .zero)
+    private var editData: EditedMeshData?
+    private var hiddenOriginal: Entity?
+    private var onPickFace: ((Int) -> Void)?
+    private var onHoverFace: ((Int?) -> Void)?
+    private var hoverEntity: ModelEntity?
+    private var hoveredFace: Int?
+    /// BVH rebuilt per mesh revision; traversed per hover/click event.
+    private var pickAccelerator: PickAccelerator?
+
+    /// Swap the file-loaded entity for the live edited mesh (flat-shaded, with
+    /// an amber overlay on the selected faces); restore it when editing ends.
+    func applyEditedMesh(_ data: EditedMeshData?, onPickFace: ((Int) -> Void)?,
+                         hoverPreview: Bool = false, onHoverFace: ((Int?) -> Void)? = nil) {
+        self.onPickFace = onPickFace
+        self.onHoverFace = onHoverFace
+        view?.onEditClick = data == nil ? nil : { [weak self] point in self?.pick(at: point) }
+        view?.onHoverMove = (data == nil || !hoverPreview)
+            ? nil : { [weak self] point in self?.hover(at: point) }
+        if data == nil || !hoverPreview { setHoveredFace(nil) }
+        guard data != editData else { return }
+        editData = data
+        pickAccelerator = data.map(PickAccelerator.init)
+        setHoveredFace(nil) // geometry changed; stale hover would mislead
+        editAnchor.children.removeAll()
+        hoverEntity = nil
+
+        guard let data else {
+            hiddenOriginal?.isEnabled = true
+            hiddenOriginal = nil
+            if editAnchor.parent != nil { editAnchor.removeFromParent() }
+            return
+        }
+        if editAnchor.parent == nil { view?.scene.addAnchor(editAnchor) }
+
+        // Hide the file-loaded entity for this prim; the edit mesh replaces it.
+        if hiddenOriginal == nil,
+           let original = modelAnchor.findEntity(primPath: data.primPath)
+               ?? modelAnchor.findEntity(named: data.primName) {
+            original.isEnabled = false
+            hiddenOriginal = original
+        }
+        let worldMatrix = hiddenOriginal?.parent?.transformMatrix(relativeTo: nil)
+            ?? matrix_identity_float4x4
+
+        if let mesh = Self.meshResource(MeshFlattener.flatten(data)) {
+            var material = PhysicallyBasedMaterial()
+            material.baseColor = .init(tint: NSColor(srgbRed: 0.62, green: 0.65, blue: 0.7, alpha: 1))
+            material.roughness = 0.6
+            let entity = ModelEntity(mesh: mesh, materials: [material])
+            entity.transform = Transform(matrix: worldMatrix)
+            editAnchor.addChild(entity)
+        }
+        if !data.selectedFaces.isEmpty,
+           let highlight = Self.meshResource(
+            MeshFlattener.flatten(data, faces: data.selectedFaces.sorted()), inflate: 0.003) {
+            let entity = ModelEntity(
+                mesh: highlight,
+                materials: [UnlitMaterial(color: NSColor(srgbRed: 0.91, green: 0.7, blue: 0.25, alpha: 0.55))])
+            entity.transform = Transform(matrix: worldMatrix)
+            editAnchor.addChild(entity)
+        }
+    }
+
+    /// Triangle buffers → MeshResource, optionally puffed along the normals so
+    /// the selection overlay never z-fights the base mesh.
+    private static func meshResource(_ buffers: MeshFlattener.Buffers, inflate: Float = 0) -> MeshResource? {
+        guard !buffers.triangleIndices.isEmpty else { return nil }
+        var descriptor = MeshDescriptor(name: "editedMesh")
+        let positions = inflate == 0 ? buffers.positions
+            : zip(buffers.positions, buffers.normals).map { $0 + $1 * inflate }
+        descriptor.positions = MeshBuffer(positions)
+        descriptor.normals = MeshBuffer(buffers.normals)
+        descriptor.primitives = .triangles(buffers.triangleIndices)
+        return try? MeshResource.generate(from: [descriptor])
+    }
+
+    /// Click → world ray (shared orbit-camera math) → prim-local ray → face.
+    private func pick(at point: CGPoint) {
+        guard let onPickFace, let hit = faceHit(at: point) else { return }
+        onPickFace(hit)
+    }
+
+    /// Cursor move → the face an op would target, previewed live.
+    private func hover(at point: CGPoint) {
+        setHoveredFace(faceHit(at: point))
+    }
+
+    private func faceHit(at point: CGPoint) -> Int? {
+        guard let data = editData, let view,
+              var ray = CameraRay.make(camera: camera, viewSize: view.bounds.size, point: point)
+        else { return nil }
+        let worldMatrix = hiddenOriginal?.parent?.transformMatrix(relativeTo: nil)
+            ?? matrix_identity_float4x4
+        let inverse = worldMatrix.inverse
+        let origin4 = inverse * SIMD4<Float>(SIMD3<Float>(ray.origin), 1)
+        let dir4 = inverse * SIMD4<Float>(SIMD3<Float>(ray.direction), 0)
+        ray = CameraRay.Ray(origin: SIMD3<Double>(SIMD3(origin4.x, origin4.y, origin4.z)),
+                            direction: SIMD3<Double>(SIMD3(dir4.x, dir4.y, dir4.z)))
+        return (pickAccelerator?.pickFace(ray: ray) ?? MeshPicker.pickFace(ray: ray, in: data))?.faceIndex
+    }
+
+    /// Rebuilds the hover highlight (accent blue, distinct from the amber
+    /// selection) and reports the change up for the HUD readout.
+    private func setHoveredFace(_ face: Int?) {
+        guard face != hoveredFace else { return }
+        hoveredFace = face
+        onHoverFace?(face)
+        hoverEntity?.removeFromParent()
+        hoverEntity = nil
+        guard let face, let data = editData,
+              let mesh = Self.meshResource(MeshFlattener.flatten(data, faces: [face]), inflate: 0.005)
+        else { return }
+        let entity = ModelEntity(
+            mesh: mesh,
+            materials: [UnlitMaterial(color: NSColor(srgbRed: 0.36, green: 0.62, blue: 1, alpha: 0.4))])
+        let worldMatrix = hiddenOriginal?.parent?.transformMatrix(relativeTo: nil)
+            ?? matrix_identity_float4x4
+        entity.transform = Transform(matrix: worldMatrix)
+        editAnchor.addChild(entity)
+        hoverEntity = entity
+    }
+
     private func frameModel() {
         guard let modelBounds else { return }
         camera.frame(
@@ -241,6 +393,30 @@ final class ViewportCoordinator {
 }
 
 extension Entity {
+    /// Finds the descendant whose named-ancestor chain matches the prim path
+    /// ("/Rig/Panel" → an entity named "Panel" under one named "Rig"),
+    /// ignoring RealityKit's unnamed wrapper entities. `nil` for empty paths
+    /// or no match — callers then fall back to plain name lookup.
+    func findEntity(primPath: String) -> Entity? {
+        let components = primPath.split(separator: "/").map(String.init)
+        guard !components.isEmpty else { return nil }
+        var match: Entity?
+        visit { entity in
+            guard match == nil, entity.name == components.last else { return }
+            // Walk up collecting named ancestors; must end with the path.
+            var names: [String] = []
+            var cursor: Entity? = entity
+            while let current = cursor {
+                if !current.name.isEmpty { names.append(current.name) }
+                cursor = current.parent
+            }
+            if Array(names.prefix(components.count)) == components.reversed().map({ $0 }) {
+                match = entity
+            }
+        }
+        return match
+    }
+
     func visit(_ body: (Entity) -> Void) {
         body(self)
         for child in children { child.visit(body) }
@@ -271,6 +447,43 @@ final class InteractiveARView: ARView {
     var onPan: ((Double, Double) -> Void)?
     var onDolly: ((Double) -> Void)?
     var onFrame: (() -> Void)?
+    /// Component picking in edit mode: fires with the click point in top-left
+    /// view coordinates when a press releases without dragging.
+    var onEditClick: ((CGPoint) -> Void)?
+    /// Live hover preview in edit mode: fires with the cursor point (top-left
+    /// coordinates) on every move, and `nil`-equivalent via mouseExited.
+    var onHoverMove: ((CGPoint) -> Void)? {
+        didSet { updateTrackingAreas() }
+    }
+
+    private var mouseDownPoint: CGPoint?
+    private var dragged = false
+    private var hoverTrackingArea: NSTrackingArea?
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let hoverTrackingArea { removeTrackingArea(hoverTrackingArea) }
+        hoverTrackingArea = nil
+        guard onHoverMove != nil else { return }
+        let area = NSTrackingArea(
+            rect: .zero,
+            options: [.mouseMoved, .mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect],
+            owner: self)
+        addTrackingArea(area)
+        hoverTrackingArea = area
+    }
+
+    override func mouseMoved(with event: NSEvent) {
+        guard let onHoverMove else { return }
+        let p = convert(event.locationInWindow, from: nil)
+        onHoverMove(CGPoint(x: p.x, y: bounds.height - p.y))
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        // Off-view: park the hover point outside any geometry so the
+        // coordinator clears the highlight.
+        onHoverMove?(CGPoint(x: -1e6, y: -1e6))
+    }
 
     /// Camera action a plain drag performs; driven by the top-leading buttons.
     var interactionMode: CameraInteractionMode = .rotate
@@ -279,9 +492,21 @@ final class InteractiveARView: ARView {
 
     override func mouseDown(with event: NSEvent) {
         window?.makeFirstResponder(self)
+        mouseDownPoint = convert(event.locationInWindow, from: nil)
+        dragged = false
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        defer { mouseDownPoint = nil }
+        guard !dragged, let onEditClick, let down = mouseDownPoint else { return }
+        let up = convert(event.locationInWindow, from: nil)
+        guard abs(up.x - down.x) < 3, abs(up.y - down.y) < 3 else { return }
+        // AppKit's origin is bottom-left; picking math wants top-left.
+        onEditClick(CGPoint(x: up.x, y: bounds.height - up.y))
     }
 
     override func mouseDragged(with event: NSEvent) {
+        dragged = true
         let dx = Double(event.deltaX), dy = Double(event.deltaY)
         // ⇧-drag always pans (power-user shortcut, independent of mode).
         guard !event.modifierFlags.contains(.shift) else {
