@@ -31,6 +31,9 @@ public enum InsetFaces: MeshOp {
             }
             let n = loop.count
             let centroid = mesh.faceCentroid(f)
+            // Invariant 6: subset (material) membership carries to the
+            // geometry that replaces the inset face.
+            let parentSubsets = mesh.subsets.filter { $0.value.contains(f) }.keys
 
             var inner: [VertexID] = []
             for v in loop {
@@ -39,12 +42,18 @@ public enum InsetFaces: MeshOp {
             }
             // Side quads: traverse the original edge in the original direction
             // (the removed face owned that direction; neighbors run opposite).
+            var replacements: [FaceID] = []
             for i in 0..<n {
                 let j = (i + 1) % n
-                out.addFace([loop[i], loop[j], inner[j], inner[i]])
+                replacements.append(out.addFace([loop[i], loop[j], inner[j], inner[i]]))
             }
-            innerFaces.insert(out.addFace(inner))
+            let innerFace = out.addFace(inner)
+            innerFaces.insert(innerFace)
+            replacements.append(innerFace)
             out.removeFace(f)
+            for name in parentSubsets {
+                for r in replacements { out.addFaceToSubset(r, subset: name) }
+            }
 
             predictedV += n
             predictedE += 2 * n

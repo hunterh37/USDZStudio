@@ -106,7 +106,10 @@ public enum MeshIO {
 
         var subsets: [String: [Int]] = [:]
         for (name, faces) in mesh.subsets {
-            subsets[name] = faces.compactMap { faceIndex[$0] }.sorted()
+            let indices = faces.compactMap { faceIndex[$0] }.sorted()
+            // An emptied subset (all member faces deleted) is not exported —
+            // a GeomSubset with no indices is meaningless in USD.
+            if !indices.isEmpty { subsets[name] = indices }
         }
         return FlatMesh(points: points,
                         faceVertexCounts: counts,

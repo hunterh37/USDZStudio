@@ -24,7 +24,10 @@ public enum FillHole: MeshOp {
             seed = e
         case .vertices(let verts):
             guard let v = verts.sorted().first else { throw MeshOpError.emptySelection }
-            guard let e = edgeFaces.first(where: { $0.key.contains(v) && $0.value.count == 1 })?.key else {
+            // Deterministic seed choice: dictionary iteration order varies per
+            // process, and redo must re-apply identically (spec §Undo & commands).
+            let candidates = edgeFaces.filter { $0.key.contains(v) && $0.value.count == 1 }.keys
+            guard let e = candidates.sorted(by: <).first else {
                 throw MeshOpError.preconditionFailed("selected vertex is not on a boundary loop")
             }
             seed = e

@@ -13,6 +13,7 @@ PACKAGES=(
   Packages/USDCore
   Packages/DicyaninDesignSystem
   Packages/USDBridge
+  Packages/MeshKit
   Packages/EditingKit
   Packages/ValidationKit
   Packages/ConversionKit

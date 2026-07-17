@@ -75,6 +75,17 @@ public enum ExtrudeFaces: MeshOp {
         }
         let offset = dir * params.distance
 
+        // A boundary edge parallel to the extrude direction would sweep a
+        // zero-area side quad — fail with an actionable precondition instead
+        // of a post-op invariant violation.
+        for e in boundaryEdgeSet {
+            let along = mesh.positions[e.b]! - mesh.positions[e.a]!
+            if simd_length(simd_cross(along, dir)) <= MeshInvariants.epsilon {
+                throw MeshOpError.preconditionFailed(
+                    "boundary edge (\(e.a.rawValue),\(e.b.rawValue)) is parallel to the extrude direction; its side face would be degenerate — pick a different axis")
+            }
+        }
+
         var out = mesh
 
         // Duplicate boundary vertices; interior region verts just move.
@@ -104,7 +115,11 @@ public enum ExtrudeFaces: MeshOp {
                 let u = loop[i], w = loop[(i + 1) % loop.count]
                 if EdgeKey(u, w) == e { a = u; b = w; break }
             }
-            out.addFace([a, b, duplicate[b]!, duplicate[a]!])
+            let side = out.addFace([a, b, duplicate[b]!, duplicate[a]!])
+            // Invariant 6: side walls inherit the cap face's subset (material).
+            for (name, members) in mesh.subsets where members.contains(capFace) {
+                out.addFaceToSubset(side, subset: name)
+            }
         }
 
         let predicted = TopologyDelta(vertices: boundaryVerts.count,
