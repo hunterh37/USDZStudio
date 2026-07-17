@@ -36,6 +36,12 @@ struct Scenario: Decodable {
         var string: String?
         var count: Int?
 
+        // Mesh edit mode operands (Phase 6).
+        /// Face indices (import order) for `mesh.selectFaces`.
+        var faces: [Int]?
+        /// For `mesh.exit`: commit the session to the stage (default true).
+        var commit: Bool?
+
         // Expectations.
         /// Assert the named input's value (with `number`/`color`, or `isNull`).
         var materialInput: String?
@@ -43,6 +49,13 @@ struct Scenario: Decodable {
         var isNull: Bool?
         /// Assert which prim the selection's material inputs resolve to.
         var surfacePath: String?
+        /// Assert the face count — of the edit session's working mesh while in
+        /// edit mode, else of the selected prim's authored faceVertexCounts.
+        var faceCount: Int?
+        /// Assert the edit session's active tool (empty string = none).
+        var activeTool: String?
+        /// Assert the last op refusal contains this substring ("" = none).
+        var meshDiagnostic: String?
     }
 }
 

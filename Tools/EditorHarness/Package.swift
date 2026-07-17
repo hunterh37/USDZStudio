@@ -13,12 +13,13 @@ let package = Package(
         .package(path: "../../Packages/USDCore"),
         .package(path: "../../Packages/USDBridge"),
         .package(path: "../../Packages/EditingKit"),
+        .package(path: "../../Packages/MeshKit"),
         .package(path: "../../Packages/EditorUI"),
     ],
     targets: [
         .executableTarget(
             name: "editor-harness",
-            dependencies: ["USDCore", "USDBridge", "EditingKit", "EditorUI"],
+            dependencies: ["USDCore", "USDBridge", "EditingKit", "MeshKit", "EditorUI"],
             path: "Sources"),
         .testTarget(name: "EditorHarnessTests", dependencies: ["editor-harness"], path: "Tests"),
     ]

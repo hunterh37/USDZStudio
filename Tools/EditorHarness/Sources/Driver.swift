@@ -2,6 +2,8 @@ import Foundation
 import SwiftUI
 import USDCore
 import EditingKit
+import USDBridge
+import MeshKit
 import EditorUI
 
 /// Runs a `Scenario` against the **real** `EditorDocument` and the **real**
@@ -33,13 +35,13 @@ final class Driver {
         log("open \(stageURL.lastPathComponent) → \(snapshot.primCount) prims")
 
         for (index, step) in scenario.steps.enumerated() {
-            try perform(step, index: index + 1)
+            try await perform(step, index: index + 1)
         }
     }
 
     // MARK: Steps
 
-    private func perform(_ step: Scenario.Step, index: Int) throws {
+    private func perform(_ step: Scenario.Step, index: Int) async throws {
         guard let document else {
             throw HarnessError.stepFailed(step: index, verb: step.do, detail: "no open stage")
         }
@@ -98,6 +100,84 @@ final class Driver {
                 log("redo \(label ?? "?")")
             }
 
+        case "mesh.enter":
+            let path: PrimPath
+            if let raw = step.path { path = try primPath(raw, step: index, verb: step.do) }
+            else if let primary = document.selection.primary { path = primary }
+            else { throw HarnessError.stepFailed(step: index, verb: step.do, detail: "no path and no selection") }
+            let availability = document.enterMeshEditMode(at: path)
+            guard availability == .available else {
+                throw HarnessError.stepFailed(
+                    step: index, verb: step.do,
+                    detail: availability.refusalMessage ?? "unavailable")
+            }
+            log("mesh.enter \(path) → \(document.meshEdit?.session.mesh.faceCount ?? 0) faces")
+
+        case "mesh.tool":
+            guard document.meshEdit != nil else {
+                throw HarnessError.stepFailed(step: index, verb: step.do, detail: "not in edit mode")
+            }
+            guard let name = step.name, let tool = MeshTool(rawValue: name) else {
+                throw HarnessError.stepFailed(step: index, verb: step.do, detail: "unknown tool '\(step.name ?? "")'")
+            }
+            document.meshEdit?.tool = tool
+            if let number = step.number {
+                switch tool {
+                case .extrude: document.meshEdit?.extrudeDistance = number
+                case .inset: document.meshEdit?.insetFraction = number
+                case .merge: document.meshEdit?.mergeDistance = number
+                case .delete, .fill: break
+                }
+            }
+            log("mesh.tool \(tool.label)\(step.number.map { " (\($0))" } ?? "")")
+
+        case "mesh.selectFaces":
+            guard document.meshEdit != nil else {
+                throw HarnessError.stepFailed(step: index, verb: step.do, detail: "not in edit mode")
+            }
+            let order = document.meshEdit!.session.mesh.faceOrder
+            let ids = try (step.faces ?? []).map { i -> FaceID in
+                guard order.indices.contains(i) else {
+                    throw HarnessError.stepFailed(step: index, verb: step.do, detail: "face index \(i) out of range")
+                }
+                return order[i]
+            }
+            document.meshEdit?.componentSelection = .faces(Set(ids))
+            log("mesh.selectFaces \(step.faces ?? [])")
+
+        case "mesh.apply":
+            guard document.meshEdit != nil else {
+                throw HarnessError.stepFailed(step: index, verb: step.do, detail: "not in edit mode")
+            }
+            document.applyActiveMeshTool()
+            if let diagnostic = document.meshEdit?.lastDiagnostic {
+                log("mesh.apply → refused: \(diagnostic)")
+            } else {
+                log("mesh.apply → \(document.meshEdit?.session.journal.last ?? "?") (\(document.meshEdit?.session.mesh.faceCount ?? 0) faces)")
+            }
+
+        case "save":
+            guard let raw = step.path else {
+                throw HarnessError.stepFailed(step: index, verb: step.do, detail: "save needs a path")
+            }
+            let target = resolve(raw)
+            let executor = ProcessBridgeExecutor(scriptPath: StageLoader.snapshotScriptPath)
+            try await document.save(to: target, executor: executor)
+            log("save → \(target.lastPathComponent)")
+
+        case "reopen":
+            guard let raw = step.path else {
+                throw HarnessError.stepFailed(step: index, verb: step.do, detail: "reopen needs a path")
+            }
+            let url = resolve(raw)
+            let snapshot = try await StageLoader.load(url)
+            self.document = EditorDocument(snapshot: snapshot, modelURL: url)
+            log("reopen \(url.lastPathComponent) → \(snapshot.primCount) prims")
+
+        case "mesh.exit":
+            document.exitMeshEditMode(commit: step.commit ?? true)
+            log("mesh.exit commit=\(step.commit ?? true) → \(document.undoLabel ?? "no command")")
+
         case "expect":
             try expect(step, index: index, document: document)
 
@@ -134,6 +214,43 @@ final class Driver {
                     detail: "\(input.name) expected \(precise(wanted)), got \(actual.map(precise) ?? "unauthored")")
             }
             log("expect \(input.name) == \(describe(wanted)) ✓")
+            return
+        }
+        if let wanted = step.faceCount {
+            let actual: Int
+            if let session = document.meshEdit?.session {
+                actual = session.mesh.faceCount
+            } else if let primary = document.selection.primary,
+                      case .intArray(let counts)? =
+                        document.snapshot.prim(at: primary)?.attribute(named: "faceVertexCounts")?.value {
+                actual = counts.count
+            } else {
+                throw HarnessError.expectationFailed(step: index, detail: "no mesh to count faces on")
+            }
+            guard actual == wanted else {
+                throw HarnessError.expectationFailed(
+                    step: index, detail: "faceCount expected \(wanted), got \(actual)")
+            }
+            log("expect faceCount == \(wanted) ✓")
+            return
+        }
+        if let wanted = step.activeTool {
+            let actual = document.meshEdit?.tool?.rawValue ?? ""
+            guard actual == wanted else {
+                throw HarnessError.expectationFailed(
+                    step: index, detail: "activeTool expected '\(wanted)', got '\(actual)'")
+            }
+            log("expect activeTool == '\(wanted)' ✓")
+            return
+        }
+        if let wanted = step.meshDiagnostic {
+            let actual = document.meshEdit?.lastDiagnostic ?? ""
+            let ok = wanted.isEmpty ? actual.isEmpty : actual.contains(wanted)
+            guard ok else {
+                throw HarnessError.expectationFailed(
+                    step: index, detail: "meshDiagnostic expected '\(wanted)', got '\(actual)'")
+            }
+            log("expect meshDiagnostic \(wanted.isEmpty ? "none" : "contains '\(wanted)'") ✓")
             return
         }
         if let wanted = step.surfacePath {
@@ -221,10 +338,23 @@ final class Driver {
 
     // MARK: Capture
 
-    /// Renders the real `InspectorView` for the current document state.
+    /// Renders the real `InspectorView` for the current document state — or,
+    /// for `tab: "mesh"`, the mesh edit-mode viewport overlay on a
+    /// viewport-colored backdrop (the RealityKit frame itself has no harness
+    /// surface; the overlay chrome is what's under review).
     private func shot(named name: String, tab: String?, document: EditorDocument) throws -> URL {
-        let resolvedTab = InspectorView.Tab(rawValue: (tab ?? "prim").capitalized) ?? .prim
         let url = outputDirectory.appendingPathComponent("\(name).png")
+        if tab == "mesh" {
+            try Render.png(
+                ZStack {
+                    Color(red: 0.05, green: 0.06, blue: 0.075) // Palette.viewportBackground
+                    MeshEditOverlay(document: document)
+                },
+                size: CGSize(width: 960, height: 560),
+                to: url)
+            return url
+        }
+        let resolvedTab = InspectorView.Tab(rawValue: (tab ?? "prim").capitalized) ?? .prim
         try Render.png(
             InspectorView(document: document, initialTab: resolvedTab),
             size: CGSize(width: 320, height: 720),

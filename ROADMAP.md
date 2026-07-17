@@ -53,7 +53,7 @@ Everything below is scoped to what native Swift + RealityKit + embedded Python/u
 - [ ] Recolor Tier A: solid-color part recolor with live preview, auto material uniquing, GeomSubset-level selection (specs/recoloring.md)
 - [x] Variant set switching (undoable) — `setVariantSelection` mutation + `SetVariantSelectionCommand` (captures prior selection for undo); InMemoryStage applies it, unknown-set throws. Surfaced on `EditorDocument` (`variantSets(at:)` + `setVariantSelection(_:set:to:)`, no-op on unchanged/missing set); inspector Variant Sets picker (per-set `VariantPicker` with a clear-to-None sentinel) drives it undoably
 - [x] Scale/units fixer — `ScaleFixer.command(for:targetMetersPerUnit:)` normalizes metersPerUnit and bakes a compensating `old/target` uniform scale into each root prim, preserving real-world size, as one undoable `CompositeCommand`. Surfaced on `EditorDocument.fixScale(targetMetersPerUnit:)` (no-op when already normalized); inspector Stage tab shows a "Normalize to meters" button next to Meters/unit whenever it isn't 1
-- [ ] Save/Save As (.usdz/.usda/.usdc), flattened export, round-trip diff test in CI
+- [x] Save/Save As (.usdz/.usda/.usdc) — `StageSaver` (usda pure Swift via USDASerializer, usdc/usdz converted by USD core via `stage_save.py`; failed saves never clobber the target), app File menu ⌘S/⌘⇧S, dirty tracking (`hasUnsavedChanges`), harness round-trip scenario `mesh-save-roundtrip.json` (extrude → save usdz → reopen through the bridge → re-edit). Serializer now preserves schema role types (`point3f[]`/`normal3f[]`). Flattened export still open
 - [ ] Crash-safe command journal
 
 **Exit:** real editor. Open → fix scale → swap texture → rename → export, all undoable.
@@ -95,12 +95,12 @@ Everything below is scoped to what native Swift + RealityKit + embedded Python/u
 
 Targeted mesh repair & adjustment — extrude a mounting tab, close a hole, merge vendor-mesh defects — not modeling-from-scratch (see `specs/mesh-editing.md`). Built agent-first: pure-function ops with machine-checkable invariants (Euler characteristic, manifoldness, analytic volume checks, property-based fuzzing), so correctness is provable without eyeballs.
 
-- [ ] MeshKit package: HalfEdgeMesh (CoW value type, stable IDs), USD⇄half-edge lossless IO, invariant suite
-- [ ] DeleteComponents + MergeVertices (pipeline validators)
-- [ ] ExtrudeFaces + InsetFaces + FillHole
-- [ ] Edit mode UI: Tab toggle, vertex/edge/face sub-modes (1/2/3), Metal component overlays, hotkeys (E/I/X/M/F), param HUD
-- [ ] MeshEditCommand: snapshot undo, stage flush on commit, crash journal
-- [ ] Skinned-mesh explicit refusal with diagnostic badge
+- [x] MeshKit package: HalfEdgeMesh (CoW value type, stable IDs), USD⇄half-edge lossless IO, invariant suite (32 tests: Euler/manifold/winding/degenerate/analytic-volume checks + property fuzzing; bridge now emits `point3f[]`/`texCoord2f[]` so opened files carry geometry)
+- [x] DeleteComponents + MergeVertices (pipeline validators)
+- [x] ExtrudeFaces + InsetFaces + FillHole (predicted topology deltas asserted per op)
+- [x] Edit mode UI: Tab toggle, vertex/edge/face sub-modes (1/2/3), viewport tool overlay (EDIT MODE badge + always-visible active-tool indicator + E/I/X/M/F tool strip + param HUD + face-picker + inline refusal diagnostics; harness scenario `mesh-editing.json`), live viewport re-meshing (edit session and committed stage geometry replace the file-loaded model, flat-shaded with amber selection highlight), and click-to-pick faces (pure-math CameraRay/MeshPicker, unit-tested; implemented as a RealityKit overlay entity + ray-cast rather than the spec's dedicated Metal pass — revisit if per-vertex/edge dot-line rendering needs it)
+- [x] MeshEditCommand: snapshot undo, stage flush on commit, crash journal (MeshEditSession op journal)
+- [x] Skinned-mesh explicit refusal with diagnostic badge (MeshEditAvailability; verified through the real bridge)
 - [ ] BevelEdges (single-segment, strict preconditions)
 - [ ] 100%-coverage gate + fuzz corpus + golden meshes in CI
 

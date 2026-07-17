@@ -1,0 +1,30 @@
+#usda 1.0
+(
+    defaultPrim = "Rig"
+    metersPerUnit = 1
+    upAxis = "Y"
+)
+
+def Xform "Rig"
+{
+    # A flat quad panel — the mesh-edit fixture (Phase 6). Real-file shape:
+    # point3f[] points, plus a skinned sibling for the explicit-refusal probe.
+    def Mesh "Panel"
+    {
+        point3f[] points = [(0, 0, 0), (1, 0, 0), (1, 1, 0), (0, 1, 0)]
+        int[] faceVertexCounts = [4]
+        int[] faceVertexIndices = [0, 1, 2, 3]
+    }
+
+    def Mesh "SkinnedPanel"
+    {
+        point3f[] points = [(0, 0, 0), (1, 0, 0), (1, 1, 0), (0, 1, 0)]
+        int[] faceVertexCounts = [4]
+        int[] faceVertexIndices = [0, 1, 2, 3]
+        rel skel:skeleton = </Rig/Skeleton>
+    }
+
+    def Skeleton "Skeleton"
+    {
+    }
+}

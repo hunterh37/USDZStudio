@@ -1,0 +1,21 @@
+#usda 1.0
+(
+    defaultPrim = "Cube"
+    metersPerUnit = 1
+    upAxis = "Y"
+)
+
+# Minimal mesh-editing playground: a single unit cube, nothing else.
+# Outward-wound quads (bottom, top, front, back, right, left).
+def Mesh "Cube"
+{
+    point3f[] points = [(0, 0, 0), (1, 0, 0), (1, 1, 0), (0, 1, 0),
+                        (0, 0, 1), (1, 0, 1), (1, 1, 1), (0, 1, 1)]
+    int[] faceVertexCounts = [4, 4, 4, 4, 4, 4]
+    int[] faceVertexIndices = [0, 3, 2, 1,
+                               4, 5, 6, 7,
+                               0, 1, 5, 4,
+                               2, 3, 7, 6,
+                               1, 2, 6, 5,
+                               3, 0, 4, 7]
+}

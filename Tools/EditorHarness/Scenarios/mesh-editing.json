@@ -1,0 +1,29 @@
+{ "name": "mesh-editing",
+  "open": "Tests/Fixtures/mesh-panel.usda",
+  "steps": [
+    { "do": "select", "path": "/Rig/Panel" },
+    { "do": "expect", "faceCount": 1 },
+
+    { "do": "mesh.enter" },
+    { "do": "shot", "name": "1-edit-mode-no-tool", "tab": "mesh" },
+    { "do": "expect", "activeTool": "" },
+
+    { "do": "mesh.tool", "name": "extrude", "number": 0.5 },
+    { "do": "expect", "activeTool": "extrude" },
+    { "do": "shot", "name": "2-extrude-armed", "tab": "mesh" },
+
+    { "do": "mesh.selectFaces", "faces": [] },
+    { "do": "mesh.apply" },
+    { "do": "expect", "meshDiagnostic": "Selection is empty" },
+    { "do": "shot", "name": "3-refusal-diagnostic", "tab": "mesh" },
+
+    { "do": "mesh.selectFaces", "faces": [0] },
+    { "do": "mesh.apply" },
+    { "do": "expect", "meshDiagnostic": "" },
+    { "do": "expect", "faceCount": 5 },
+
+    { "do": "mesh.exit", "commit": true },
+    { "do": "expect", "faceCount": 5 },
+    { "do": "undo" },
+    { "do": "expect", "faceCount": 1 }
+  ] }

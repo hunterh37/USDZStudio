@@ -34,6 +34,16 @@ struct DicyaninUSDZEditorApp: App {
                     Text(openError ?? "")
                 }
                 .onOpenURL(perform: open)
+                .task {
+                    // Dev convenience: `swift run DicyaninUSDZEditorApp file.usda`
+                    // opens straight into the file.
+                    if document == nil,
+                       let arg = CommandLine.arguments.dropFirst().first(where: {
+                           ["usda", "usdz", "usdc", "usd"].contains(URL(fileURLWithPath: $0).pathExtension)
+                       }) {
+                        open(URL(fileURLWithPath: arg))
+                    }
+                }
                 .onDrop(of: [.fileURL], isTargeted: nil) { providers in
                     _ = providers.first?.loadObject(ofClass: URL.self) { url, _ in
                         if let url { Task { @MainActor in open(url) } }
@@ -45,6 +55,14 @@ struct DicyaninUSDZEditorApp: App {
             CommandGroup(replacing: .newItem) {
                 Button("Open…") { presentOpenPanel() }
                     .keyboardShortcut("o")
+            }
+            CommandGroup(replacing: .saveItem) {
+                Button("Save") { save(to: document?.modelURL) }
+                    .keyboardShortcut("s")
+                    .disabled(document == nil)
+                Button("Save As…") { save(to: nil) }
+                    .keyboardShortcut("s", modifiers: [.command, .shift])
+                    .disabled(document == nil)
             }
             // Drive undo/redo straight through the document's CommandStack. The
             // package's UndoManagerBridge stays available for the eventual
@@ -75,6 +93,31 @@ struct DicyaninUSDZEditorApp: App {
     private func postMenu(_ command: EditorShellView.MenuCommand) {
         NotificationCenter.default.post(
             name: EditorShellView.MenuCommand.notification, object: command.rawValue)
+    }
+
+    /// Save (to the opened file) / Save As (panel when `url` is nil).
+    private func save(to url: URL?) {
+        guard let document else { return }
+        let target: URL
+        if let url {
+            target = url
+        } else {
+            let panel = NSSavePanel()
+            panel.allowedContentTypes = [.init(filenameExtension: "usdz"),
+                                         .init(filenameExtension: "usda"),
+                                         .init(filenameExtension: "usdc")].compactMap { $0 }
+            panel.nameFieldStringValue = document.modelURL?.lastPathComponent ?? "Untitled.usdz"
+            guard panel.runModal() == .OK, let chosen = panel.url else { return }
+            target = chosen
+        }
+        Task { @MainActor in
+            do {
+                let executor = ProcessBridgeExecutor(scriptPath: Self.snapshotScriptPath)
+                try await document.save(to: target, executor: executor)
+            } catch {
+                openError = "Could not save \(target.lastPathComponent):\n\(error)"
+            }
+        }
     }
 
     private func presentOpenPanel() {

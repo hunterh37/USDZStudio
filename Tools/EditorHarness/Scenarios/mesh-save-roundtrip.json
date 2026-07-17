@@ -1,0 +1,27 @@
+{ "name": "mesh-save-roundtrip",
+  "open": "Tests/Fixtures/test-cube.usda",
+  "steps": [
+    { "do": "select", "path": "/Cube" },
+    { "do": "expect", "faceCount": 6 },
+
+    { "do": "mesh.enter" },
+    { "do": "mesh.tool", "name": "extrude", "number": 0.5 },
+    { "do": "mesh.selectFaces", "faces": [1] },
+    { "do": "mesh.apply" },
+    { "do": "mesh.exit", "commit": true },
+    { "do": "expect", "faceCount": 10 },
+
+    { "do": "save", "path": "/tmp/harness-roundtrip.usdz" },
+    { "do": "reopen", "path": "/tmp/harness-roundtrip.usdz" },
+    { "do": "select", "path": "/Cube" },
+    { "do": "expect", "faceCount": 10 },
+
+    { "do": "mesh.enter" },
+    { "do": "expect", "faceCount": 10 },
+    { "do": "mesh.exit", "commit": false },
+
+    { "do": "save", "path": "/tmp/harness-roundtrip.usda" },
+    { "do": "reopen", "path": "/tmp/harness-roundtrip.usda" },
+    { "do": "select", "path": "/Cube" },
+    { "do": "expect", "faceCount": 10 }
+  ] }
