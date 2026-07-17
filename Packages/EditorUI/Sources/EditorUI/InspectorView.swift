@@ -41,6 +41,7 @@ public struct InspectorView: View {
 
     public var body: some View {
         VStack(alignment: .leading, spacing: 0) {
+            PanelHeader("Inspector", systemImage: "slider.horizontal.3")
             Picker("", selection: $tab) {
                 ForEach(Tab.allCases) { Text($0.rawValue).tag($0) }
             }

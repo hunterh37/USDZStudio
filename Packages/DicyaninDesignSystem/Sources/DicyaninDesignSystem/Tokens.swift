@@ -66,18 +66,47 @@ public struct ColorToken: Hashable, Sendable {
     }
 }
 
-/// The neutral dark-theme palette (specs/design-system.md — enterprise-restrained,
-/// no gradients-for-decoration). Light theme lands in Phase 5.
+/// The blue-graphite dark-theme palette (specs/design-system.md —
+/// enterprise-restrained, no gradients-for-decoration). Every neutral carries a
+/// cool ~220° cast so chrome reads as one material. Light theme lands in Phase 5.
 public enum Palette {
-    public static let windowBackground = ColorToken(hex: "#1E1F22")!
-    public static let panelBackground = ColorToken(hex: "#26272B")!
-    public static let panelBorder = ColorToken(hex: "#3A3B40")!
-    public static let textPrimary = ColorToken(hex: "#E8E8EA")!
-    public static let textSecondary = ColorToken(hex: "#9A9BA1")!
-    public static let accent = ColorToken(hex: "#4C8DFF")!
-    public static let warning = ColorToken(hex: "#E5A50A")!
-    public static let error = ColorToken(hex: "#E0453A")!
-    public static let viewportBackground = ColorToken(hex: "#141519")!
+    // Surfaces, darkest → lightest.
+    public static let viewportBackground = ColorToken(hex: "#0D0F13")!
+    public static let windowBackground = ColorToken(hex: "#14161C")!
+    public static let panelBackground = ColorToken(hex: "#1A1D24")!
+    /// Toolbars, cards, and other raised chrome sit one step above panels.
+    public static let surfaceElevated = ColorToken(hex: "#20242D")!
+    /// Text fields, wells, and code areas sit one step below panels.
+    public static let surfaceSunken = ColorToken(hex: "#111318")!
+    /// Pointer-hover wash for rows and buttons.
+    public static let surfaceHover = ColorToken(hex: "#262B35")!
+
+    // Lines.
+    public static let panelBorder = ColorToken(hex: "#2B303B")!
+    /// Subtler inner hairline for nested cards and section rules.
+    public static let borderSubtle = ColorToken(hex: "#222630")!
+
+    // Text.
+    public static let textPrimary = ColorToken(hex: "#E7EAF0")!
+    public static let textSecondary = ColorToken(hex: "#8C94A6")!
+    /// Placeholder / disabled text.
+    public static let textTertiary = ColorToken(hex: "#5B6373")!
+
+    // Semantics.
+    public static let accent = ColorToken(hex: "#5B9DFF")!
+    public static let success = ColorToken(hex: "#3ECF8E")!
+    public static let warning = ColorToken(hex: "#E8B341")!
+    public static let error = ColorToken(hex: "#F0564A")!
+}
+
+/// Corner-radius tokens so components round consistently.
+public enum Radius {
+    /// Chips, badges, small controls.
+    public static let sm: Double = 4
+    /// Buttons, rows, fields.
+    public static let md: Double = 6
+    /// Cards and panels.
+    public static let lg: Double = 10
 }
 
 /// Typography scale (SF Pro via system fonts; sizes only — pure and testable).

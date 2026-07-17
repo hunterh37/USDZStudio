@@ -26,7 +26,6 @@ struct ValidationDrawer: View {
     var body: some View {
         VStack(spacing: 0) {
             header
-            Divider().overlay(Palette.panelBorder.color)
             content
         }
         .background(Palette.panelBackground.color)
@@ -35,32 +34,28 @@ struct ValidationDrawer: View {
     }
 
     private var header: some View {
-        HStack(spacing: Spacing.sm) {
-            Text("Validation")
-                .font(.system(size: TypeScale.heading, weight: .semibold))
-                .foregroundStyle(Palette.textPrimary.color)
-            if let report {
-                summaryChip(count: report.errorCount, label: "errors", color: Palette.error)
-                summaryChip(count: report.warningCount, label: "warnings", color: Palette.warning)
-                summaryChip(count: report.infoCount, label: "info", color: Palette.textSecondary)
-                if report.isCompliant {
-                    Label("AR-ready", systemImage: "checkmark.seal.fill")
-                        .font(.system(size: TypeScale.body, weight: .medium))
-                        .foregroundStyle(Palette.accent.color)
+        PanelHeader("Validation", systemImage: "checkmark.shield") {
+            HStack(spacing: Spacing.xs) {
+                if let report {
+                    summaryChip(count: report.errorCount, label: "errors", color: Palette.error)
+                    summaryChip(count: report.warningCount, label: "warnings", color: Palette.warning)
+                    summaryChip(count: report.infoCount, label: "info", color: Palette.textSecondary)
+                    if report.isCompliant {
+                        Label("AR-ready", systemImage: "checkmark.seal.fill")
+                            .font(.system(size: TypeScale.caption, weight: .semibold))
+                            .foregroundStyle(Palette.success.color)
+                    }
                 }
+                Button(action: revalidate) { Image(systemName: "arrow.clockwise") }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(Palette.textSecondary.color)
+                    .help("Re-run validation")
+                Button(action: onClose) { Image(systemName: "xmark") }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(Palette.textSecondary.color)
+                    .help("Close drawer")
             }
-            Spacer()
-            Button(action: revalidate) { Image(systemName: "arrow.clockwise") }
-                .buttonStyle(.plain)
-                .foregroundStyle(Palette.textSecondary.color)
-                .help("Re-run validation")
-            Button(action: onClose) { Image(systemName: "xmark") }
-                .buttonStyle(.plain)
-                .foregroundStyle(Palette.textSecondary.color)
-                .help("Close drawer")
         }
-        .padding(.horizontal, Spacing.sm)
-        .padding(.vertical, Spacing.xs)
     }
 
     @ViewBuilder
@@ -121,8 +116,10 @@ struct ValidationDrawer: View {
             .font(.system(size: TypeScale.caption, weight: .semibold))
             .padding(.horizontal, Spacing.xs)
             .padding(.vertical, 2)
-            .background(RoundedRectangle(cornerRadius: 4).fill(color.color.opacity(count > 0 ? 0.22 : 0.08)))
-            .foregroundStyle(count > 0 ? color.color : Palette.textSecondary.color)
+            .background(Capsule().fill(color.color.opacity(count > 0 ? 0.16 : 0.06)))
+            .overlay(Capsule().strokeBorder(
+                color.color.opacity(count > 0 ? 0.4 : 0.12), lineWidth: 1))
+            .foregroundStyle(count > 0 ? color.color : Palette.textTertiary.color)
     }
 
     private func centered(_ text: String) -> some View {

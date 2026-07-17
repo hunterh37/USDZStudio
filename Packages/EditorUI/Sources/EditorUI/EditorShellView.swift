@@ -92,11 +92,11 @@ public struct EditorShellView: View {
     // MARK: Action bar
 
     private var actionBar: some View {
-        HStack(spacing: Spacing.sm) {
+        HStack(spacing: Spacing.xs) {
             actionButton("Convert", systemImage: "arrow.triangle.2.circlepath") { activeSheet = .convert }
             actionButton("Batch", systemImage: "square.stack.3d.up") { activeSheet = .batch }
             actionButton("Scripts", systemImage: "curlybraces") { activeSheet = .scripts }
-            Divider().frame(height: 16).overlay(Palette.panelBorder.color)
+            Divider().frame(height: 16).overlay(Palette.borderSubtle.color)
             actionButton(showValidation ? "Hide Issues" : "Validate",
                          systemImage: "checkmark.shield",
                          isActive: showValidation) {
@@ -104,14 +104,12 @@ public struct EditorShellView: View {
             }
             Spacer()
             if let stage {
-                Text("\(stage.primCount) prims")
-                    .font(.system(size: TypeScale.caption, design: .monospaced))
-                    .foregroundStyle(Palette.textSecondary.color)
+                StatusPill(text: "\(stage.primCount) prims", tint: Palette.success)
             }
         }
         .padding(.horizontal, Spacing.sm)
         .padding(.vertical, Spacing.xs)
-        .background(Palette.panelBackground.color)
+        .background(Palette.surfaceElevated.color)
     }
 
     private func actionButton(_ title: String, systemImage: String,
@@ -119,14 +117,8 @@ public struct EditorShellView: View {
                               action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Label(title, systemImage: systemImage)
-                .font(.system(size: TypeScale.body, weight: .medium))
-                .padding(.horizontal, Spacing.xs)
-                .padding(.vertical, Spacing.xxs)
-                .background(RoundedRectangle(cornerRadius: 5)
-                    .fill(isActive ? Palette.accent.color.opacity(0.25) : .clear))
-                .foregroundStyle(isActive ? Palette.accent.color : Palette.textPrimary.color)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(ToolbarButtonStyle(isActive: isActive))
         // Conversion/batch/scripts work without an open stage; validation needs one.
         .disabled(stage == nil && title.hasPrefix("Validate"))
     }
@@ -152,14 +144,15 @@ public struct EditorShellView: View {
     // MARK: Outliner
 
     private var outliner: some View {
-        VStack(alignment: .leading, spacing: Spacing.xs) {
-            TextField("Filter", text: $searchText)
-                .textFieldStyle(.roundedBorder)
+        VStack(alignment: .leading, spacing: 0) {
+            PanelHeader("Outliner", systemImage: "list.bullet.indent")
+            FilterField(placeholder: "Filter prims", text: $searchText)
                 .padding(Spacing.xs)
             List(filteredRows) { row in
                 outlinerRow(row)
             }
             .listStyle(.sidebar)
+            .scrollContentBackground(.hidden)
         }
         .background(Palette.panelBackground.color)
         // Dropping onto empty outliner space reparents to the stage root.
@@ -218,8 +211,13 @@ public struct EditorShellView: View {
         .padding(.vertical, Spacing.xxs)
         .padding(.horizontal, Spacing.xs)
         .background(
-            RoundedRectangle(cornerRadius: 5)
+            RoundedRectangle(cornerRadius: Radius.md)
                 .fill(rowBackground(row, isSelected: isSelected))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: Radius.md)
+                .strokeBorder(isSelected ? Palette.accent.color.opacity(0.35) : .clear,
+                              lineWidth: 1)
         )
         .contentShape(Rectangle())
         .onTapGesture {
@@ -238,8 +236,8 @@ public struct EditorShellView: View {
 
     /// Selection tint, or a stronger accent while a valid drag hovers the row.
     private func rowBackground(_ row: OutlinerModel.Row, isSelected: Bool) -> Color {
-        if dropTarget == row.path { return Palette.accent.color.opacity(0.4) }
-        return isSelected ? Palette.accent.color.opacity(0.25) : .clear
+        if dropTarget == row.path { return Palette.accent.color.opacity(0.35) }
+        return isSelected ? Palette.accent.color.opacity(0.16) : .clear
     }
 
     // MARK: Outliner context menu
@@ -331,9 +329,17 @@ public struct EditorShellView: View {
         } else {
             ZStack {
                 Palette.viewportBackground.color
-                Text("Open a USDZ to begin")
-                    .font(.system(size: TypeScale.title))
-                    .foregroundStyle(Palette.textSecondary.color)
+                VStack(spacing: Spacing.sm) {
+                    Image(systemName: "cube.transparent")
+                        .font(.system(size: 40, weight: .light))
+                        .foregroundStyle(Palette.textTertiary.color)
+                    Text("Open a USDZ to begin")
+                        .font(.system(size: TypeScale.title, weight: .medium))
+                        .foregroundStyle(Palette.textSecondary.color)
+                    Text("File → Open, or drop a file on the window")
+                        .font(.system(size: TypeScale.body))
+                        .foregroundStyle(Palette.textTertiary.color)
+                }
             }
         }
     }
