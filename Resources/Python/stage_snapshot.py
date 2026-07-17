@@ -36,6 +36,15 @@ def attribute_payload(attr):
         elif type_name == "matrix4d":
             out.update(type="matrix4d",
                        doubles=[float(c) for row in value for c in row])
+        elif type_name in ("point3f[]", "normal3f[]", "vector3f[]", "float3[]",
+                           "double3[]", "color3f[]"):
+            # Flattened xyz triples — mesh points/normals (Phase 6 mesh editing
+            # reads these; without them no opened file could enter edit mode).
+            out.update(type="float3[]",
+                       doubles=[float(c) for v in value for c in v])
+        elif type_name in ("texCoord2f[]", "float2[]", "double2[]"):
+            out.update(type="double[]",
+                       doubles=[float(c) for v in value for c in v])
         elif type_name in ("int[]", "uint[]"):
             out.update(type="int[]", ints=[int(v) for v in value])
         elif type_name in ("float[]", "double[]"):

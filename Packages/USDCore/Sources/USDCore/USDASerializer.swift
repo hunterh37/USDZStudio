@@ -149,7 +149,15 @@ public enum USDASerializer {
             }
         case .stringArray: return "string[]"
         case .tokenArray: return "token[]"
-        case .float3Array(let v): return v.count % 3 == 0 ? "float3[]" : nil
+        case .float3Array(let v):
+            guard v.count % 3 == 0 else { return nil }
+            // Schema-typed geometry attributes must keep their declared role
+            // types, or reopening tools won't treat them as geometry.
+            switch name {
+            case "points": return "point3f[]"
+            case "normals": return "normal3f[]"
+            default: return "float3[]"
+            }
         case .quatfArray(let v): return v.count % 4 == 0 ? "quatf[]" : nil
         case .matrix4dArray(let v): return !v.isEmpty && v.count % 16 == 0 ? "matrix4d[]" : nil
         case .unsupported: return nil

@@ -74,6 +74,11 @@ public struct ProcessBridgeExecutor: BridgeExecutor {
         }
     }
 
+    /// Shared process plumbing for every bridge script (snapshot, save, …).
+    func runProcess(arguments: [String]) async throws -> Data {
+        try await run(arguments: arguments)
+    }
+
     private func run(arguments: [String]) async throws -> Data {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: pythonPath)

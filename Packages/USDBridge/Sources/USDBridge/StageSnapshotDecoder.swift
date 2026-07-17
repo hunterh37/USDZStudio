@@ -154,6 +154,9 @@ public enum StageSnapshotDecoder {
         case "matrix4d":
             guard let v = dto.doubles, v.count == 16 else { throw missingValue(dto) }
             value = .matrix4(v)
+        case "float3[]":
+            guard let v = dto.doubles, v.count % 3 == 0 else { throw missingValue(dto) }
+            value = .float3Array(v)
         case "int[]":
             guard let v = dto.ints else { throw missingValue(dto) }
             value = .intArray(v)
