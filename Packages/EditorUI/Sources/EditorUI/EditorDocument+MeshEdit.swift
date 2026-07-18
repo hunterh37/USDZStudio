@@ -182,13 +182,37 @@ extension EditorDocument {
         if run(command) != nil { lastMeshEditPath = command.path }
     }
 
-    /// Tab behavior: toggle against the current selection.
+    /// Tab behavior: toggle against the current selection. When the selected
+    /// prim isn't itself a Mesh (the common case for imported USDZ, where the
+    /// user selects the model root and the Mesh sits under Xform scopes),
+    /// descend to the first editable Mesh in its subtree. Refusals surface in
+    /// `meshEditRefusal` — never a silent no-op.
     public func toggleMeshEditMode() {
+        meshEditRefusal = nil
         if meshEdit != nil {
             exitMeshEditMode()
-        } else if let path = selection.paths.first {
-            enterMeshEditMode(at: path)
+            return
         }
+        guard let path = selection.paths.first else {
+            meshEditRefusal = "Nothing selected — select a prim, then press ⇥."
+            return
+        }
+        let target = editableMeshDescendant(from: path) ?? path
+        let availability = enterMeshEditMode(at: target)
+        if availability != .available {
+            meshEditRefusal = availability.refusalMessage
+        }
+    }
+
+    /// First prim at-or-below `path` (depth-first, authored order) on which
+    /// edit mode can start; `nil` when the subtree has none.
+    func editableMeshDescendant(from path: PrimPath) -> PrimPath? {
+        guard let prim = snapshot.prim(at: path) else { return nil }
+        if meshEditAvailability(at: prim.path) == .available { return prim.path }
+        for child in prim.children {
+            if let found = editableMeshDescendant(from: child.path) { return found }
+        }
+        return nil
     }
 
     // MARK: Tool application

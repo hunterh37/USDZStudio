@@ -3,9 +3,10 @@ import USDCore
 import EditingKit
 import DicyaninDesignSystem
 
-/// The inspector. Read-only surfacing landed in Phase 1; Phase 3 makes every
-/// tab *editable*, routing each change through the document's `CommandStack` so
-/// edits are undoable. The Material tab's controls live in `MaterialEditor`.
+/// The inspector, in the Blender-4.x Properties-editor idiom: a vertical icon
+/// tab rail down the left edge, flat collapsible sections, and scrub-draggable
+/// value fields (`ScrubField`). Every edit still routes through the document's
+/// `CommandStack` so it stays undoable.
 ///
 /// Public so the offscreen harness (`Tools/EditorHarness`) can render a single
 /// panel state without standing up the whole shell — the panel-snapshot layer in
@@ -20,6 +21,15 @@ public struct InspectorView: View {
         case material = "Material"
         case stage = "Stage"
         public var id: String { rawValue }
+
+        var icon: String {
+            switch self {
+            case .prim: return "cube"
+            case .transform: return "move.3d"
+            case .material: return "paintpalette"
+            case .stage: return "square.stack.3d.up"
+            }
+        }
     }
 
     @State private var tab: Tab
@@ -41,30 +51,72 @@ public struct InspectorView: View {
 
     public var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            PanelHeader("Inspector", systemImage: "slider.horizontal.3")
-            Picker("", selection: $tab) {
-                ForEach(Tab.allCases) { Text($0.rawValue).tag($0) }
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .padding(Spacing.xs)
-
-            Divider().overlay(Palette.panelBorder.color)
-
-            ScrollView {
-                VStack(alignment: .leading, spacing: Spacing.lg) {
-                    switch tab {
-                    case .prim: primTab
-                    case .transform: transformTab
-                    case .material: materialTab
-                    case .stage: stageTab
-                    }
+            PanelHeader("Inspector", systemImage: "slider.horizontal.3") {
+                if let prim {
+                    StatusPill(text: prim.name)
                 }
-                .padding(Spacing.md)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            HStack(spacing: 0) {
+                tabRail
+                Rectangle().fill(Palette.panelBorder.color).frame(width: 1)
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 0) {
+                        switch tab {
+                        case .prim: primTab
+                        case .transform: transformTab
+                        case .material: materialTab
+                        case .stage: stageTab
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
             }
         }
         .background(Palette.panelBackground.color)
+    }
+
+    // MARK: Tab rail
+
+    /// Blender's vertical properties-tab strip: icon buttons on a sunken rail,
+    /// the active tab filled with the accent wash.
+    private var tabRail: some View {
+        VStack(spacing: Spacing.xxs) {
+            ForEach(Tab.allCases) { t in
+                TabRailButton(tab: t, isActive: t == tab) { tab = t }
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.vertical, Spacing.xs)
+        .padding(.horizontal, Spacing.xxs)
+        .frame(width: 36)
+        .background(Palette.surfaceSunken.color)
+    }
+
+    private struct TabRailButton: View {
+        let tab: Tab
+        let isActive: Bool
+        let action: () -> Void
+        @State private var hovering = false
+
+        var body: some View {
+            Button(action: action) {
+                Image(systemName: tab.icon)
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(isActive
+                        ? Palette.accent.color
+                        : (hovering ? Palette.textPrimary : Palette.textSecondary).color)
+                    .frame(width: 28, height: 26)
+                    .background(RoundedRectangle(cornerRadius: Radius.md)
+                        .fill(isActive
+                            ? Palette.accent.color.opacity(0.18)
+                            : (hovering ? Palette.surfaceHover.color : .clear)))
+                    .contentShape(RoundedRectangle(cornerRadius: Radius.md))
+            }
+            .buttonStyle(.plain)
+            .onHover { hovering = $0 }
+            .help(tab.rawValue)
+            .accessibilityIdentifier("inspector.tab.\(tab.rawValue)")
+        }
     }
 
     // MARK: Prim
@@ -72,37 +124,35 @@ public struct InspectorView: View {
     @ViewBuilder
     private var primTab: some View {
         if let document, let prim {
-            PanelSection(title: "Prim") {
-                VStack(alignment: .leading, spacing: Spacing.xs) {
-                    LabeledField(label: "Name") {
-                        NameField(name: prim.name) { document.rename(prim.path, to: $0) }
-                    }
-                    FieldRow(label: "Path", value: prim.path.description)
-                    FieldRow(label: "Type", value: prim.typeName.isEmpty ? "(typeless)" : prim.typeName)
-                    LabeledField(label: "Active") {
-                        Toggle("", isOn: Binding(
-                            get: { prim.isActive },
-                            set: { document.setActive(prim.path, $0) }))
-                            .labelsHidden()
-                            .toggleStyle(.switch)
-                            .controlSize(.mini)
-                    }
-                    LabeledField(label: "Visibility") {
-                        Picker("", selection: Binding(
-                            get: { prim.visibility },
-                            set: { document.setVisibility(prim.path, $0) })) {
-                            ForEach([Visibility.inherited, .invisible], id: \.self) {
-                                Text($0.rawValue).tag($0)
-                            }
-                        }
-                        .labelsHidden()
-                        .frame(maxWidth: 140)
-                    }
-                    FieldRow(label: "Children", value: String(prim.children.count))
+            InspectorSection(title: "Prim",
+                             subtitle: prim.typeName.isEmpty ? "(typeless)" : prim.typeName) {
+                LabeledField(label: "Name") {
+                    NameField(name: prim.name) { document.rename(prim.path, to: $0) }
                 }
+                FieldRow(label: "Path", value: prim.path.description)
+                LabeledField(label: "Active") {
+                    Toggle("", isOn: Binding(
+                        get: { prim.isActive },
+                        set: { document.setActive(prim.path, $0) }))
+                        .labelsHidden()
+                        .toggleStyle(.switch)
+                        .controlSize(.mini)
+                }
+                LabeledField(label: "Visibility") {
+                    Picker("", selection: Binding(
+                        get: { prim.visibility },
+                        set: { document.setVisibility(prim.path, $0) })) {
+                        ForEach([Visibility.inherited, .invisible], id: \.self) {
+                            Text($0.rawValue).tag($0)
+                        }
+                    }
+                    .labelsHidden()
+                    .frame(maxWidth: 140)
+                }
+                FieldRow(label: "Children", value: String(prim.children.count))
             }
             if !prim.metadata.isEmpty {
-                PanelSection(title: "Metadata") {
+                InspectorSection(title: "Metadata") {
                     ForEach(prim.metadata.sorted(by: { $0.key < $1.key }), id: \.key) { k, v in
                         FieldRow(label: k, value: v)
                     }
@@ -110,7 +160,7 @@ public struct InspectorView: View {
             }
             attributesSection(prim.attributes)
             if !prim.relationships.isEmpty {
-                PanelSection(title: "Relationships") {
+                InspectorSection(title: "Relationships") {
                     ForEach(prim.relationships, id: \.name) { rel in
                         FieldRow(label: rel.name,
                                  value: rel.targets.map(\.description).joined(separator: ", "))
@@ -118,14 +168,12 @@ public struct InspectorView: View {
                 }
             }
             if !prim.variantSets.isEmpty {
-                PanelSection(title: "Variant Sets") {
-                    VStack(alignment: .leading, spacing: Spacing.xs) {
-                        ForEach(prim.variantSets, id: \.name) { vs in
-                            LabeledField(label: vs.name) {
-                                VariantPicker(variantSet: vs) { newSelection in
-                                    document.setVariantSelection(
-                                        prim.path, set: vs.name, to: newSelection)
-                                }
+                InspectorSection(title: "Variant Sets") {
+                    ForEach(prim.variantSets, id: \.name) { vs in
+                        LabeledField(label: vs.name) {
+                            VariantPicker(variantSet: vs) { newSelection in
+                                document.setVariantSelection(
+                                    prim.path, set: vs.name, to: newSelection)
                             }
                         }
                     }
@@ -139,26 +187,24 @@ public struct InspectorView: View {
     @ViewBuilder
     private func attributesSection(_ attributes: [Attribute]) -> some View {
         if !attributes.isEmpty {
-            PanelSection(title: "Attributes (\(attributes.count))") {
-                VStack(alignment: .leading, spacing: Spacing.xs) {
-                    ForEach(attributes.sorted(by: { $0.name < $1.name }), id: \.name) { attr in
-                        VStack(alignment: .leading, spacing: 1) {
-                            HStack(spacing: Spacing.xs) {
-                                Text(attr.name)
-                                    .font(.system(size: TypeScale.body, weight: .medium))
-                                    .foregroundStyle(Palette.textPrimary.color)
-                                Text(attr.value.typeLabel)
-                                    .font(.system(size: TypeScale.caption, design: .monospaced))
-                                    .foregroundStyle(Palette.textSecondary.color)
-                                if attr.isUniform { badge("uniform") }
-                                if attr.isAnimated { badge("anim") }
-                            }
-                            Text(ValueFormatter.string(attr.value))
-                                .font(.system(size: TypeScale.inspectorField, design: .monospaced))
+            InspectorSection(title: "Attributes", subtitle: String(attributes.count)) {
+                ForEach(attributes.sorted(by: { $0.name < $1.name }), id: \.name) { attr in
+                    VStack(alignment: .leading, spacing: 1) {
+                        HStack(spacing: Spacing.xs) {
+                            Text(attr.name)
+                                .font(.system(size: TypeScale.body, weight: .medium))
+                                .foregroundStyle(Palette.textPrimary.color)
+                            Text(attr.value.typeLabel)
+                                .font(.system(size: TypeScale.caption, design: .monospaced))
                                 .foregroundStyle(Palette.textSecondary.color)
-                                .textSelection(.enabled)
-                                .lineLimit(2)
+                            if attr.isUniform { badge("uniform") }
+                            if attr.isAnimated { badge("anim") }
                         }
+                        Text(ValueFormatter.string(attr.value))
+                            .font(.system(size: TypeScale.inspectorField, design: .monospaced))
+                            .foregroundStyle(Palette.textSecondary.color)
+                            .textSelection(.enabled)
+                            .lineLimit(2)
                     }
                 }
             }
@@ -199,57 +245,54 @@ public struct InspectorView: View {
     private var stageTab: some View {
         if let document, let stage {
             let m = stage.metadata
-            PanelSection(title: "Stage") {
-                VStack(alignment: .leading, spacing: Spacing.xs) {
-                    FieldRow(label: "Source", value: stage.sourceURL?.lastPathComponent ?? "—")
-                    LabeledField(label: "Up axis") {
-                        Picker("", selection: Binding(
-                            get: { m.upAxis },
-                            set: { new in
-                                var copy = m; copy.upAxis = new
-                                document.setStageMetadata(copy)
-                            })) {
-                            ForEach([UpAxis.y, UpAxis.z], id: \.self) { Text($0.rawValue).tag($0) }
-                        }
-                        .labelsHidden()
-                        .frame(maxWidth: 100)
-                    }
-                    LabeledField(label: "Meters/unit") {
-                        DoubleField(value: m.metersPerUnit) { new in
-                            var copy = m; copy.metersPerUnit = new
+            InspectorSection(title: "Stage") {
+                FieldRow(label: "Source", value: stage.sourceURL?.lastPathComponent ?? "—")
+                LabeledField(label: "Up axis") {
+                    Picker("", selection: Binding(
+                        get: { m.upAxis },
+                        set: { new in
+                            var copy = m; copy.upAxis = new
                             document.setStageMetadata(copy)
-                        }
+                        })) {
+                        ForEach([UpAxis.y, UpAxis.z], id: \.self) { Text($0.rawValue).tag($0) }
                     }
-                    if m.metersPerUnit != 1.0 {
-                        LabeledField(label: "") {
-                            Button("Normalize to meters") { document.fixScale() }
-                                .buttonStyle(.link)
-                                .font(.system(size: TypeScale.body))
-                                .help("Set meters/unit to 1 and bake a compensating "
-                                      + "scale into each root prim, preserving real-world size.")
-                        }
-                    }
-                    LabeledField(label: "Default prim") {
-                        NameField(name: m.defaultPrim ?? "", allowEmpty: true) { new in
-                            var copy = m
-                            copy.defaultPrim = new.isEmpty ? nil : new
-                            document.setStageMetadata(copy)
-                        }
-                    }
-                    FieldRow(label: "Prims", value: String(stage.primCount))
+                    .labelsHidden()
+                    .frame(maxWidth: 100)
                 }
+                LabeledField(label: "Meters/unit") {
+                    ScrubField(value: m.metersPerUnit, step: 0.01) { new in
+                        var copy = m; copy.metersPerUnit = new
+                        document.setStageMetadata(copy)
+                    }
+                    .frame(maxWidth: 120)
+                }
+                if m.metersPerUnit != 1.0 {
+                    LabeledField(label: "") {
+                        Button("Normalize to meters") { document.fixScale() }
+                            .buttonStyle(.link)
+                            .font(.system(size: TypeScale.body))
+                            .help("Set meters/unit to 1 and bake a compensating "
+                                  + "scale into each root prim, preserving real-world size.")
+                    }
+                }
+                LabeledField(label: "Default prim") {
+                    NameField(name: m.defaultPrim ?? "", allowEmpty: true) { new in
+                        var copy = m
+                        copy.defaultPrim = new.isEmpty ? nil : new
+                        document.setStageMetadata(copy)
+                    }
+                }
+                FieldRow(label: "Prims", value: String(stage.primCount))
             }
             if m.isAnimated {
-                PanelSection(title: "Animation") {
-                    VStack(alignment: .leading, spacing: Spacing.xxs) {
-                        FieldRow(label: "Start", value: m.startTimeCode.map { String(format: "%g", $0) } ?? "—")
-                        FieldRow(label: "End", value: m.endTimeCode.map { String(format: "%g", $0) } ?? "—")
-                        FieldRow(label: "FPS", value: m.timeCodesPerSecond.map { String(format: "%g", $0) } ?? "—")
-                    }
+                InspectorSection(title: "Animation") {
+                    FieldRow(label: "Start", value: m.startTimeCode.map { String(format: "%g", $0) } ?? "—")
+                    FieldRow(label: "End", value: m.endTimeCode.map { String(format: "%g", $0) } ?? "—")
+                    FieldRow(label: "FPS", value: m.timeCodesPerSecond.map { String(format: "%g", $0) } ?? "—")
                 }
             }
             if !m.customLayerData.isEmpty {
-                PanelSection(title: "Custom Layer Data") {
+                InspectorSection(title: "Custom Layer Data") {
                     ForEach(m.customLayerData.sorted(by: { $0.key < $1.key }), id: \.key) { k, v in
                         FieldRow(label: k, value: v)
                     }
@@ -268,6 +311,7 @@ public struct InspectorView: View {
         Text(text)
             .font(.system(size: TypeScale.body))
             .foregroundStyle(Palette.textSecondary.color)
+            .padding(Spacing.md)
             .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
@@ -311,8 +355,7 @@ private struct NameField: View {
 
     var body: some View {
         TextField("", text: $text)
-            .textFieldStyle(.roundedBorder)
-            .font(.system(size: TypeScale.inspectorField, design: .monospaced))
+            .sunkenField()
             .frame(maxWidth: 160)
             .focused($focused)
             .onSubmit(commitIfChanged)
@@ -325,43 +368,6 @@ private struct NameField: View {
         if trimmed.isEmpty && !allowEmpty { text = name; return }
         if trimmed != name { commit(trimmed) }
     }
-}
-
-/// A numeric text field committing a Double on submit/blur; reverts on garbage.
-// (internal: shared with MaterialEditor.swift)
-struct DoubleField: View {
-    let value: Double
-    let commit: (Double) -> Void
-
-    @State private var text: String
-    @FocusState private var focused: Bool
-
-    init(value: Double, commit: @escaping (Double) -> Void) {
-        self.value = value
-        self.commit = commit
-        _text = State(initialValue: Self.format(value))
-    }
-
-    var body: some View {
-        TextField("", text: $text)
-            .textFieldStyle(.roundedBorder)
-            .font(.system(size: TypeScale.inspectorField, design: .monospaced))
-            .frame(maxWidth: 90)
-            .multilineTextAlignment(.trailing)
-            .focused($focused)
-            .onSubmit(commitIfChanged)
-            .onChange(of: focused) { _, isFocused in if !isFocused { commitIfChanged() } }
-            .onChange(of: value) { _, new in text = Self.format(new) }
-    }
-
-    private func commitIfChanged() {
-        guard let parsed = Double(text.trimmingCharacters(in: .whitespaces)) else {
-            text = Self.format(value); return
-        }
-        if parsed != value { commit(parsed) }
-    }
-
-    static func format(_ v: Double) -> String { String(format: "%g", v) }
 }
 
 /// A picker over a variant set's authored variants, committing the active
@@ -385,27 +391,27 @@ private struct VariantPicker: View {
     }
 }
 
-/// Editable T/R/S for a prim, committed as one undoable `SetTransformCommand`
-/// per field edit. Seeded from the prim's current transform; `.id(path)` in the
-/// parent re-seeds it when the selection changes.
+/// Editable T/R/S for a prim in the Blender N-panel idiom — Location / Rotation /
+/// Scale sections, each a vertical stack of axis-tinted scrub fields. Every edit
+/// commits as one undoable `SetTransformCommand`. Seeded from the prim's current
+/// transform; `.id(path)` in the parent re-seeds it when the selection changes.
 private struct TransformEditor: View {
     let document: EditorDocument
     let path: PrimPath
 
-    private let axes = ["X", "Y", "Z"]
-
     var body: some View {
         let trs = document.transform(at: path)
-        VStack(alignment: .leading, spacing: Spacing.lg) {
-            vectorSection("Translate", values: trs.translation) { axis, v in
+        VStack(alignment: .leading, spacing: 0) {
+            vectorSection("Location", values: trs.translation, step: 0.01) { axis, v in
                 var next = trs; next.translation[axis] = v
                 document.setTransform(path, to: next, verb: "Move")
             }
-            vectorSection("Rotate (°)", values: trs.rotationEulerDegrees) { axis, v in
+            vectorSection("Rotation", values: trs.rotationEulerDegrees,
+                          step: 1, suffix: "°") { axis, v in
                 var next = trs; next.rotationEulerDegrees[axis] = v
                 document.setTransform(path, to: next, verb: "Rotate")
             }
-            vectorSection("Scale", values: trs.scale) { axis, v in
+            vectorSection("Scale", values: trs.scale, step: 0.01) { axis, v in
                 var next = trs; next.scale[axis] = v
                 document.setTransform(path, to: next, verb: "Scale")
             }
@@ -414,21 +420,20 @@ private struct TransformEditor: View {
             }
             .buttonStyle(.link)
             .font(.system(size: TypeScale.body))
+            .padding(Spacing.sm)
         }
     }
 
-    private func vectorSection(_ title: String, values: [Double],
+    private func vectorSection(_ title: String, values: [Double], step: Double,
+                               suffix: String = "",
                                set: @escaping (Int, Double) -> Void) -> some View {
-        PanelSection(title: title) {
-            HStack(spacing: Spacing.xs) {
-                ForEach(axes.indices, id: \.self) { axis in
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text(axes[axis])
-                            .font(.system(size: TypeScale.caption, weight: .semibold))
-                            .foregroundStyle(Palette.textSecondary.color)
-                        DoubleField(value: values[axis]) { set(axis, $0) }
-                    }
-                }
+        InspectorSection(title: title) {
+            ForEach(0..<3, id: \.self) { axis in
+                ScrubField(value: values[axis],
+                           label: axisLabels[axis],
+                           labelTint: axisTint(axis),
+                           step: step,
+                           suffix: suffix) { set(axis, $0) }
             }
         }
     }

@@ -94,6 +94,11 @@ public enum Palette {
 
     // Semantics.
     public static let accent = ColorToken(hex: "#5B9DFF")!
+
+    // Axis tints (Blender-idiom X/Y/Z gizmo colors, tuned to the graphite cast).
+    public static let axisX = ColorToken(hex: "#EF5E5E")!
+    public static let axisY = ColorToken(hex: "#67C46E")!
+    public static let axisZ = ColorToken(hex: "#559BE6")!
     public static let success = ColorToken(hex: "#3ECF8E")!
     public static let warning = ColorToken(hex: "#E8B341")!
     public static let error = ColorToken(hex: "#F0564A")!

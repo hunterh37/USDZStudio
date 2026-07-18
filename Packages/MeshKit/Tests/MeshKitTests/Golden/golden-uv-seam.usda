@@ -1,0 +1,15 @@
+#usda 1.0
+(
+    doc = "Golden mesh: UV seam crossing a selection boundary — two quads share edge (v1,v4); the shared-edge vertices carry different face-varying UVs per side (atlas seam). Ops touching one quad must leave the other quad's UV corners byte-identical."
+    defaultPrim = "SeamStrip"
+)
+
+def Mesh "SeamStrip"
+{
+    point3f[] points = [(0, 0, 0), (1, 0, 0), (2, 0, 0), (0, 1, 0), (1, 1, 0), (2, 1, 0)]
+    int[] faceVertexCounts = [4, 4]
+    int[] faceVertexIndices = [0, 1, 4, 3, 1, 2, 5, 4]
+    texCoord2f[] primvars:st = [(0, 0), (0.5, 0), (0.5, 1), (0, 1), (0.75, 0), (1, 0), (1, 1), (0.75, 1)] (
+        interpolation = "faceVarying"
+    )
+}

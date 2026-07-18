@@ -23,6 +23,76 @@ private func makeDocument(skinned: Bool = false) -> (EditorDocument, PrimPath) {
     return (document, path)
 }
 
+/// USDZ-shaped document: the Mesh is nested two Xform scopes below the root,
+/// the way imported models arrive (user selects the root, not the Mesh).
+@MainActor
+private func makeNestedDocument() -> (EditorDocument, root: PrimPath, mesh: PrimPath) {
+    let meshPath = PrimPath("/Model/Geom/Body")!
+    let mesh = Prim(
+        path: meshPath, typeName: "Mesh",
+        attributes: [
+            Attribute(name: "points",
+                      value: .float3Array([0, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0])),
+            Attribute(name: "faceVertexCounts", value: .intArray([4])),
+            Attribute(name: "faceVertexIndices", value: .intArray([0, 1, 2, 3])),
+        ])
+    let geom = Prim(path: PrimPath("/Model/Geom")!, typeName: "Xform", children: [mesh])
+    let root = Prim(path: PrimPath("/Model")!, typeName: "Xform", children: [geom])
+    let document = EditorDocument(snapshot: StageSnapshot(rootPrims: [root]))
+    return (document, PrimPath("/Model")!, meshPath)
+}
+
+@MainActor
+@Suite("Tab toggle (USDZ-shaped selection)")
+struct MeshEditToggleTests {
+
+    @Test func tabDescendsFromXformRootToNestedMesh() {
+        let (doc, root, meshPath) = makeNestedDocument()
+        doc.selection = Selection([root])
+        doc.toggleMeshEditMode()
+        #expect(doc.meshEdit != nil)
+        #expect(doc.meshEdit?.session.path == meshPath)
+        #expect(doc.meshEditRefusal == nil)
+    }
+
+    @Test func tabWithNothingSelectedSurfacesRefusal() {
+        let (doc, _, _) = makeNestedDocument()
+        doc.toggleMeshEditMode()
+        #expect(doc.meshEdit == nil)
+        #expect(doc.meshEditRefusal != nil)
+    }
+
+    @Test func tabOnMeshlessSubtreeSurfacesRefusal() {
+        let empty = Prim(path: PrimPath("/Empty")!, typeName: "Xform")
+        let doc = EditorDocument(snapshot: StageSnapshot(rootPrims: [empty]))
+        doc.selection = Selection([PrimPath("/Empty")!])
+        doc.toggleMeshEditMode()
+        #expect(doc.meshEdit == nil)
+        #expect(doc.meshEditRefusal == MeshEditAvailability.notAMesh.refusalMessage)
+    }
+
+    @Test func tabOnSkinnedMeshSurfacesSkinnedRefusal() {
+        let (doc, path) = makeDocument(skinned: true)
+        doc.selection = Selection([path])
+        doc.toggleMeshEditMode()
+        #expect(doc.meshEdit == nil)
+        #expect(doc.meshEditRefusal == MeshEditAvailability.skinned.refusalMessage)
+    }
+
+    @Test func successfulToggleClearsStaleRefusal() {
+        let (doc, root, _) = makeNestedDocument()
+        doc.toggleMeshEditMode() // nothing selected → refusal
+        #expect(doc.meshEditRefusal != nil)
+        doc.selection = Selection([root])
+        doc.toggleMeshEditMode()
+        #expect(doc.meshEdit != nil)
+        #expect(doc.meshEditRefusal == nil)
+        doc.toggleMeshEditMode() // Tab again exits cleanly
+        #expect(doc.meshEdit == nil)
+        #expect(doc.meshEditRefusal == nil)
+    }
+}
+
 @MainActor
 @Suite("Mesh edit mode (EditorDocument)")
 struct MeshEditModeTests {

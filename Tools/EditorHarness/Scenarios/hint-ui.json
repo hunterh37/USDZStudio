@@ -1,0 +1,13 @@
+{ "name": "hint-ui",
+  "open": "Tests/Fixtures/mesh-panel.usda",
+  "steps": [
+    { "do": "select", "path": "/Rig/Panel" },
+    { "do": "shot", "name": "1-object-mode-hintbar", "tab": "hints" },
+
+    { "do": "mesh.enter" },
+    { "do": "shot", "name": "2-edit-mode-no-hintbar", "tab": "hints" },
+    { "do": "shot", "name": "3-edit-mode-no-tool-line", "tab": "mesh" },
+
+    { "do": "mesh.exit", "commit": false },
+    { "do": "shot", "name": "4-back-to-object-hintbar", "tab": "hints" }
+  ] }

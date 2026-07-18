@@ -1,0 +1,22 @@
+#usda 1.0
+(
+    doc = "Golden mesh: GeomSubset borders — closed cube partitioned into 'lid' (top) and 'shell' (the other five faces). Ops must keep subset membership consistent and drop emptied subsets on export."
+    defaultPrim = "Crate"
+)
+
+def Mesh "Crate"
+{
+    point3f[] points = [(0, 0, 0), (1, 0, 0), (1, 1, 0), (0, 1, 0), (0, 0, 1), (1, 0, 1), (1, 1, 1), (0, 1, 1)]
+    int[] faceVertexCounts = [4, 4, 4, 4, 4, 4]
+    int[] faceVertexIndices = [0, 3, 2, 1, 4, 5, 6, 7, 0, 1, 5, 4, 2, 3, 7, 6, 1, 2, 6, 5, 3, 0, 4, 7]
+
+    def GeomSubset "lid"
+    {
+        int[] indices = [1]
+    }
+
+    def GeomSubset "shell"
+    {
+        int[] indices = [0, 2, 3, 4, 5]
+    }
+}

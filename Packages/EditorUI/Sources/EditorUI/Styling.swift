@@ -228,6 +228,68 @@ struct FieldRow: View {
     }
 }
 
+/// A keyboard-key chip ("⇥", "F", "⇧drag") in the enterprise-CAD status-hint
+/// idiom: sunken, monospaced, quiet. Used only inside `HintBar`.
+struct KeyCap: View {
+    let text: String
+
+    var body: some View {
+        Text(text)
+            .font(.system(size: TypeScale.caption, weight: .semibold, design: .monospaced))
+            .foregroundStyle(Palette.textSecondary.color)
+            .padding(.horizontal, 4)
+            .padding(.vertical, 1)
+            .background(RoundedRectangle(cornerRadius: Radius.sm)
+                .fill(Palette.surfaceSunken.color))
+            .overlay(RoundedRectangle(cornerRadius: Radius.sm)
+                .strokeBorder(Palette.borderSubtle.color, lineWidth: 1))
+    }
+}
+
+/// One entry in a `HintBar`: a key (or gesture) plus what it does.
+struct Hint: Identifiable {
+    let key: String
+    let label: String
+    var id: String { key + label }
+}
+
+/// The Blender/Fusion-style status hint line: a single quiet row of
+/// key → action pairs pinned to an edge of the viewport. Deliberately inert —
+/// no animation, no chrome beyond the shared HUD surface — with a close
+/// button so it can be dismissed for good (persisted by the caller).
+struct HintBar: View {
+    let hints: [Hint]
+    let onDismiss: () -> Void
+
+    var body: some View {
+        HStack(spacing: Spacing.sm) {
+            ForEach(hints) { hint in
+                HStack(spacing: Spacing.xxs) {
+                    KeyCap(text: hint.key)
+                    Text(hint.label)
+                        .font(.system(size: TypeScale.caption))
+                        .foregroundStyle(Palette.textTertiary.color)
+                }
+            }
+            Button {
+                onDismiss()
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 8, weight: .bold))
+                    .foregroundStyle(Palette.textTertiary.color)
+            }
+            .buttonStyle(.plain)
+            .help("Hide shortcut hints")
+            .accessibilityIdentifier("hintBar.dismiss")
+        }
+        .padding(.horizontal, Spacing.sm)
+        .padding(.vertical, Spacing.xxs)
+        .background(Capsule().fill(Palette.surfaceElevated.color.opacity(0.85)))
+        .overlay(Capsule().strokeBorder(Palette.borderSubtle.color, lineWidth: 1))
+        .accessibilityIdentifier("hintBar")
+    }
+}
+
 /// Human-readable rendering of a typed USD attribute value for the inspector.
 enum ValueFormatter {
     static func string(_ value: AttributeValue) -> String {

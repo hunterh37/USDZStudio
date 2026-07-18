@@ -1,0 +1,12 @@
+#usda 1.0
+(
+    doc = "Golden mesh: mixed tri/quad region — 2x2 quad grid with the two right-column quads split into triangle pairs. Open manifold, consistent winding."
+    defaultPrim = "MixedPanel"
+)
+
+def Mesh "MixedPanel"
+{
+    point3f[] points = [(0, 0, 0), (1, 0, 0), (2, 0, 0), (0, 1, 0), (1, 1, 0), (2, 1, 0), (0, 2, 0), (1, 2, 0), (2, 2, 0)]
+    int[] faceVertexCounts = [4, 4, 3, 3, 3, 3]
+    int[] faceVertexIndices = [0, 1, 4, 3, 3, 4, 7, 6, 1, 2, 5, 1, 5, 4, 4, 5, 8, 4, 8, 7]
+}

@@ -1,0 +1,16 @@
+{
+  "name": "inspector-tabs",
+  "open": "Tests/Fixtures/material-shader.usda",
+  "steps": [
+    { "do": "select", "path": "/Car/Body" },
+
+    { "do": "shot", "name": "1-prim", "tab": "prim" },
+    { "do": "shot", "name": "2-transform", "tab": "transform" },
+    { "do": "shot", "name": "3-material", "tab": "material" },
+    { "do": "shot", "name": "4-stage", "tab": "stage" },
+
+    { "do": "select", "path": "/Car/Body/Trim" },
+    { "do": "expect", "surfacePath": "/Looks/Paint/Surface" },
+    { "do": "shot", "name": "5-inherited-material", "tab": "material" }
+  ]
+}

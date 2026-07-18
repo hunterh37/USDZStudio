@@ -38,16 +38,19 @@ struct FuzzTests {
         return Set(mesh.faceOrder.shuffled(using: &rng).prefix(count))
     }
 
-    @Test(arguments: 0..<40)
-    func fuzzOps(iteration: UInt64) throws {
-        var rng = SplitMix64(seed: 0xC0FFEE &+ iteration)
+    /// Seeds come from the committed corpus (`FuzzCorpus.swift`): pinned
+    /// regression seeds + a deterministic sweep, deepened in CI via
+    /// `MESHKIT_FUZZ_ITERATIONS`.
+    @Test(arguments: FuzzCorpus.allSeeds)
+    func fuzzOps(seed: UInt64) throws {
+        var rng = SplitMix64(seed: seed)
         let mesh = randomMesh(&rng)
         let original = mesh
 
         for opIndex in 0..<3 {
             let result: MeshOpResult?
             do {
-                switch (Int(iteration) + opIndex) % 5 {
+                switch (Int(seed % 5) + opIndex) % 5 {
                 case 0:
                     result = try ExtrudeFaces.apply(mesh, selection: .faces(randomFaces(mesh, &rng)),
                                                     params: .init(distance: Double.random(in: 0.1...2, using: &rng)))
@@ -74,7 +77,7 @@ struct FuzzTests {
 
             if let result {
                 #expect(MeshInvariants.violations(in: result.mesh).isEmpty,
-                        "op produced invariant violations on iteration \(iteration)/\(opIndex)")
+                        "op produced invariant violations on seed \(seed)/\(opIndex)")
                 // Purity: input mesh must never mutate.
                 #expect(mesh == original)
                 // Round-trip through flat arrays keeps counts.

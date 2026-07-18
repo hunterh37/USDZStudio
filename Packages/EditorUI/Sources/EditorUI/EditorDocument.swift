@@ -42,6 +42,11 @@ public final class EditorDocument {
     /// specs/mesh-editing.md). Managed by `EditorDocument+MeshEdit.swift`.
     public var meshEdit: MeshEditState?
 
+    /// Why the last Tab press couldn't enter edit mode (`nil` after a
+    /// successful toggle). Shown as an object-mode badge — a refused Tab must
+    /// never be a silent no-op.
+    public var meshEditRefusal: String?
+
     /// The mesh prim most recently committed by an edit session — after
     /// commit, the stage (not the file) is the viewport's source of truth for
     /// this prim's geometry, including across undo/redo.

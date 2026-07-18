@@ -38,6 +38,7 @@ public struct EditorShellView: View {
     @State private var showValidation = false
     @State private var activeSheet: Sheet?
 
+
     private enum Sheet: String, Identifiable {
         case convert, batch, scripts
         var id: String { rawValue }
@@ -344,6 +345,9 @@ public struct EditorShellView: View {
                     // Mesh edit mode: tool strip + active-tool indicator over
                     // the viewport (Phase 6; specs/mesh-editing.md).
                     if let document { MeshEditOverlay(document: document) }
+                }
+                .overlay(alignment: .bottom) {
+                    if let document { ViewportHintOverlay(document: document) }
                 }
                 .background(editModeToggleShortcut)
         } else {

@@ -56,6 +56,8 @@ public enum FillHole: MeshOp {
         var start = seed.a
         if holeNext[seed.a] != seed.b { start = seed.b }
         guard holeNext[start] == (start == seed.a ? seed.b : seed.a) else {
+            // coverage:disable — unreachable: a boundary EdgeKey has exactly one
+            // directed occurrence, so holeNext maps one endpoint to the other.
             throw MeshOpError.nonManifoldRegion("boundary loop is not a simple cycle")
         }
         var loop: [VertexID] = [start]
@@ -63,9 +65,17 @@ public enum FillHole: MeshOp {
         while current != start {
             loop.append(current)
             guard let next = holeNext[current] else {
+                // coverage:disable — unreachable: the duplicate-write guard above
+                // forces holeNext in-degree ≤ 1, and per-vertex directed-edge
+                // balance (face loops contribute one in + one out per corner,
+                // interior pairs cancel evenly) then makes holeNext a permutation:
+                // disjoint simple cycles, never a dead-ended chain.
                 throw MeshOpError.nonManifoldRegion("boundary loop is not closed")
             }
             guard loop.count <= mesh.vertexCount else {
+                // coverage:disable — unreachable for the same reason: a permutation
+                // walk from `start` returns to `start` within vertexCount steps.
+                // Kept as a hard backstop against non-termination.
                 throw MeshOpError.nonManifoldRegion("boundary walk did not terminate")
             }
             current = next

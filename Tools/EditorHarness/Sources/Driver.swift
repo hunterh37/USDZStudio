@@ -345,6 +345,18 @@ final class Driver {
     /// surface; the overlay chrome is what's under review).
     private func shot(named name: String, tab: String?, document: EditorDocument) throws -> URL {
         let url = outputDirectory.appendingPathComponent("\(name).png")
+        // The object-mode shortcut hint bar over the same viewport backdrop
+        // (renders empty in edit mode by design — that's an assertion too).
+        if tab == "hints" {
+            try Render.png(
+                ZStack(alignment: .bottom) {
+                    Color(red: 0.05, green: 0.06, blue: 0.075) // Palette.viewportBackground
+                    ViewportHintOverlay(document: document)
+                },
+                size: CGSize(width: 960, height: 200),
+                to: url)
+            return url
+        }
         if tab == "mesh" {
             try Render.png(
                 ZStack {

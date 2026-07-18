@@ -26,6 +26,16 @@ public enum CameraInteractionMode: String, CaseIterable, Identifiable {
     }
 
     var label: String { rawValue.capitalized }
+
+    /// Tooltip naming the always-on shortcuts alongside the mode, in the
+    /// standard CAD "action (modifier)" tooltip form.
+    var helpText: String {
+        switch self {
+        case .rotate: "Rotate — drag to orbit"
+        case .zoom: "Zoom — drag or scroll to dolly"
+        case .pan: "Pan — drag (or ⇧-drag / middle-drag in any mode)"
+        }
+    }
 }
 
 public struct ViewportPane: View {
@@ -92,7 +102,7 @@ public struct ViewportPane: View {
         Picker("Camera mode", selection: $cameraMode) {
             ForEach(CameraInteractionMode.allCases) { mode in
                 Image(systemName: mode.symbol)
-                    .help(mode.label)
+                    .help(mode.helpText)
                     .tag(mode)
             }
         }

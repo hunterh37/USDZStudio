@@ -1,0 +1,12 @@
+#usda 1.0
+(
+    doc = "Golden mesh: bowtie vertex — 4-triangle fan around v0 plus a quad attached at v0 only. Ops selecting the fan must refuse loudly (specs/mesh-editing.md §Golden-mesh fixtures)."
+    defaultPrim = "Bowtie"
+)
+
+def Mesh "Bowtie"
+{
+    point3f[] points = [(0, 0, 0), (1, 0, 0), (0, 1, 0), (-1, 0, 0), (0, -1, 0), (1, 1, 1), (2, 1, 1), (2, 0, 1)]
+    int[] faceVertexCounts = [3, 3, 3, 3, 4]
+    int[] faceVertexIndices = [0, 1, 2, 0, 2, 3, 0, 3, 4, 0, 4, 1, 0, 5, 6, 7]
+}

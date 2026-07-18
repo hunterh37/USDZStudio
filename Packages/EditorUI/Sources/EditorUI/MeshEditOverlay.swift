@@ -98,7 +98,11 @@ public struct MeshEditOverlay: View {
                 Image(systemName: "cursorarrow")
                     .font(.system(size: 14))
                     .foregroundStyle(Palette.textSecondary.color)
-                Text("No tool — press E · I · X · M · F")
+                // Built from MeshTool so new tools (e.g. Bevel/B) show up
+                // without touching this string again.
+                Text("No tool — press " + MeshTool.allCases
+                    .map { String($0.hotkey).uppercased() }
+                    .joined(separator: " · "))
                     .font(.system(size: TypeScale.body, weight: .medium))
                     .foregroundStyle(Palette.textSecondary.color)
             }

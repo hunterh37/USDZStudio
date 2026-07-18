@@ -24,5 +24,11 @@ jobs:
         run: bash scripts/fetch-python-runtime.sh
       - name: Test all packages (with coverage)
         run: bash scripts/test-all.sh --coverage
-      # Per-module xccov coverage floors (specs/testing.md) are wired in as
-      # modules gain measurable surface; tracked in ROADMAP Phase 0.
+      - name: MeshKit coverage gate (100% floor) + deep fuzz corpus
+        env:
+          # Deepens the committed fuzz-corpus sweep (FuzzCorpus.swift) far
+          # beyond the 40-iteration local default.
+          MESHKIT_FUZZ_ITERATIONS: "400"
+        run: bash scripts/coverage-gate.sh
+      # Remaining per-module xccov coverage floors (specs/testing.md) are wired
+      # in as modules gain measurable surface; tracked in ROADMAP Phase 0.

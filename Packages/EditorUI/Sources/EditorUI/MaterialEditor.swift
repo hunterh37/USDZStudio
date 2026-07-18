@@ -23,30 +23,27 @@ struct MaterialEditor: View {
     let selected: PrimPath
 
     var body: some View {
-        VStack(alignment: .leading, spacing: Spacing.lg) {
-            PanelSection(title: "Binding") {
-                VStack(alignment: .leading, spacing: Spacing.xs) {
-                    FieldRow(label: "material", value: material.material.path.description)
-                    if material.hasDedicatedShader {
-                        FieldRow(label: "surface", value: material.surfacePath.description)
-                    }
-                    if material.material.path != selected, !isBoundDirectly {
-                        Text("Inherited — bound on an ancestor of \(selected.name).")
-                            .font(.system(size: TypeScale.caption))
-                            .foregroundStyle(Palette.textSecondary.color)
-                    }
+        VStack(alignment: .leading, spacing: 0) {
+            InspectorSection(title: "Binding") {
+                FieldRow(label: "material", value: material.material.path.description)
+                if material.hasDedicatedShader {
+                    FieldRow(label: "surface", value: material.surfacePath.description)
+                }
+                if material.material.path != selected, !isBoundDirectly {
+                    Text("Inherited — bound on an ancestor of \(selected.name).")
+                        .font(.system(size: TypeScale.caption))
+                        .foregroundStyle(Palette.textSecondary.color)
                 }
             }
 
-            PanelSection(title: "Surface Inputs") {
-                VStack(alignment: .leading, spacing: Spacing.sm) {
-                    ForEach(PreviewSurfaceInput.catalog) { input in
-                        MaterialInputRow(
-                            input: input,
-                            authored: document.materialInput(input, on: material),
-                            set: { document.setMaterialInput(input, on: material, to: $0) },
-                            clear: { document.clearMaterialInput(input, on: material) })
-                    }
+            InspectorSection(title: "Surface Inputs",
+                             subtitle: String(PreviewSurfaceInput.catalog.count)) {
+                ForEach(PreviewSurfaceInput.catalog) { input in
+                    MaterialInputRow(
+                        input: input,
+                        authored: document.materialInput(input, on: material),
+                        set: { document.setMaterialInput(input, on: material, to: $0) },
+                        clear: { document.clearMaterialInput(input, on: material) })
                 }
             }
         }
@@ -163,54 +160,41 @@ private struct ColorInputWell: View {
     }
 }
 
-/// A slider (when the input is range-bounded) plus a numeric field. The slider
-/// commits once on release so a drag is a single undo entry; the field commits
-/// on submit/blur as elsewhere in the inspector.
+/// A scalar input as a Blender value slider: range-bounded inputs get the
+/// proportional fill bar, and both flavors scrub on drag and edit on click
+/// (`ScrubField` commits once per scrub — a single undo entry).
 private struct ScalarInputRow: View {
     let value: Double
     let range: ClosedRange<Double>?
     let commit: (Double) -> Void
 
-    /// Non-nil only while a drag is in flight — the live, uncommitted value.
-    @State private var live: Double?
-
     var body: some View {
-        HStack(spacing: Spacing.sm) {
-            if let range {
-                Slider(
-                    value: Binding(get: { live ?? value }, set: { live = $0 }),
-                    in: range,
-                    onEditingChanged: { editing in
-                        guard !editing else { return }
-                        if let live, live != value { commit(live) }
-                        self.live = nil
-                    })
-                    .controlSize(.small)
-            }
-            DoubleField(value: live ?? value) { commit($0) }
-        }
+        ScrubField(value: value, range: range, step: scrubStep, commit: commit)
+    }
+
+    /// One scrub step spans the range in ~100 steps; unbounded scalars step 0.01.
+    private var scrubStep: Double {
+        guard let range else { return 0.01 }
+        let span = range.upperBound - range.lowerBound
+        return span > 0 ? span / 100 : 0.01
     }
 }
 
-/// Three numeric fields for a `normal3f`-shaped input.
+/// Three axis-tinted scrub fields, stacked, for a `normal3f`-shaped input.
 private struct VectorInputRow: View {
     let components: [Double]
     let commit: ([Double]) -> Void
 
-    private let axes = ["X", "Y", "Z"]
-
     var body: some View {
-        HStack(spacing: Spacing.xs) {
-            ForEach(axes.indices, id: \.self) { axis in
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(axes[axis])
-                        .font(.system(size: TypeScale.caption, weight: .semibold))
-                        .foregroundStyle(Palette.textSecondary.color)
-                    DoubleField(value: components[axis]) { new in
-                        var next = components
-                        next[axis] = new
-                        commit(next)
-                    }
+        VStack(alignment: .leading, spacing: Spacing.xxs) {
+            ForEach(0..<3, id: \.self) { axis in
+                ScrubField(value: components[axis],
+                           label: axisLabels[axis],
+                           labelTint: axisTint(axis),
+                           step: 0.01) { new in
+                    var next = components
+                    next[axis] = new
+                    commit(next)
                 }
             }
         }
