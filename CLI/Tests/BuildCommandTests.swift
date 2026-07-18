@@ -1,6 +1,6 @@
 import Testing
 import Foundation
-@testable import dicyanin_usdz
+@testable import openusdz
 
 @Suite("build subcommand")
 struct BuildCommandTests {
@@ -53,6 +53,23 @@ struct BuildCommandTests {
         // Human report: per-step deltas and a summary line.
         #expect(capture.out.contains { $0.contains("step 0 inset") })
         #expect(capture.out.contains { $0.hasPrefix("wrote ") && $0.contains("crate.usda") })
+    }
+
+    @Test func duplicateMaterialNamesFailCleanlyInsteadOfCrashing() {
+        // "arm-1" and "arm_1" collide after USD sanitizing; the engine must
+        // reject the recipe with a typed error before the writer ever runs.
+        let recipe = """
+        {
+          "name": "M",
+          "materials": [{"name": "arm-1", "diffuseColor": [1, 0, 0]},
+                        {"name": "arm_1", "diffuseColor": [0, 1, 0]}],
+          "parts": [{"name": "P", "primitive": {"type": "box"}, "material": "arm-1"}]
+        }
+        """
+        let (code, capture) = run(["recipe.json", "m.usda"], recipe: recipe)
+        #expect(code == 1)
+        #expect(capture.written.isEmpty)
+        #expect(capture.err.contains { $0.contains("duplicate material") })
     }
 
     @Test func jsonReportIsMachineReadable() throws {

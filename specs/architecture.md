@@ -7,7 +7,7 @@ Modularity is the product strategy: an open-source contributor should be able to
 ## Workspace Layout
 
 ```
-DicyaninUSDZEditor/
+OpenUSDZEditor/
 ├── App/                          # Thin app target (SwiftUI lifecycle, DI wiring)
 ├── Packages/
 │   ├── USDCore/                  # Pure Swift USD stage model (no UI, no Python)
@@ -20,7 +20,7 @@ DicyaninUSDZEditor/
 │   ├── ScriptingKit/             # Python console, script library, CLI core
 │   ├── EditorUI/                 # Panels: outliner, inspector, console, toolbar
 │   └── DicyaninDesignSystem/     # Tokens, colors, typography, reusable controls
-├── CLI/                          # dicyanin-usdz command-line target (links kits, no UI)
+├── CLI/                          # openusdz command-line target (links kits, no UI)
 ├── Resources/Python/             # Bundled Python runtime + usd-core wheel + scripts
 ├── Tests/                        # Per-package tests + integration corpus tests
 └── specs/

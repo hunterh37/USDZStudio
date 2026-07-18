@@ -2,10 +2,10 @@
 import PackageDescription
 
 let package = Package(
-    name: "dicyanin-usdz",
+    name: "openusdz",
     platforms: [.macOS(.v14)],
     products: [
-        .executable(name: "dicyanin-usdz", targets: ["dicyanin-usdz"])
+        .executable(name: "openusdz", targets: ["openusdz"])
     ],
     dependencies: [
         // Kits only — never EditorUI (specs/architecture.md dependency rules).
@@ -17,9 +17,9 @@ let package = Package(
     ],
     targets: [
         .executableTarget(
-            name: "dicyanin-usdz",
+            name: "openusdz",
             dependencies: ["USDCore", "USDBridge", "ValidationKit", "ConversionKit", "MeshKit"],
             path: "Sources"),
-        .testTarget(name: "CLITests", dependencies: ["dicyanin-usdz"], path: "Tests"),
+        .testTarget(name: "CLITests", dependencies: ["openusdz"], path: "Tests"),
     ]
 )

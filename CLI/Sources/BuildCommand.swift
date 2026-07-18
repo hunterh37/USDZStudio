@@ -1,7 +1,7 @@
 import Foundation
 import MeshKit
 
-/// `dicyanin-usdz build <recipe.json> <out.usda> [--json]` — the agent
+/// `openusdz build <recipe.json> <out.usda> [--json]` — the agent
 /// modeling loop's execute step (specs/mesh-editing.md, agent-first): a
 /// declarative recipe goes in, invariant-checked geometry and a
 /// machine-readable report come out.

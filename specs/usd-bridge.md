@@ -11,7 +11,7 @@ Apple ships no public Swift/C API for authoring USD. Options considered:
 ## Runtime Layout
 
 ```
-DicyaninUSDZEditor.app/Contents/Resources/Python/
+OpenUSDZEditor.app/Contents/Resources/Python/
 ├── python3.12/            # Python.framework (python.org universal2 build, relocatable)
 ├── site-packages/
 │   └── pxr/ …             # usd-core wheel contents (universal2)

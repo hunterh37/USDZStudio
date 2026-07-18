@@ -10,9 +10,9 @@ loop:
 
 ```
 agent writes recipe.json
-  → dicyanin-usdz build recipe.json out.usda --json     # execute + report
-  → dicyanin-usdz validate out.usda                     # compliance gate
-  → dicyanin-usdz thumbnail out.usda --frames 8 -o t.##.png   # observe
+  → openusdz build recipe.json out.usda --json     # execute + report
+  → openusdz validate out.usda                     # compliance gate
+  → openusdz thumbnail out.usda --frames 8 -o t.##.png   # observe
   → agent reads the report + renders, edits the recipe, repeats
 ```
 

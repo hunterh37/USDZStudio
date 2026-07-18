@@ -49,7 +49,7 @@ Implementation: Metal compute kernel (live path, 2K texture at slider-drag rates
 
 ## Scripting & Batch
 - `app.recolor(selection, target="#FF6B00", mode="calibrated")` exposed to the Python console; batch script `recolor_batch.py` ships in the library (the e-commerce "rebrand 200 SKUs" workflow).
-- CLI: `dicyanin-usdz recolor in.usdz --prim /Car/Body --color '#FF6B00' --mode calibrated -o out.usdz`.
+- CLI: `openusdz recolor in.usdz --prim /Car/Body --color '#FF6B00' --mode calibrated -o out.usdz`.
 
 ## Testing (per specs/testing.md — logic is 100%-gated)
 - RecolorEngine: reference-value unit tests for every color-space conversion; property tests (recolor to same color = identity within ε; lightness preservation invariant).

@@ -4,7 +4,7 @@ import USDCore
 import USDBridge
 import ValidationKit
 
-/// Phase 0 CLI: `dicyanin-usdz info <file>` prints the prim tree.
+/// Phase 0 CLI: `openusdz info <file>` prints the prim tree.
 /// `convert`, `run`, and `validate` add Phase 2/4 pipeline capabilities
 /// (specs/scripting.md, specs/validation.md). Exit codes: 0 ok, 1 runtime
 /// failure / validation gate failure, 2 usage.
@@ -18,7 +18,7 @@ struct Main {
 enum CLIRunner {
 
     static let usage = """
-    usage: dicyanin-usdz <subcommand>
+    usage: openusdz <subcommand>
       info <file.usd[z|a|c]>   Print stage metadata and the prim tree.
       convert <input> <output.usda> [--preset NAME] [--max-texture-size N]
                      [--jpeg-basecolor]

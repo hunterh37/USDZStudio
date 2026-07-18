@@ -69,7 +69,7 @@ Unsupported extensions produce **warnings, never silent drops**.
 - `BatchJob`: input folder/glob → preset → output folder. Concurrency-limited task group (default = performance cores).
 - Emits `report.csv` + `report.json`: per-file status, warnings, tri counts, texture memory, output size.
 - Resumable: completed outputs skipped by content hash unless `--force`.
-- Fully usable from CLI target: `dicyanin-usdz convert-batch ./in ./out --preset ecommerce`.
+- Fully usable from CLI target: `openusdz convert-batch ./in ./out --preset ecommerce`.
 
 ## UI
 

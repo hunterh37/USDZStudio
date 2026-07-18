@@ -1,7 +1,7 @@
 import Foundation
 import USDBridge
 
-/// `dicyanin-usdz thumbnail <file> [-o out.png] [--size N] [--frames N]` —
+/// `openusdz thumbnail <file> [-o out.png] [--size N] [--frames N]` —
 /// the agent modeling loop's *observe* step. Single frame renders the model
 /// as-is; `--frames N` authors a turntable wrapper stage (animated rotateY
 /// around a reference to the model) and renders N frames via `usdrecord`,

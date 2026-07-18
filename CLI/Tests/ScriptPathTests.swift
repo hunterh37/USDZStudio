@@ -1,7 +1,7 @@
 import Testing
 import Foundation
 import USDBridge
-@testable import dicyanin_usdz
+@testable import openusdz
 
 @Suite("snapshotScriptPath resolution")
 struct ScriptPathTests {

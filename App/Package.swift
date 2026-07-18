@@ -2,7 +2,7 @@
 import PackageDescription
 
 let package = Package(
-    name: "DicyaninUSDZEditorApp",
+    name: "OpenUSDZEditorApp",
     platforms: [.macOS(.v14)],
     dependencies: [
         .package(path: "../Packages/EditorUI"),
@@ -11,7 +11,7 @@ let package = Package(
     ],
     targets: [
         .executableTarget(
-            name: "DicyaninUSDZEditorApp",
+            name: "OpenUSDZEditorApp",
             dependencies: ["EditorUI", "USDBridge", "USDCore"],
             path: "Sources")
     ]

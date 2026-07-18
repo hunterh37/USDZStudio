@@ -1,6 +1,6 @@
 # Bundled Scripts
 
-Starter scripts shipped with DicyaninUSDZEditor. They surface in the **Scripts**
+Starter scripts shipped with OpenUSDZEditor. They surface in the **Scripts**
 panel (bundled section) and are the reference implementations for the scripting
 model in `specs/scripting.md`.
 
@@ -11,7 +11,7 @@ Each script targets both execution modes with no change to its body, via
 
 1. **In-app console** — the host execs the script with injected globals `stage`,
    `selection`, `app`. Mutations are wrapped into a single undo step by the host.
-2. **Headless CLI** — `dicyanin-usdz run <script>.py model.usdz [--flags]`
+2. **Headless CLI** — `openusdz run <script>.py model.usdz [--flags]`
    (or plain `python3 <script>.py model.usdz`). The harness opens the stage,
    parses flags from the script's `MANIFEST`, and saves on exit (mutating
    scripts only) unless `--dry-run`.

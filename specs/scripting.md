@@ -23,7 +23,7 @@ The embedded Python runtime that powers USDBridge is exposed to users, turning t
 
 ## Script Library (panel)
 
-- Two sources: bundled scripts (`Resources/Python/scripts/`) and user folder (`~/Library/Application Support/DicyaninUSDZEditor/Scripts/`, revealed via menu).
+- Two sources: bundled scripts (`Resources/Python/scripts/`) and user folder (`~/Library/Application Support/OpenUSDZEditor/Scripts/`, revealed via menu).
 - Script metadata in a docstring header (name, description, args schema) → auto-generated parameter sheet UI when run.
 
 ### Bundled script starters
@@ -35,17 +35,17 @@ The embedded Python runtime that powers USDBridge is exposed to users, turning t
 - `screenshot_grid.py` — render turntable frames via viewport API
 - `strip_animations.py`, `remove_hidden_prims.py`, `merge_usdz.py`
 
-## Headless CLI (`dicyanin-usdz`)
+## Headless CLI (`openusdz`)
 
 Separate SPM executable target linking the kits (no UI). Installed via `brew` or the app's Settings ("Install command-line tool", symlink like VS Code's `code`).
 
 ```
-dicyanin-usdz convert in.glb out.usdz --preset ecommerce
-dicyanin-usdz convert-batch ./in ./out --preset quicklook-strict --report report.csv
-dicyanin-usdz validate model.usdz --profile quicklook --json
-dicyanin-usdz info model.usdz            # tree, counts, materials, textures
-dicyanin-usdz run script.py model.usdz   # headless scripting
-dicyanin-usdz thumbnail model.usdz -o thumb.png --size 512
+openusdz convert in.glb out.usdz --preset ecommerce
+openusdz convert-batch ./in ./out --preset quicklook-strict --report report.csv
+openusdz validate model.usdz --profile quicklook --json
+openusdz info model.usdz            # tree, counts, materials, textures
+openusdz run script.py model.usdz   # headless scripting
+openusdz thumbnail model.usdz -o thumb.png --size 512
 ```
 
 - JSON output mode on every subcommand → CI-friendly.

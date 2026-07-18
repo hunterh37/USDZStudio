@@ -1,6 +1,6 @@
 import Testing
 import Foundation
-@testable import dicyanin_usdz
+@testable import openusdz
 
 @Suite("thumbnail subcommand")
 struct ThumbnailCommandTests {

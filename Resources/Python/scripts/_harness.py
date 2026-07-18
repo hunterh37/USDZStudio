@@ -1,4 +1,4 @@
-"""Shared runtime harness for DicyaninUSDZEditor bundled scripts.
+"""Shared runtime harness for OpenUSDZEditor bundled scripts.
 
 Every bundled script targets *two* execution modes without changing its body:
 
@@ -7,7 +7,7 @@ Every bundled script targets *two* execution modes without changing its body:
    paths) and ``app`` (facade with .select/.frame/.run_command/.log/.progress).
    Mutations are wrapped by the host into a single undo step.
 
-2. Headless CLI — ``dicyanin-usdz run script.py model.usdz [--flags]`` (and plain
+2. Headless CLI — ``openusdz run script.py model.usdz [--flags]`` (and plain
    ``python3 script.py model.usdz``). Here we open the stage ourselves, parse
    flags from the script's MANIFEST, and save on exit unless --dry-run.
 

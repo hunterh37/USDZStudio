@@ -4,7 +4,7 @@ import ConversionKit
 import USDCore
 import USDBridge
 import ValidationKit
-@testable import dicyanin_usdz
+@testable import openusdz
 
 private func fixtureStage() -> StageSnapshot {
     let wheel = Prim(path: PrimPath("/Car/Wheel")!, typeName: "Mesh", visibility: .invisible)
