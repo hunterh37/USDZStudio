@@ -231,6 +231,12 @@ public struct InspectorView: View {
             if let material = document.boundMaterial(for: prim.path) {
                 MaterialEditor(document: document, material: material, selected: prim.path)
                     .id(material.surfacePath)
+            } else if let subtreeMaterial = document.materials(under: selection.paths).first {
+                // No material bound to the selected prim itself (e.g. a model root
+                // Xform), but parts under it carry materials — surface the
+                // model-wide recolor rather than dead-ending.
+                MaterialEditor(document: document, material: subtreeMaterial, selected: prim.path)
+                    .id(prim.path)
             } else {
                 emptyState("No material bound to \(prim.name).")
             }

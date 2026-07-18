@@ -22,8 +22,19 @@ struct MaterialEditor: View {
     /// The prim the user actually selected — may be a mesh that inherits it.
     let selected: PrimPath
 
+    /// The `diffuseColor` catalog entry — the base albedo a "recolor" targets.
+    private var diffuseColor: PreviewSurfaceInput { PreviewSurfaceInput.named("diffuseColor")! }
+
+    /// The prims a model-wide recolor spans: the whole multi-selection, or just
+    /// the selected prim when the selection is empty (e.g. driven by the harness).
+    private var recolorScope: [PrimPath] {
+        document.selection.paths.isEmpty ? [selected] : document.selection.paths
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
+            modelRecolorSection
+
             InspectorSection(title: "Binding") {
                 FieldRow(label: "material", value: material.material.path.description)
                 if material.hasDedicatedShader {
@@ -47,6 +58,39 @@ struct MaterialEditor: View {
                 }
             }
         }
+    }
+
+    /// A single colour well that recolors the base albedo of *every* material in
+    /// the selected model at once, as one undoable edit. Distinct from the
+    /// per-material "Surface Inputs" below, which only touch the bound material.
+    @ViewBuilder
+    private var modelRecolorSection: some View {
+        let materials = document.materials(under: recolorScope)
+        if materials.count > 1 {
+            InspectorSection(title: "Whole Model") {
+                LabeledField(label: "Recolor all") {
+                    ColorInputWell(components: representativeDiffuse(materials)) {
+                        document.recolorMaterials(materials, input: diffuseColor, to: .vector($0))
+                    }
+                }
+                Text("Sets base colour on all \(materials.count) materials in the "
+                     + "selection as one undoable step.")
+                    .font(.system(size: TypeScale.caption))
+                    .foregroundStyle(Palette.textSecondary.color)
+            }
+        }
+    }
+
+    /// The base colour to seed the model-wide well with: the first material's
+    /// authored `diffuseColor`, else the USD fallback.
+    private func representativeDiffuse(_ materials: [ResolvedMaterial]) -> [Double] {
+        for material in materials {
+            if case let .vector(v)? = document.materialInput(diffuseColor, on: material), v.count == 3 {
+                return v
+            }
+        }
+        if case let .vector(v) = diffuseColor.fallback { return v }
+        return [0.18, 0.18, 0.18]
     }
 
     /// `true` when the selected prim authors the binding itself (rather than

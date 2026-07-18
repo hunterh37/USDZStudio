@@ -34,6 +34,76 @@ private func shaderBackedDocument() -> EditorDocument {
     return EditorDocument(snapshot: StageSnapshot(rootPrims: [looks, body]))
 }
 
+/// A model with two distinct materials: /Looks/Paint on /Car/Body (inherited by
+/// /Car/Body/Trim) and /Looks/Glass on /Car/Windows.
+@MainActor
+private func twoMaterialCarDocument() -> EditorDocument {
+    let paint = Prim(path: PrimPath("/Looks/Paint")!, typeName: "Material", attributes: [
+        Attribute(name: "inputs:diffuseColor", value: .vector([0.2, 0.2, 0.2])),
+    ])
+    let glass = Prim(path: PrimPath("/Looks/Glass")!, typeName: "Material")
+    let looks = Prim(path: PrimPath("/Looks")!, typeName: "Scope", children: [paint, glass])
+    let trim = Prim(path: PrimPath("/Car/Body/Trim")!, typeName: "Mesh")
+    let bodyMesh = Prim(
+        path: PrimPath("/Car/Body")!, typeName: "Mesh",
+        relationships: [Relationship(name: "material:binding", targets: [paint.path])],
+        children: [trim])
+    let windows = Prim(
+        path: PrimPath("/Car/Windows")!, typeName: "Mesh",
+        relationships: [Relationship(name: "material:binding", targets: [glass.path])])
+    let car = Prim(path: PrimPath("/Car")!, typeName: "Xform", children: [bodyMesh, windows])
+    return EditorDocument(snapshot: StageSnapshot(rootPrims: [looks, car]))
+}
+
+@Suite("EditorDocument model-wide recolor")
+@MainActor
+struct EditorDocumentRecolorTests {
+
+    let car = PrimPath("/Car")!
+    let paint = PrimPath("/Looks/Paint")!
+    let glass = PrimPath("/Looks/Glass")!
+
+    private func input(_ name: String) throws -> PreviewSurfaceInput {
+        try #require(PreviewSurfaceInput.named(name))
+    }
+
+    @Test func gathersDistinctMaterialsUnderModelRoot() {
+        let doc = twoMaterialCarDocument()
+        let surfaces = Set(doc.materials(under: [car]).map(\.surfacePath))
+        // Two distinct materials, deduped across the inheriting Trim part.
+        #expect(surfaces == [paint, glass])
+    }
+
+    @Test func recolorSetsEveryMaterialInOneUndoStep() throws {
+        let doc = twoMaterialCarDocument()
+        let materials = doc.materials(under: [car])
+        #expect(doc.recolorMaterials(materials, input: try input("diffuseColor"), to: .vector([1, 0, 0])))
+
+        #expect(doc.snapshot.prim(at: paint)?.attribute(named: "inputs:diffuseColor")?.value == .vector([1, 0, 0]))
+        #expect(doc.snapshot.prim(at: glass)?.attribute(named: "inputs:diffuseColor")?.value == .vector([1, 0, 0]))
+        #expect(doc.undoLabel == "Recolor 2 materials")
+
+        doc.undo()
+        // Paint reverts to its prior colour; Glass back to no opinion.
+        #expect(doc.snapshot.prim(at: paint)?.attribute(named: "inputs:diffuseColor")?.value == .vector([0.2, 0.2, 0.2]))
+        #expect(doc.snapshot.prim(at: glass)?.attribute(named: "inputs:diffuseColor") == nil)
+    }
+
+    @Test func recolorNoOpsWhenNothingChanges() throws {
+        let doc = twoMaterialCarDocument()
+        // Only Paint has a diffuseColor, already this value; Glass has none, so
+        // it does change — expect a run. Then re-applying the same is a no-op.
+        _ = doc.recolorMaterials(doc.materials(under: [car]), input: try input("diffuseColor"), to: .vector([0.5, 0.5, 0.5]))
+        #expect(!doc.recolorMaterials(doc.materials(under: [car]), input: try input("diffuseColor"), to: .vector([0.5, 0.5, 0.5])))
+    }
+
+    @Test func recolorEmptySelectionDoesNothing() throws {
+        let doc = twoMaterialCarDocument()
+        #expect(!doc.recolorMaterials([], input: try input("diffuseColor"), to: .vector([1, 0, 0])))
+        #expect(!doc.canUndo)
+    }
+}
+
 @Suite("EditorDocument material editing")
 @MainActor
 struct EditorDocumentMaterialTests {

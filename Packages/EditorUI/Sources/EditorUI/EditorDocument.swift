@@ -245,6 +245,48 @@ public final class EditorDocument {
         return run(command) != nil
     }
 
+    /// Every distinct material bound anywhere within the subtrees of `paths`,
+    /// deduped by surface prim — the set a model-wide recolor should touch.
+    ///
+    /// Walks each root's whole subtree (not just the root prim) so a model whose
+    /// parts each bind their own material yields all of them, and resolves
+    /// bindings up the namespace so parts inheriting a shared material collapse
+    /// to a single entry. Returned in first-seen depth-first order.
+    public func materials(under paths: [PrimPath]) -> [ResolvedMaterial] {
+        var seen = Set<PrimPath>()
+        var result: [ResolvedMaterial] = []
+        for root in paths {
+            guard let rootPrim = snapshot.prim(at: root) else { continue }
+            for prim in rootPrim.flattened() {
+                guard let material = MaterialBinding.resolve(for: prim.path, in: snapshot) else { continue }
+                if seen.insert(material.surfacePath).inserted { result.append(material) }
+            }
+        }
+        return result
+    }
+
+    /// Sets one UsdPreviewSurface input across several materials as a single
+    /// undoable command — the model-wide recolor path. No-op materials (value
+    /// already set, or illegal for the input) are dropped; when every material
+    /// is a no-op nothing runs. Returns `true` when an edit ran.
+    @discardableResult
+    public func recolorMaterials(
+        _ materials: [ResolvedMaterial],
+        input: PreviewSurfaceInput,
+        to value: AttributeValue
+    ) -> Bool {
+        let commands: [any EditCommand] = materials.compactMap {
+            SetMaterialInputCommand.make($0, input: input, value: value, in: snapshot)
+        }
+        switch commands.count {
+        case 0: return false
+        case 1: return run(commands[0]) != nil
+        default:
+            return run(CompositeCommand(
+                label: "Recolor \(commands.count) materials", commands: commands)) != nil
+        }
+    }
+
     // MARK: Scale / units
 
     /// Normalizes the stage's `metersPerUnit` to `target`, preserving real-world
