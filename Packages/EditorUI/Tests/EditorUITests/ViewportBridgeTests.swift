@@ -349,6 +349,18 @@ struct ViewportBridgeTests {
         #expect(doc.viewportEditedMesh?.faceLoops.count == 6)
     }
 
+    @Test func toolOnAnEmptiedSelectionReportsADiagnosticInsteadOfCrashing() {
+        let (doc, path) = makeCubeDocument()
+        doc.enterMeshEditMode(at: path)
+        doc.pickMeshFace(index: 1)
+        doc.pickMeshFace(index: 1, additive: true) // toggle off → empty set
+        #expect(doc.meshEditSelectedFaceCount == 0)
+        doc.meshEdit?.tool = .extrude
+        doc.applyActiveMeshTool()
+        #expect(doc.meshEdit?.lastDiagnostic != nil)
+        #expect(doc.viewportEditedMesh?.faceLoops.count == 6) // untouched
+    }
+
     @Test func pickedRayHitsTheFaceTheViewportWouldPick() {
         let (doc, path) = makeCubeDocument()
         doc.enterMeshEditMode(at: path)

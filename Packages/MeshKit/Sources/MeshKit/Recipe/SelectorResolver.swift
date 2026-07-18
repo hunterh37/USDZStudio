@@ -51,11 +51,13 @@ enum SelectorResolver {
         guard let selector else {
             throw RecipeError(message: "step needs a 'select' (e.g. {\"all\": true}, {\"facing\": [0,1,0]}, {\"last\": true})")
         }
-        let sources = [selector.all != nil, selector.faces != nil, selector.vertices != nil,
+        // Boolean sources count only when true — {"last": false} is "no
+        // source", not a source that then resolves to nothing.
+        let sources = [selector.all == true, selector.faces != nil, selector.vertices != nil,
                        selector.edges != nil, selector.facing != nil,
-                       selector.boundary != nil, selector.last != nil,
+                       selector.boundary == true, selector.last == true,
                        // `within` counts as a source only when it stands alone
-                       selector.within != nil && selector.facing == nil && selector.all == nil]
+                       selector.within != nil && selector.facing == nil && selector.all != true]
             .filter { $0 }.count
         guard sources == 1 else {
             throw RecipeError(message: "selector must use exactly one source (all / faces / vertices / edges / facing / within / boundary / last); 'within' may also refine 'all' or 'facing'")
@@ -104,10 +106,11 @@ enum SelectorResolver {
             guard direction.count == 3 else {
                 throw RecipeError(message: "'facing' must be [x, y, z]")
             }
-            let dir = simd_normalize(SIMD3(direction[0], direction[1], direction[2]))
-            guard simd_length(dir) > MeshInvariants.epsilon else {
+            let raw = SIMD3(direction[0], direction[1], direction[2])
+            guard simd_length(raw) > MeshInvariants.epsilon else {
                 throw RecipeError(message: "'facing' direction is zero-length")
             }
+            let dir = simd_normalize(raw)
             let minDot = selector.minDot ?? 0.9
             faces = Set(mesh.faceOrder.filter { f in
                 simd_dot(simd_normalize(mesh.faceNormalArea(f)), dir) >= minDot
@@ -115,6 +118,9 @@ enum SelectorResolver {
         } else if selector.within != nil {
             faces = Set(mesh.faceOrder)
         } else {
+            // coverage:disable — unreachable today: the sources==1 guard means
+            // one of the face branches above always matches by the time we get
+            // here. Kept as a backstop for future selector sources.
             throw RecipeError(message: "selector selected nothing")
         }
 

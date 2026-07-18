@@ -203,7 +203,8 @@ struct RecipeCoverageTests {
             (RecipeSelector(vertices: [99]), "out of range"),
             (RecipeSelector(facing: [0, 1]), "'facing' must be [x, y, z]"),
             (RecipeSelector(facing: [0, 0, 0]), "zero-length"),
-            (RecipeSelector(boundary: false), "selected nothing"),
+            // A false boolean flag is "no source given", not an empty selection.
+            (RecipeSelector(boundary: false), "exactly one source"),
             (RecipeSelector(within: RecipeBounds(min: [0], max: [1])), "min/max as [x, y, z]"),
         ] {
             let step = RecipeStep(op: "delete", select: selector)

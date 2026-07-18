@@ -78,7 +78,11 @@ public enum RecipeEngine {
         }
 
         let materialNames = Set((recipe.materials ?? []).map(\.name))
+        var seenMaterials = Set<String>()
         for material in recipe.materials ?? [] {
+            guard seenMaterials.insert(USDAWriter.sanitize(material.name)).inserted else {
+                throw RecipeError(message: "duplicate material name '\(material.name)' (after USD sanitizing)")
+            }
             guard material.diffuseColor.count == 3,
                   material.diffuseColor.allSatisfy({ (0...1).contains($0) }) else {
                 throw RecipeError(message: "material '\(material.name)' diffuseColor must be 3 values in 0…1")
