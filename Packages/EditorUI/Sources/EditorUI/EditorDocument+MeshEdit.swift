@@ -261,6 +261,12 @@ extension EditorDocument {
             }
             state.session.record(result, journalEntry: entry)
             state.componentSelection = result.resultSelection
+            // Re-anchor the HUD stepper to the op's result selection: a single
+            // face keeps the stepper on it, anything else (multi-face result,
+            // empty set, edges/vertices) clears it so the readout can't claim
+            // a face that isn't actually selected.
+            state.selectedFaceIndex = Self.stepperIndex(
+                for: result.resultSelection, in: state.session.mesh)
             state.lastDiagnostic = nil
         } catch let error as MeshOpError {
             state.lastDiagnostic = error.description
@@ -274,6 +280,9 @@ extension EditorDocument {
         guard var state = meshEdit, state.session.canUndo else { return }
         state.session.undo()
         state.componentSelection = .faces([])
+        // The selection is now empty — a stale stepper position would make the
+        // HUD claim "Face N of M" while no face is actually selected.
+        state.selectedFaceIndex = nil
         state.lastDiagnostic = nil
         meshEdit = state
     }
@@ -331,6 +340,15 @@ extension EditorDocument {
             ? faces.first.flatMap { order.firstIndex(of: $0) } : nil
         state.lastDiagnostic = nil
         meshEdit = state
+    }
+
+    /// HUD stepper position for a selection: exactly one face → its authored
+    /// index; anything else has no meaningful stepper position.
+    private static func stepperIndex(for selection: ComponentSelection,
+                                     in mesh: HalfEdgeMesh) -> Int? {
+        guard case .faces(let faces) = selection, faces.count == 1,
+              let face = faces.first else { return nil }
+        return mesh.faceOrder.firstIndex(of: face)
     }
 
     /// Number of faces in the current component selection (0 outside face

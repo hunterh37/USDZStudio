@@ -34,6 +34,15 @@ enum CLIRunner {
                                headless against a stage. Remaining flags pass
                                through to the script (see its --help). Exit code
                                is the script's own.
+      build <recipe.json> <output.usda> [--json]
+                               Execute a declarative modeling recipe (MeshKit
+                               primitives + op chain per part) and author the
+                               result. --json prints a machine-readable report
+                               of per-step topology deltas, bounds, and counts.
+      thumbnail <file.usd[z|a|c]> [-o out.png] [--size N] [--frames N]
+                               Render the model via usdrecord. --frames N > 1
+                               renders a turntable (output needs a frame
+                               placeholder, e.g. turn.###.png).
       validate <file.usd[z|a|c]> [--profile NAME] [--strict]
                                Run a compliance profile's rule catalog and print
                                diagnostics (most-severe first) with an export
@@ -81,6 +90,12 @@ enum CLIRunner {
             return await convertBatch(arguments: Array(arguments.dropFirst()), print: output, printError: printError)
         case "run":
             return runScript(arguments: Array(arguments.dropFirst()), printError: printError)
+        case "build":
+            return BuildCommand.run(arguments: Array(arguments.dropFirst()),
+                                    print: output, printError: printError)
+        case "thumbnail":
+            return ThumbnailCommand.run(arguments: Array(arguments.dropFirst()),
+                                        print: output, printError: printError)
         case "validate":
             return await validate(
                 arguments: Array(arguments.dropFirst()),

@@ -13,11 +13,12 @@ let package = Package(
         .package(path: "../Packages/USDBridge"),
         .package(path: "../Packages/ValidationKit"),
         .package(path: "../Packages/ConversionKit"),
+        .package(path: "../Packages/MeshKit"),
     ],
     targets: [
         .executableTarget(
             name: "dicyanin-usdz",
-            dependencies: ["USDCore", "USDBridge", "ValidationKit", "ConversionKit"],
+            dependencies: ["USDCore", "USDBridge", "ValidationKit", "ConversionKit", "MeshKit"],
             path: "Sources"),
         .testTarget(name: "CLITests", dependencies: ["dicyanin-usdz"], path: "Tests"),
     ]

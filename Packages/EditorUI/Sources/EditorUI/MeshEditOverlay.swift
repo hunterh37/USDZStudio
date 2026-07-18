@@ -278,6 +278,7 @@ public struct MeshEditOverlay: View {
                     .buttonStyle(.plain)
                     .font(.system(size: TypeScale.label, weight: .medium))
                     .foregroundStyle(state.selectedFaceIndex == nil
+                                     && document.meshEditSelectedFaceCount == count
                                      ? Palette.accent.color : Palette.textSecondary.color)
                     .accessibilityIdentifier("meshEdit.face.all")
             }

@@ -162,6 +162,193 @@ struct ViewportBridgeTests {
         #expect(doc.viewportEditedMesh?.selectedFaces == [0])
     }
 
+    // MARK: Multi-face selection × every tool
+
+    @Test func deleteRunsOnAMultiFaceSelection() {
+        let (doc, path) = makeCubeDocument()
+        doc.enterMeshEditMode(at: path)
+        doc.pickMeshFace(index: 0)
+        doc.pickMeshFace(index: 3, additive: true)
+        doc.meshEdit?.tool = .delete
+        doc.applyActiveMeshTool()
+        #expect(doc.meshEdit?.lastDiagnostic == nil)
+        #expect(doc.viewportEditedMesh?.faceLoops.count == 4)
+        // Delete leaves nothing selected — HUD must not claim a face is.
+        #expect(doc.meshEditSelectedFaceCount == 0)
+        #expect(doc.meshEdit?.selectedFaceIndex == nil)
+    }
+
+    @Test func extrudeRefusesCancellingNormalsButKeepsTheSelection() {
+        let (doc, path) = makeCubeDocument()
+        doc.enterMeshEditMode(at: path)
+        // Faces 0 (z=0) and 1 (z=1) are opposite — average normal ~zero.
+        doc.pickMeshFace(index: 0)
+        doc.pickMeshFace(index: 1, additive: true)
+        doc.meshEdit?.tool = .extrude
+        doc.applyActiveMeshTool()
+        #expect(doc.meshEdit?.lastDiagnostic != nil) // loud refusal
+        #expect(doc.viewportEditedMesh?.faceLoops.count == 6) // untouched
+        #expect(doc.viewportEditedMesh?.selectedFaces == [0, 1]) // retry-able
+    }
+
+    @Test func bevelIgnoresFaceMultiSelectionAndUsesTheEdgePicker() {
+        let (doc, path) = makeCubeDocument()
+        doc.enterMeshEditMode(at: path)
+        doc.pickMeshFace(index: 0)
+        doc.pickMeshFace(index: 2, additive: true)
+        doc.meshEdit?.tool = .bevel
+        doc.applyActiveMeshTool()
+        #expect(doc.meshEdit?.lastDiagnostic == nil)
+        #expect((doc.viewportEditedMesh?.faceLoops.count ?? 0) > 6)
+    }
+
+    @Test func fillHoleRefusesAFaceSelectionLoudly() {
+        let (doc, path) = makeCubeDocument()
+        doc.enterMeshEditMode(at: path)
+        doc.pickMeshFace(index: 0)
+        doc.pickMeshFace(index: 2, additive: true)
+        doc.meshEdit?.tool = .fill
+        doc.applyActiveMeshTool()
+        #expect(doc.meshEdit?.lastDiagnostic?.contains("Fill Hole") == true)
+        #expect(doc.viewportEditedMesh?.faceLoops.count == 6) // untouched
+    }
+
+    @Test func mergeRefusesAFaceSelectionLoudly() {
+        let (doc, path) = makeCubeDocument()
+        doc.enterMeshEditMode(at: path)
+        doc.pickMeshFace(index: 0)
+        doc.pickMeshFace(index: 2, additive: true)
+        doc.meshEdit?.tool = .merge
+        doc.applyActiveMeshTool()
+        #expect(doc.meshEdit?.lastDiagnostic != nil)
+        #expect(doc.viewportEditedMesh?.faceLoops.count == 6) // untouched
+    }
+
+    @Test func deleteOnAnAllFacesSelectionEmptiesTheMesh() {
+        let (doc, path) = makeCubeDocument()
+        doc.enterMeshEditMode(at: path)
+        doc.selectMeshFace(index: nil) // HUD "All"
+        doc.meshEdit?.tool = .delete
+        doc.applyActiveMeshTool()
+        #expect(doc.meshEdit?.lastDiagnostic == nil)
+        #expect(doc.viewportEditedMesh?.faceLoops.isEmpty == true)
+        #expect(doc.viewportEditedMesh?.positions.isEmpty == true) // isolated verts pruned
+    }
+
+    // MARK: Stepper / selection consistency after ops
+
+    @Test func stepperStaysAnchoredAfterASingleFaceExtrude() {
+        let (doc, path) = makeCubeDocument()
+        doc.enterMeshEditMode(at: path)
+        doc.pickMeshFace(index: 3)
+        doc.meshEdit?.tool = .extrude
+        doc.applyActiveMeshTool()
+        #expect(doc.meshEdit?.lastDiagnostic == nil)
+        // Extrude keeps the cap's FaceID; the stepper follows the result.
+        #expect(doc.meshEdit?.selectedFaceIndex == 3)
+        #expect(doc.viewportEditedMesh?.selectedFaces == [3])
+    }
+
+    @Test func stepperClearsWhenAnOpProducesAMultiFaceResult() {
+        let (doc, path) = makeCubeDocument()
+        doc.enterMeshEditMode(at: path)
+        doc.pickMeshFace(index: 0)
+        doc.pickMeshFace(index: 1, additive: true)
+        doc.meshEdit?.tool = .inset
+        doc.applyActiveMeshTool()
+        #expect(doc.meshEdit?.lastDiagnostic == nil)
+        #expect(doc.meshEditSelectedFaceCount == 2) // the two inner faces
+        #expect(doc.meshEdit?.selectedFaceIndex == nil) // no single stepper position
+    }
+
+    @Test func inSessionUndoClearsBothSelectionAndStepper() {
+        let (doc, path) = makeCubeDocument()
+        doc.enterMeshEditMode(at: path)
+        doc.meshEdit?.tool = .extrude
+        doc.applyActiveMeshTool()
+        doc.undoMeshEdit()
+        #expect(doc.viewportEditedMesh?.faceLoops.count == 6)
+        #expect(doc.meshEditSelectedFaceCount == 0)
+        // A stale stepper here would make the HUD lie ("Face 1 of 6") while
+        // the next tool apply fails with an empty-selection diagnostic.
+        #expect(doc.meshEdit?.selectedFaceIndex == nil)
+        doc.applyActiveMeshTool()
+        #expect(doc.meshEdit?.lastDiagnostic != nil) // loud, matching the HUD
+    }
+
+    @Test func toolingContinuesAfterAMultiFaceOpAndAnotherPick() {
+        let (doc, path) = makeCubeDocument()
+        doc.enterMeshEditMode(at: path)
+        doc.pickMeshFace(index: 0)
+        doc.pickMeshFace(index: 2, additive: true)
+        doc.meshEdit?.tool = .inset
+        doc.applyActiveMeshTool()
+        // Shift-pick against the post-op mesh: toggles against the op's
+        // result selection using the *new* face order.
+        doc.pickMeshFace(index: 0, additive: true)
+        #expect(doc.meshEditSelectedFaceCount == 3)
+        doc.meshEdit?.tool = .delete
+        doc.applyActiveMeshTool()
+        #expect(doc.meshEdit?.lastDiagnostic == nil)
+        #expect(doc.viewportEditedMesh?.faceLoops.count == 11) // 14 - 3
+    }
+
+    // MARK: Additive-pick edge cases
+
+    @Test func additivePickIgnoresOutOfRangeIndices() {
+        let (doc, path) = makeCubeDocument()
+        doc.enterMeshEditMode(at: path)
+        doc.pickMeshFace(index: 2)
+        doc.pickMeshFace(index: 99, additive: true)
+        doc.pickMeshFace(index: -1, additive: true)
+        #expect(doc.viewportEditedMesh?.selectedFaces == [2])
+        #expect(doc.meshEdit?.selectedFaceIndex == 2)
+    }
+
+    @Test func additivePickOutsideEditModeIsANoOp() {
+        let (doc, _) = makeCubeDocument()
+        doc.pickMeshFace(index: 2, additive: true) // must not crash or create state
+        #expect(doc.meshEdit == nil)
+    }
+
+    @Test func additivePickAfterAnEdgeSelectionStartsAFreshFaceSet() {
+        let (doc, path) = makeCubeDocument()
+        doc.enterMeshEditMode(at: path)
+        doc.selectMeshEdge(index: 0) // bevel-style edge selection
+        doc.pickMeshFace(index: 4, additive: true)
+        #expect(doc.viewportEditedMesh?.selectedFaces == [4])
+        #expect(doc.meshEditSelectedFaceCount == 1)
+        #expect(doc.meshEdit?.selectedFaceIndex == 4)
+    }
+
+    @Test func additivePickClearsAStaleDiagnostic() {
+        let (doc, path) = makeCubeDocument()
+        doc.enterMeshEditMode(at: path)
+        doc.pickMeshFace(index: 0)
+        doc.pickMeshFace(index: 1, additive: true)
+        doc.meshEdit?.tool = .extrude
+        doc.applyActiveMeshTool() // opposite faces → refusal
+        #expect(doc.meshEdit?.lastDiagnostic != nil)
+        doc.pickMeshFace(index: 1, additive: true) // fix the selection
+        #expect(doc.meshEdit?.lastDiagnostic == nil) // badge clears on re-pick
+    }
+
+    @Test func multiSelectionSurvivesTheCommitOnExit() {
+        let (doc, path) = makeCubeDocument()
+        doc.enterMeshEditMode(at: path)
+        doc.pickMeshFace(index: 0)
+        doc.pickMeshFace(index: 2, additive: true)
+        doc.meshEdit?.tool = .extrude
+        doc.applyActiveMeshTool()
+        let editedFaceCount = doc.viewportEditedMesh?.faceLoops.count
+        doc.exitMeshEditMode(commit: true)
+        #expect(doc.meshEdit == nil)
+        // The committed stage geometry matches what the multi-face op built.
+        #expect(doc.viewportEditedMesh?.faceLoops.count == editedFaceCount)
+        doc.undo()
+        #expect(doc.viewportEditedMesh?.faceLoops.count == 6)
+    }
+
     @Test func pickedRayHitsTheFaceTheViewportWouldPick() {
         let (doc, path) = makeCubeDocument()
         doc.enterMeshEditMode(at: path)
