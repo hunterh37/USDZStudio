@@ -1,5 +1,11 @@
 # ScriptingKit Specification — Python Console, Script Library, CLI
 
+> **Status: DESIGN — largely unimplemented.** `Packages/ScriptingKit` is
+> currently a stub (~40 lines). This document is the target design, not a
+> description of shipped behavior; do not plan work against it as if the
+> console, script library, or `jedi` completion exist. See `ROADMAP.md` for the
+> phase in which this lands. Remove this banner as sections ship.
+
 ## Why scripting is a pillar
 
 The embedded Python runtime that powers USDBridge is exposed to users, turning the app from a tool into a platform. Pipeline engineers get the full `pxr` API against the live stage; we get community-contributed scripts as the cheapest form of extensibility.
