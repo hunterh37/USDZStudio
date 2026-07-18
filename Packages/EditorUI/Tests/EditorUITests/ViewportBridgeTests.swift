@@ -52,6 +52,65 @@ struct ViewportBridgeTests {
         #expect(doc.viewportEditedMesh?.selectedFaces == [4])
     }
 
+    @Test func shiftPickAddsToTheSelection() {
+        let (doc, path) = makeCubeDocument()
+        doc.enterMeshEditMode(at: path)
+        doc.pickMeshFace(index: 2)
+        doc.pickMeshFace(index: 4, additive: true)
+        doc.pickMeshFace(index: 5, additive: true)
+        #expect(doc.viewportEditedMesh?.selectedFaces == [2, 4, 5])
+        #expect(doc.meshEditSelectedFaceCount == 3)
+        // Multi-face selection has no single stepper position.
+        #expect(doc.meshEdit?.selectedFaceIndex == nil)
+    }
+
+    @Test func shiftPickTogglesAnAlreadySelectedFaceOff() {
+        let (doc, path) = makeCubeDocument()
+        doc.enterMeshEditMode(at: path)
+        doc.pickMeshFace(index: 2)
+        doc.pickMeshFace(index: 4, additive: true)
+        doc.pickMeshFace(index: 2, additive: true) // toggle off
+        #expect(doc.viewportEditedMesh?.selectedFaces == [4])
+        // Back to a single face → the stepper re-anchors to it.
+        #expect(doc.meshEdit?.selectedFaceIndex == 4)
+        doc.pickMeshFace(index: 4, additive: true) // toggle the last one off
+        #expect(doc.meshEditSelectedFaceCount == 0)
+    }
+
+    @Test func plainPickReplacesAMultiSelection() {
+        let (doc, path) = makeCubeDocument()
+        doc.enterMeshEditMode(at: path)
+        doc.pickMeshFace(index: 1, additive: true)
+        doc.pickMeshFace(index: 3, additive: true)
+        doc.pickMeshFace(index: 5) // no shift → replace
+        #expect(doc.viewportEditedMesh?.selectedFaces == [5])
+        #expect(doc.meshEdit?.selectedFaceIndex == 5)
+    }
+
+    @Test func extrudeRunsOnAMultiFaceSelection() {
+        let (doc, path) = makeCubeDocument()
+        doc.enterMeshEditMode(at: path)
+        // Adjacent faces (opposite faces have cancelling normals, which the
+        // op refuses without an explicit axis).
+        doc.pickMeshFace(index: 0)
+        doc.pickMeshFace(index: 2, additive: true)
+        doc.meshEdit?.tool = .extrude
+        doc.applyActiveMeshTool()
+        #expect(doc.meshEdit?.lastDiagnostic == nil)
+        #expect((doc.viewportEditedMesh?.faceLoops.count ?? 0) > 6)
+    }
+
+    @Test func insetRunsOnAMultiFaceSelection() {
+        let (doc, path) = makeCubeDocument()
+        doc.enterMeshEditMode(at: path)
+        doc.pickMeshFace(index: 0)
+        doc.pickMeshFace(index: 1, additive: true)
+        doc.meshEdit?.tool = .inset
+        doc.applyActiveMeshTool()
+        #expect(doc.meshEdit?.lastDiagnostic == nil)
+        #expect(doc.viewportEditedMesh?.faceLoops.count == 14)
+    }
+
     @Test func opsReflectImmediatelyInViewportData() {
         let (doc, path) = makeCubeDocument()
         doc.enterMeshEditMode(at: path)

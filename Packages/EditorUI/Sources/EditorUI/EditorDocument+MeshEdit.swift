@@ -305,9 +305,39 @@ extension EditorDocument {
     }
 
     /// Viewport click → face selection (indices are authored order, matching
-    /// the HUD face-picker).
-    public func pickMeshFace(index: Int) {
-        selectMeshFace(index: index)
+    /// the HUD face-picker). `additive` (⇧-click) toggles the face against the
+    /// current selection instead of replacing it, so tools like Extrude and
+    /// Inset can run on a group of faces at once.
+    public func pickMeshFace(index: Int, additive: Bool = false) {
+        guard additive else {
+            selectMeshFace(index: index)
+            return
+        }
+        guard var state = meshEdit else { return }
+        let order = state.session.mesh.faceOrder
+        guard order.indices.contains(index) else { return }
+        let face = order[index]
+        var faces: Set<FaceID>
+        if case .faces(let current) = state.componentSelection {
+            faces = current
+        } else {
+            faces = []
+        }
+        if faces.contains(face) { faces.remove(face) } else { faces.insert(face) }
+        state.componentSelection = .faces(faces)
+        // Keep the HUD stepper anchored to a single-face selection; a
+        // multi-face (or empty) set has no meaningful stepper position.
+        state.selectedFaceIndex = faces.count == 1
+            ? faces.first.flatMap { order.firstIndex(of: $0) } : nil
+        state.lastDiagnostic = nil
+        meshEdit = state
+    }
+
+    /// Number of faces in the current component selection (0 outside face
+    /// selection) — drives the HUD "N faces" readout.
+    public var meshEditSelectedFaceCount: Int {
+        guard let state = meshEdit, case .faces(let faces) = state.componentSelection else { return 0 }
+        return faces.count
     }
 
     /// Viewport hover → HUD readout ("will extrude Face n").

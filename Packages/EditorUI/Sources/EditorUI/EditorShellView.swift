@@ -338,7 +338,9 @@ public struct EditorShellView: View {
             ViewportPane(
                 modelURL: modelURL,
                 editedMesh: document?.viewportEditedMesh,
-                onPickFace: { [weak document] index in document?.pickMeshFace(index: index) },
+                onPickFace: { [weak document] index, additive in
+                    document?.pickMeshFace(index: index, additive: additive)
+                },
                 hoverPreview: document?.meshEdit?.hoverPreviewEnabled ?? false,
                 onHoverFace: { [weak document] index in document?.hoverMeshFace(index: index) })
                 .overlay {

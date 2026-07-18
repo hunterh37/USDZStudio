@@ -85,7 +85,7 @@ public struct MeshEditOverlay: View {
                         .tracking(0.8)
                         .foregroundStyle(Palette.textPrimary.color)
                     if let hovered = state?.hoveredFaceIndex, state?.hoverPreviewEnabled == true {
-                        Text("will \(tool.label.lowercased()) Face \(hovered + 1) — click to select")
+                        Text("will \(tool.label.lowercased()) Face \(hovered + 1) — click to select, ⇧click to add")
                             .font(.system(size: TypeScale.caption, weight: .semibold))
                             .foregroundStyle(Palette.accent.color)
                     } else {
@@ -263,7 +263,7 @@ public struct MeshEditOverlay: View {
                     .buttonStyle(.plain)
                     .foregroundStyle(Palette.textSecondary.color)
                     .accessibilityIdentifier("meshEdit.face.prev")
-                Text(state.selectedFaceIndex.map { "Face \($0 + 1) of \(count)" } ?? "All \(count) faces")
+                Text(facePickerLabel(state: state, count: count))
                     .font(.system(size: TypeScale.body, weight: .semibold, design: .monospaced))
                     .foregroundStyle(Palette.accent.color)
                     .frame(minWidth: 110)
@@ -284,6 +284,16 @@ public struct MeshEditOverlay: View {
             .padding(Spacing.sm)
             .background(hudBackground)
         }
+    }
+
+    /// Face-picker readout: single face → position; ⇧-click multi-select →
+    /// selection count; everything → "All"; none → prompt.
+    private func facePickerLabel(state: MeshEditState, count: Int) -> String {
+        if let index = state.selectedFaceIndex { return "Face \(index + 1) of \(count)" }
+        let selected = document.meshEditSelectedFaceCount
+        if selected == 0 { return "No faces — click one" }
+        if selected == count { return "All \(count) faces" }
+        return "\(selected) of \(count) faces"
     }
 
     @ViewBuilder

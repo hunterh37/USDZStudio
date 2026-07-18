@@ -45,8 +45,9 @@ public struct ViewportPane: View {
     /// prim (Phase 6). `nil` = plain file rendering.
     let editedMesh: EditedMeshData?
     /// Called with the picked face index (authored order) on a click while
-    /// `editedMesh` is active.
-    let onPickFace: ((Int) -> Void)?
+    /// `editedMesh` is active. The second parameter is `true` when ⇧ was held
+    /// (additive selection: toggle the face into/out of the current set).
+    let onPickFace: ((Int, Bool) -> Void)?
     /// Live hover preview: highlight the face under the cursor (the one a
     /// click / op would target). Reported up so the HUD can name it.
     let hoverPreview: Bool
@@ -58,7 +59,7 @@ public struct ViewportPane: View {
 
     public init(modelURL: URL?,
                 editedMesh: EditedMeshData? = nil,
-                onPickFace: ((Int) -> Void)? = nil,
+                onPickFace: ((Int, Bool) -> Void)? = nil,
                 hoverPreview: Bool = false,
                 onHoverFace: ((Int?) -> Void)? = nil) {
         self.modelURL = modelURL
@@ -121,7 +122,7 @@ struct ViewportRepresentable: NSViewRepresentable {
     let modelURL: URL?
     let mode: CameraInteractionMode
     let editedMesh: EditedMeshData?
-    let onPickFace: ((Int) -> Void)?
+    let onPickFace: ((Int, Bool) -> Void)?
     let hoverPreview: Bool
     let onHoverFace: ((Int?) -> Void)?
     @Binding var stats: SceneStats?
@@ -233,7 +234,7 @@ final class ViewportCoordinator {
     private let editAnchor = AnchorEntity(world: .zero)
     private var editData: EditedMeshData?
     private var hiddenOriginal: Entity?
-    private var onPickFace: ((Int) -> Void)?
+    private var onPickFace: ((Int, Bool) -> Void)?
     private var onHoverFace: ((Int?) -> Void)?
     private var hoverEntity: ModelEntity?
     private var hoveredFace: Int?
@@ -242,11 +243,12 @@ final class ViewportCoordinator {
 
     /// Swap the file-loaded entity for the live edited mesh (flat-shaded, with
     /// an amber overlay on the selected faces); restore it when editing ends.
-    func applyEditedMesh(_ data: EditedMeshData?, onPickFace: ((Int) -> Void)?,
+    func applyEditedMesh(_ data: EditedMeshData?, onPickFace: ((Int, Bool) -> Void)?,
                          hoverPreview: Bool = false, onHoverFace: ((Int?) -> Void)? = nil) {
         self.onPickFace = onPickFace
         self.onHoverFace = onHoverFace
-        view?.onEditClick = data == nil ? nil : { [weak self] point in self?.pick(at: point) }
+        view?.onEditClick = data == nil
+            ? nil : { [weak self] point, additive in self?.pick(at: point, additive: additive) }
         view?.onHoverMove = (data == nil || !hoverPreview)
             ? nil : { [weak self] point in self?.hover(at: point) }
         if data == nil || !hoverPreview { setHoveredFace(nil) }
@@ -308,9 +310,10 @@ final class ViewportCoordinator {
     }
 
     /// Click → world ray (shared orbit-camera math) → prim-local ray → face.
-    private func pick(at point: CGPoint) {
+    /// `additive` (⇧-click) toggles the face against the current selection.
+    private func pick(at point: CGPoint, additive: Bool) {
         guard let onPickFace, let hit = faceHit(at: point) else { return }
-        onPickFace(hit)
+        onPickFace(hit, additive)
     }
 
     /// Cursor move → the face an op would target, previewed live.
@@ -458,8 +461,9 @@ final class InteractiveARView: ARView {
     var onDolly: ((Double) -> Void)?
     var onFrame: (() -> Void)?
     /// Component picking in edit mode: fires with the click point in top-left
-    /// view coordinates when a press releases without dragging.
-    var onEditClick: ((CGPoint) -> Void)?
+    /// view coordinates when a press releases without dragging. The Bool is
+    /// `true` when ⇧ was held (additive multi-select).
+    var onEditClick: ((CGPoint, Bool) -> Void)?
     /// Live hover preview in edit mode: fires with the cursor point (top-left
     /// coordinates) on every move, and `nil`-equivalent via mouseExited.
     var onHoverMove: ((CGPoint) -> Void)? {
@@ -512,7 +516,8 @@ final class InteractiveARView: ARView {
         let up = convert(event.locationInWindow, from: nil)
         guard abs(up.x - down.x) < 3, abs(up.y - down.y) < 3 else { return }
         // AppKit's origin is bottom-left; picking math wants top-left.
-        onEditClick(CGPoint(x: up.x, y: bounds.height - up.y))
+        onEditClick(CGPoint(x: up.x, y: bounds.height - up.y),
+                    event.modifierFlags.contains(.shift))
     }
 
     override func mouseDragged(with event: NSEvent) {
