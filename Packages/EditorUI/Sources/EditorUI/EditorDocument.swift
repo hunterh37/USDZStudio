@@ -55,6 +55,20 @@ public final class EditorDocument {
     /// Bumped on every stack change so the menu can observe undo/redo enablement.
     public private(set) var revision: Int = 0
 
+    /// Absolute path strings of every prim on the stage, for the viewport's
+    /// live-stage sync (deleted prims get their entities disabled). Cached per
+    /// revision so repeated SwiftUI reads don't re-walk a large stage.
+    public var scenePrimPaths: Set<String> {
+        let rev = revision // read tracked property so observers refresh
+        if pathsCacheRevision != rev {
+            pathsCache = Set(snapshot.allPrims().map(\.path.description))
+            pathsCacheRevision = rev
+        }
+        return pathsCache
+    }
+    @ObservationIgnored private var pathsCacheRevision: Int = -1
+    @ObservationIgnored private var pathsCache: Set<String> = []
+
     private let stage: InMemoryStage
     private let stack: CommandStack
 

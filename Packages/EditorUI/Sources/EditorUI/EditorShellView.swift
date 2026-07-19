@@ -14,6 +14,11 @@ public struct EditorShellView: View {
     /// The live editing document (nil before a file is opened). Selection and
     /// all mutations flow through it so edits are undoable.
     let document: EditorDocument?
+
+    /// While a dropped/opened file is being imported through the USD bridge,
+    /// the viewport shows a circular progress veil. Name is surfaced under it.
+    let isImporting: Bool
+    let importingFileName: String?
     @State private var searchText = ""
     @State private var collapsed: Set<PrimPath> = []
 
@@ -51,8 +56,12 @@ public struct EditorShellView: View {
         public static let notification = Notification.Name("EditorUI.MenuCommand")
     }
 
-    public init(document: EditorDocument? = nil) {
+    public init(document: EditorDocument? = nil,
+                isImporting: Bool = false,
+                importingFileName: String? = nil) {
         self.document = document
+        self.isImporting = isImporting
+        self.importingFileName = importingFileName
     }
 
     public var body: some View {
@@ -130,6 +139,12 @@ public struct EditorShellView: View {
         VSplitView {
             viewport
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .overlay {
+                    if isImporting {
+                        ImportProgressOverlay(fileName: importingFileName)
+                    }
+                }
+                .animation(.easeInOut(duration: 0.2), value: isImporting)
             if showValidation {
                 ValidationDrawer(
                     stage: stage,
@@ -337,6 +352,8 @@ public struct EditorShellView: View {
         if let modelURL {
             ViewportPane(
                 modelURL: modelURL,
+                livePrimPaths: document?.scenePrimPaths,
+                sceneRevision: document?.revision ?? 0,
                 editedMesh: document?.viewportEditedMesh,
                 onPickFace: { [weak document] index, additive in
                     document?.pickMeshFace(index: index, additive: additive)
