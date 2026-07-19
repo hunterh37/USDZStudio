@@ -90,11 +90,11 @@ public struct EditorShellView: View {
             Divider().overlay(Palette.panelBorder.color)
             HSplitView {
                 outliner
-                    .frame(minWidth: 220, idealWidth: 260)
+                    .frame(minWidth: 180, idealWidth: 210, maxWidth: 320)
                 centerColumn
-                    .frame(minWidth: 400, maxWidth: .infinity, maxHeight: .infinity)
+                    .frame(minWidth: 480, maxWidth: .infinity, maxHeight: .infinity)
                 InspectorView(document: document)
-                    .frame(minWidth: 260, idealWidth: 300)
+                    .frame(minWidth: 200, idealWidth: 230, maxWidth: 360)
             }
         }
         .background(Palette.windowBackground.color)
