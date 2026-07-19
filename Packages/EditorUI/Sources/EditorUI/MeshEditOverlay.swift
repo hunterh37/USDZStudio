@@ -147,6 +147,17 @@ public struct MeshEditOverlay: View {
 
     private var bottomStack: some View {
         VStack(spacing: Spacing.sm) {
+            if let drag = state?.gizmoDrag {
+                // Live drag-extrude readout (the gizmo is the input; this is
+                // the number, matching Blender's header readout during E-drag).
+                Label(String(format: "Extrude %+.3f", drag.distance),
+                      systemImage: "arrow.up.and.down")
+                    .font(.system(size: TypeScale.body, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(Palette.warning.color)
+                    .padding(Spacing.sm)
+                    .background(hudBackground)
+                    .accessibilityIdentifier("meshEdit.gizmoReadout")
+            }
             if let diagnostic = state?.lastDiagnostic {
                 Label(diagnostic, systemImage: "exclamationmark.triangle.fill")
                     .font(.system(size: TypeScale.label))

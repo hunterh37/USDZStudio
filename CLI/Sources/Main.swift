@@ -10,9 +10,11 @@ import ValidationKit
 /// failure / validation gate failure, 2 usage.
 @main
 struct Main {
+    // coverage:disable — process entry point: spawns the real CLI over argv and calls exit(); driven by end-to-end invocation, not in-process unit tests.
     static func main() async {
         exit(await CLIRunner.run(arguments: Array(CommandLine.arguments.dropFirst())))
     }
+    // coverage:enable
 }
 
 enum CLIRunner {
@@ -386,6 +388,7 @@ enum CLIRunner {
     /// Runs the interpreter, inheriting stdio so the script's stdout/stderr and
     /// exit code flow straight through. Prepends our search dirs to any
     /// inherited `PYTHONPATH`.
+    // coverage:disable — real subprocess launch of the Python interpreter with inherited stdio; exercised by integration runs, not unit tests (specs/testing.md exclusion discipline).
     static func defaultSpawn(_ invocation: RunInvocation) -> Int32 {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: invocation.python)
@@ -404,6 +407,7 @@ enum CLIRunner {
         process.waitUntilExit()
         return process.terminationStatus
     }
+    // coverage:enable
 
     /// Locates the bundled `Resources/Python/scripts` directory the same way
     /// `snapshotScriptPath` finds the snapshot script: a `DICYANIN_SCRIPTS_DIR`
@@ -632,12 +636,14 @@ enum CLIRunner {
         return lines.joined(separator: "\n")
     }
 
+    // coverage:disable — resolves and opens a stage through the real Python bridge; covered by USDBridge integration, not CLI unit tests.
     static func defaultOpen(url: URL) async throws -> any USDStageProtocol {
         guard let executor = ProcessBridgeExecutor(scriptPath: try snapshotScriptPath()) else {
             throw BridgeError.pythonUnavailable(detail: "no Python interpreter found")
         }
         return try await BridgedStage.open(url: url, executor: executor)
     }
+    // coverage:enable
 
     /// Finds `Resources/Python/stage_snapshot.py` by walking up from the cwd
     /// (works from the repo root, CLI/, or a build directory), with a

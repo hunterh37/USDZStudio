@@ -1,4 +1,5 @@
 import Foundation
+import simd
 import USDCore
 import EditingKit
 import MeshKit
@@ -102,6 +103,20 @@ public struct MeshEditState {
     public var selectedEdgeIndex: Int = 0
     /// Most recent op refusal / diagnostic for the HUD.
     public var lastDiagnostic: String?
+    /// Live extrude-gizmo drag (`nil` = not dragging). The axis is frozen at
+    /// grab time so the handle can't chase its own preview; `distance` feeds
+    /// the HUD readout while the mesh updates under the cursor.
+    public var gizmoDrag: GizmoDragState?
+
+    public struct GizmoDragState: Equatable, Sendable {
+        /// Extrude axis captured at drag start (unit, prim-local).
+        public var axis: SIMD3<Double>
+        /// Signed distance along `axis` of the current preview.
+        public var distance: Double = 0
+        /// Whether a preview extrude is currently recorded in the session
+        /// (undone and re-applied as the pointer moves).
+        var hasPreview = false
+    }
 }
 
 extension EditorDocument {
@@ -285,6 +300,108 @@ extension EditorDocument {
         state.selectedFaceIndex = nil
         state.lastDiagnostic = nil
         meshEdit = state
+    }
+
+    // MARK: Extrude gizmo (drag-to-extrude; specs/mesh-editing.md)
+
+    /// Minimum |distance| treated as an actual extrude. Below this a drag is a
+    /// no-op (grabbing the handle without moving must not dirty the session,
+    /// and `ExtrudeFaces` rejects zero distance anyway).
+    static let gizmoMinimumDistance = 1e-6
+
+    /// The extrude handle for the current selection: anchored at the mean
+    /// face centroid, aimed along the area-weighted averaged normal — the
+    /// exact direction the Extrude button would use, so drag and button agree.
+    /// `nil` outside face mode, with nothing selected, or when the region's
+    /// normals cancel (there is no meaningful single axis to drag along).
+    public var meshEditExtrudeGizmo: ViewportKit.ExtrudeGizmoDescriptor? {
+        guard let state = meshEdit, state.mode == .face,
+              case .faces(let faces) = state.componentSelection, !faces.isEmpty else { return nil }
+        let mesh = state.session.mesh
+        var normal = SIMD3<Double>()
+        var centroid = SIMD3<Double>()
+        var count = 0
+        for f in faces where mesh.faceLoops[f] != nil {
+            normal += mesh.faceNormalArea(f)
+            centroid += mesh.faceCentroid(f)
+            count += 1
+        }
+        guard count > 0, simd_length(normal) > 1e-9 else { return nil }
+        return ViewportKit.ExtrudeGizmoDescriptor(
+            origin: centroid / Double(count),
+            axis: simd_normalize(normal))
+    }
+
+    /// Viewport bridge for the handle's drag lifecycle.
+    public func handleExtrudeGizmoDrag(_ phase: ExtrudeGizmoDragPhase) {
+        switch phase {
+        case .began: beginGizmoExtrude()
+        case .changed(let distance): updateGizmoExtrude(distance: distance)
+        case .ended: endGizmoExtrude()
+        }
+    }
+
+    /// Freezes the extrude axis for the whole drag. The preview moves the cap
+    /// (and with it the recomputed handle), but the gesture keeps measuring
+    /// against the axis that was grabbed — stable, no feedback loop.
+    func beginGizmoExtrude() {
+        guard var state = meshEdit, state.gizmoDrag == nil,
+              let gizmo = meshEditExtrudeGizmo else { return }
+        state.gizmoDrag = .init(axis: gizmo.axis)
+        state.lastDiagnostic = nil
+        meshEdit = state
+    }
+
+    /// Live preview: rewind the previous preview (if any), then re-apply one
+    /// extrude from the same base mesh at the new distance. The session's CoW
+    /// snapshots make this cheap, and the base never drifts — a drag is always
+    /// exactly zero or one op, never a stack of increments.
+    func updateGizmoExtrude(distance: Double) {
+        guard var state = meshEdit, var drag = state.gizmoDrag else { return }
+        if drag.hasPreview {
+            state.session.undo()
+            drag.hasPreview = false
+        }
+        drag.distance = distance
+        if abs(distance) >= Self.gizmoMinimumDistance {
+            do {
+                let result = try ExtrudeFaces.apply(
+                    state.session.mesh, selection: state.componentSelection,
+                    params: .init(distance: distance, direction: .axis(drag.axis)))
+                state.session.record(result, journalEntry: Self.gizmoJournalEntry(distance))
+                state.componentSelection = result.resultSelection
+                drag.hasPreview = true
+                state.lastDiagnostic = nil
+            } catch let error as MeshOpError {
+                // Loud, never silent — e.g. a boundary edge parallel to the
+                // axis. The drag stays alive; moving further may succeed.
+                state.lastDiagnostic = error.description
+            } catch {
+                state.lastDiagnostic = "\(error)"
+            }
+        }
+        state.gizmoDrag = drag
+        meshEdit = state
+    }
+
+    /// Commit: the last preview simply stays recorded — one in-session undo
+    /// step per drag, flushed with everything else on exit. A drag that ends
+    /// back at ~zero leaves the session exactly as it found it.
+    func endGizmoExtrude() {
+        guard var state = meshEdit, let drag = state.gizmoDrag else { return }
+        state.gizmoDrag = nil
+        if drag.hasPreview {
+            // Keep drag and button tools in sync: the HUD distance now reads
+            // what was just dragged, so ⏎ repeats it.
+            state.extrudeDistance = drag.distance
+            state.selectedFaceIndex = Self.stepperIndex(
+                for: state.componentSelection, in: state.session.mesh)
+        }
+        meshEdit = state
+    }
+
+    private static func gizmoJournalEntry(_ distance: Double) -> String {
+        "Extrude d=\(String(format: "%.4g", distance))"
     }
 
     // MARK: Viewport bridge

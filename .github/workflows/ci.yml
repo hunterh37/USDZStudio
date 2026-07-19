@@ -33,11 +33,13 @@ jobs:
         run: bash scripts/fetch-python-runtime.sh
       - name: Test all packages (with coverage)
         run: bash scripts/test-all.sh --coverage
-      - name: MeshKit coverage gate (100% floor) + deep fuzz corpus
+      - name: Per-module coverage gate + deep fuzz corpus
         env:
           # Deepens the committed fuzz-corpus sweep (FuzzCorpus.swift) far
-          # beyond the 40-iteration local default.
+          # beyond the 40-iteration local default (applies to the MeshKit run).
           MESHKIT_FUZZ_ITERATIONS: "400"
+        # Data-driven gate over the whole MODULES table in coverage-gate.sh:
+        # spec floors (100%/95%) for the logic modules + DesignSystem + CLI,
+        # ratchet floors for USDBridge/ViewportKit/EditorUI (raised as their
+        # harnesses land — see ROADMAP Phase T). No override label, by design.
         run: bash scripts/coverage-gate.sh
-      # Remaining per-module xccov coverage floors (specs/testing.md) are wired
-      # in as modules gain measurable surface; tracked in ROADMAP Phase 0.

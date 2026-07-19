@@ -110,6 +110,7 @@ public final class InMemoryStage: USDStageMutable, @unchecked Sendable {
     private func rename(at path: PrimPath, to newName: String) throws {
         guard PrimPath.isValidName(newName) else { throw StageMutationError.invalidName(newName) }
         guard let newPath = path.parent.appending(newName) else {
+            // coverage:disable — unreachable: appending re-runs the same isValidName predicate the guard above already enforced, so it cannot return nil here.
             throw StageMutationError.invalidName(newName)
         }
         // Sibling collision check.
@@ -163,10 +164,7 @@ public final class InMemoryStage: USDStageMutable, @unchecked Sendable {
 
     private func childList(of parent: PrimPath) -> [Prim] {
         if parent.isRoot { return snapshot.rootPrims }
-        for root in snapshot.rootPrims {
-            if let found = root.prim(at: parent) { return found.children }
-        }
-        return []
+        return snapshot.rootPrims.lazy.compactMap { $0.prim(at: parent) }.first?.children ?? []
     }
 
     private func clamp(_ index: Int, count: Int) -> Int {
