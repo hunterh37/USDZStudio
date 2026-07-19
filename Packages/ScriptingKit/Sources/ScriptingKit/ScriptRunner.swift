@@ -101,6 +101,7 @@ public struct ScriptRunner: Sendable {
                                                  message: result.standardError)
         }
         guard let data = result.standardOutput.data(using: .utf8) else {
+            // coverage:disable — unreachable: standardOutput is a Swift String, which always encodes to UTF-8; kept as a defensive guard.
             throw ScriptRunError.malformedManifest("non-UTF8 output")
         }
         do {

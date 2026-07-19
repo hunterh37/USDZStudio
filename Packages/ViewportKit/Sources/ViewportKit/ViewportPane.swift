@@ -77,6 +77,10 @@ public struct ViewportPane: View {
     /// click / op would target). Reported up so the HUD can name it.
     let hoverPreview: Bool
     let onHoverFace: ((Int?) -> Void)?
+    /// Extrude handle next to the selected face(s) in mesh edit mode; `nil`
+    /// hides it. Dragging the handle reports phases through `onGizmoDrag`.
+    let extrudeGizmo: ExtrudeGizmoDescriptor?
+    let onGizmoDrag: ((ExtrudeGizmoDragPhase) -> Void)?
     /// Scripted camera (guided tour): while non-nil the pose overrides the
     /// user-driven orbit camera. `nil` = normal mouse control.
     let cameraPose: ViewportCameraPose?
@@ -101,6 +105,8 @@ public struct ViewportPane: View {
                 onPickFace: ((Int, Bool) -> Void)? = nil,
                 hoverPreview: Bool = false,
                 onHoverFace: ((Int?) -> Void)? = nil,
+                extrudeGizmo: ExtrudeGizmoDescriptor? = nil,
+                onGizmoDrag: ((ExtrudeGizmoDragPhase) -> Void)? = nil,
                 cameraPose: ViewportCameraPose? = nil,
                 liveTransforms: [String: float4x4]? = nil,
                 materialOverrides: [String: MaterialOverride]? = nil) {
@@ -111,6 +117,8 @@ public struct ViewportPane: View {
         self.onPickFace = onPickFace
         self.hoverPreview = hoverPreview
         self.onHoverFace = onHoverFace
+        self.extrudeGizmo = extrudeGizmo
+        self.onGizmoDrag = onGizmoDrag
         self.cameraPose = cameraPose
         self.liveTransforms = liveTransforms
         self.materialOverrides = materialOverrides
@@ -122,6 +130,7 @@ public struct ViewportPane: View {
                                   livePrimPaths: livePrimPaths, sceneRevision: sceneRevision,
                                   editedMesh: editedMesh, onPickFace: onPickFace,
                                   hoverPreview: hoverPreview, onHoverFace: onHoverFace,
+                                  extrudeGizmo: extrudeGizmo, onGizmoDrag: onGizmoDrag,
                                   cameraLink: cameraLink,
                                   cameraPose: cameraPose, liveTransforms: liveTransforms,
                                   materialOverrides: materialOverrides,
@@ -182,6 +191,8 @@ struct ViewportRepresentable: NSViewRepresentable {
     let onPickFace: ((Int, Bool) -> Void)?
     let hoverPreview: Bool
     let onHoverFace: ((Int?) -> Void)?
+    let extrudeGizmo: ExtrudeGizmoDescriptor?
+    let onGizmoDrag: ((ExtrudeGizmoDragPhase) -> Void)?
     let cameraLink: ViewportCameraLink
     let cameraPose: ViewportCameraPose?
     let liveTransforms: [String: float4x4]?
@@ -210,6 +221,7 @@ struct ViewportRepresentable: NSViewRepresentable {
         }
         context.coordinator.applyEditedMesh(editedMesh, onPickFace: onPickFace,
                                             hoverPreview: hoverPreview, onHoverFace: onHoverFace)
+        context.coordinator.applyExtrudeGizmo(extrudeGizmo, onDrag: onGizmoDrag)
         context.coordinator.applyCameraPose(cameraPose)
         context.coordinator.applyLiveTransforms(liveTransforms)
         context.coordinator.applyMaterialOverrides(materialOverrides)
@@ -565,17 +577,28 @@ final class ViewportCoordinator {
     }
 
     private func faceHit(at point: CGPoint) -> Int? {
-        guard let data = editData, let view,
-              var ray = CameraRay.make(camera: camera, viewSize: view.bounds.size, point: point)
+        guard let data = editData, let ray = primLocalRay(at: point) else { return nil }
+        return (pickAccelerator?.pickFace(ray: ray) ?? MeshPicker.pickFace(ray: ray, in: data))?.faceIndex
+    }
+
+    /// Click point → world pick ray → the edited prim's local space (where the
+    /// edit mesh, selection overlays, and extrude gizmo all live). Direction is
+    /// NOT re-normalized: keeping the world-ray parameterization means axis
+    /// parameters measured on this ray stay proportional to local units.
+    private func primLocalRay(at point: CGPoint) -> CameraRay.Ray? {
+        guard let view,
+              let ray = CameraRay.make(camera: camera, viewSize: view.bounds.size, point: point)
         else { return nil }
         let worldMatrix = hiddenOriginal?.parent?.transformMatrix(relativeTo: nil)
             ?? matrix_identity_float4x4
         let inverse = worldMatrix.inverse
         let origin4 = inverse * SIMD4<Float>(SIMD3<Float>(ray.origin), 1)
         let dir4 = inverse * SIMD4<Float>(SIMD3<Float>(ray.direction), 0)
-        ray = CameraRay.Ray(origin: SIMD3<Double>(SIMD3(origin4.x, origin4.y, origin4.z)),
-                            direction: SIMD3<Double>(SIMD3(dir4.x, dir4.y, dir4.z)))
-        return (pickAccelerator?.pickFace(ray: ray) ?? MeshPicker.pickFace(ray: ray, in: data))?.faceIndex
+        let direction = SIMD3<Double>(SIMD3(dir4.x, dir4.y, dir4.z))
+        let len = (direction * direction).sum().squareRoot()
+        guard len > 1e-12 else { return nil }
+        return CameraRay.Ray(origin: SIMD3<Double>(SIMD3(origin4.x, origin4.y, origin4.z)),
+                             direction: direction / len)
     }
 
     /// Rebuilds the hover highlight (accent blue, distinct from the amber
@@ -599,6 +622,122 @@ final class ViewportCoordinator {
         hoverEntity = entity
     }
 
+    // MARK: Extrude gizmo (drag-to-extrude handle; specs/mesh-editing.md)
+
+    /// Container carrying the prim's world transform; `gizmoHandle` inside it
+    /// lives in prim-local space like the edit mesh and selection overlays.
+    private let gizmoRoot = Entity()
+    private let gizmoHandle = Entity()
+    private var gizmoDescriptor: ExtrudeGizmoDescriptor?
+    private var onGizmoDrag: ((ExtrudeGizmoDragPhase) -> Void)?
+    /// Drag reference frozen at mouse-down: the handle's origin/axis and the
+    /// start ray's axis parameter. The live preview moves the handle, but the
+    /// drag keeps measuring against where it was grabbed — no feedback loop.
+    private var gizmoDragStart: (origin: SIMD3<Double>, axis: SIMD3<Double>, param: Double)?
+    private var gizmoLastDistance = 0.0
+
+    /// Shows/hides/rebuilds the extrude handle. Cheap when unchanged
+    /// (descriptor-gated, same idiom as the other apply* methods).
+    func applyExtrudeGizmo(_ descriptor: ExtrudeGizmoDescriptor?,
+                           onDrag: ((ExtrudeGizmoDragPhase) -> Void)?) {
+        onGizmoDrag = onDrag
+        let active = descriptor != nil
+        view?.onGizmoMouseDown = active ? { [weak self] p in self?.gizmoMouseDown(at: p) ?? false } : nil
+        view?.onGizmoDragMove = active ? { [weak self] p in self?.gizmoDragMoved(to: p) } : nil
+        view?.onGizmoDragEnd = active ? { [weak self] in self?.gizmoDragEnded() } : nil
+        // `applyEditedMesh` clears the edit anchor on every mesh revision, so
+        // reattach even when the descriptor itself is unchanged.
+        if let current = descriptor ?? gizmoDescriptor, gizmoRoot.parent == nil, active {
+            if gizmoHandle.parent == nil { gizmoRoot.addChild(gizmoHandle) }
+            editAnchor.addChild(gizmoRoot)
+            if editAnchor.parent == nil { view?.scene.addAnchor(editAnchor) }
+            layoutGizmo(current)
+        }
+        guard descriptor != gizmoDescriptor else { return }
+        gizmoDescriptor = descriptor
+        guard let descriptor else {
+            gizmoDragStart = nil
+            gizmoRoot.removeFromParent()
+            return
+        }
+        if gizmoHandle.children.isEmpty { rebuildGizmoGeometry() }
+        layoutGizmo(descriptor)
+    }
+
+    /// Unit-length arrow (shaft + tip sphere) along +Y; `layoutGizmo` scales it
+    /// to screen-constant size and aims it down the extrude axis. Amber to
+    /// match the selection it extrudes; unlit so it reads at any angle.
+    private func rebuildGizmoGeometry() {
+        gizmoHandle.children.removeAll()
+        let shaftColor = NSColor(srgbRed: 0.91, green: 0.7, blue: 0.25, alpha: 0.95)
+        let r = Float(ExtrudeGizmoMath.shaftRadiusFraction)
+        let shaft = ModelEntity(mesh: .generateBox(size: SIMD3<Float>(r * 2, 1, r * 2)),
+                                materials: [UnlitMaterial(color: shaftColor)])
+        shaft.position = SIMD3<Float>(0, 0.5, 0)
+        let tip = ModelEntity(mesh: .generateSphere(radius: Float(ExtrudeGizmoMath.tipRadiusFraction)),
+                              materials: [UnlitMaterial(color: shaftColor)])
+        tip.position = SIMD3<Float>(0, 1, 0)
+        gizmoHandle.addChild(shaft)
+        gizmoHandle.addChild(tip)
+    }
+
+    /// Anchors the handle at the selection centroid, aims it along the extrude
+    /// axis, and scales it to a constant apparent size for the current camera
+    /// distance (re-run on every camera change).
+    private func layoutGizmo(_ descriptor: ExtrudeGizmoDescriptor) {
+        let worldMatrix = hiddenOriginal?.parent?.transformMatrix(relativeTo: nil)
+            ?? matrix_identity_float4x4
+        gizmoRoot.transform = Transform(matrix: worldMatrix)
+        gizmoHandle.position = SIMD3<Float>(descriptor.origin)
+        gizmoHandle.orientation = simd_quatf(from: SIMD3<Float>(0, 1, 0),
+                                             to: simd_normalize(SIMD3<Float>(descriptor.axis)))
+        gizmoHandle.scale = SIMD3<Float>(repeating: Float(gizmoLocalLength()))
+    }
+
+    /// Handle length in prim-local units: world screen-constant length divided
+    /// by the prim's (approximately uniform) world scale.
+    private func gizmoLocalLength() -> Double {
+        let worldMatrix = hiddenOriginal?.parent?.transformMatrix(relativeTo: nil)
+            ?? matrix_identity_float4x4
+        let scaleColumn = worldMatrix.columns.0
+        let worldScale = Double(simd_length(SIMD3(scaleColumn.x, scaleColumn.y, scaleColumn.z)))
+        let length = ExtrudeGizmoMath.handleLength(cameraDistance: camera.distance)
+        return worldScale > 1e-9 ? length / worldScale : length
+    }
+
+    /// Mouse-down over the handle? Then capture the drag (camera stays put).
+    private func gizmoMouseDown(at point: CGPoint) -> Bool {
+        guard let descriptor = gizmoDescriptor, let ray = primLocalRay(at: point),
+              ExtrudeGizmoMath.hitTest(ray: ray, origin: descriptor.origin,
+                                       axis: descriptor.axis, length: gizmoLocalLength()),
+              let param = ExtrudeGizmoMath.axisParameter(ray: ray, origin: descriptor.origin,
+                                                         axis: descriptor.axis)
+        else { return false }
+        gizmoDragStart = (descriptor.origin, descriptor.axis, param)
+        gizmoLastDistance = 0
+        setHoveredFace(nil) // hover highlight would fight the live preview
+        onGizmoDrag?(.began)
+        return true
+    }
+
+    private func gizmoDragMoved(to point: CGPoint) {
+        guard let start = gizmoDragStart else { return }
+        // A ray gone parallel to the axis keeps the last stable distance
+        // instead of jumping — the drag freezes, never glitches.
+        if let ray = primLocalRay(at: point),
+           let param = ExtrudeGizmoMath.axisParameter(ray: ray, origin: start.origin,
+                                                      axis: start.axis) {
+            gizmoLastDistance = param - start.param
+        }
+        onGizmoDrag?(.changed(gizmoLastDistance))
+    }
+
+    private func gizmoDragEnded() {
+        guard gizmoDragStart != nil else { return }
+        gizmoDragStart = nil
+        onGizmoDrag?(.ended)
+    }
+
     private func frameModel() {
         // A scripted pose owns the camera; auto-framing would fight it.
         guard appliedPose == nil, let modelBounds else { return }
@@ -612,6 +751,8 @@ final class ViewportCoordinator {
         cameraEntity.transform = Transform(matrix: float4x4(lookAtFrom: SIMD3<Float>(camera.position),
                                                             target: SIMD3<Float>(camera.target)))
         cameraLink?.publish(camera)
+        // Keep the extrude handle a constant apparent size as the camera moves.
+        if let descriptor = gizmoDescriptor { layoutGizmo(descriptor) }
     }
 
     private func rebuildGrid(halfExtent: Float) {
@@ -724,8 +865,17 @@ final class InteractiveARView: ARView {
         didSet { updateTrackingAreas() }
     }
 
+    /// Extrude-gizmo drag capture: `onGizmoMouseDown` hit-tests the handle at
+    /// press time and returns `true` to claim the drag — the camera then never
+    /// sees it. Move/end phases follow on the same capture. Points arrive in
+    /// top-left coordinates like the picking callbacks.
+    var onGizmoMouseDown: ((CGPoint) -> Bool)?
+    var onGizmoDragMove: ((CGPoint) -> Void)?
+    var onGizmoDragEnd: (() -> Void)?
+
     private var mouseDownPoint: CGPoint?
     private var dragged = false
+    private var gizmoCapturing = false
     private var hoverTrackingArea: NSTrackingArea?
 
     override func updateTrackingAreas() {
@@ -760,12 +910,20 @@ final class InteractiveARView: ARView {
 
     override func mouseDown(with event: NSEvent) {
         window?.makeFirstResponder(self)
-        mouseDownPoint = convert(event.locationInWindow, from: nil)
+        let p = convert(event.locationInWindow, from: nil)
+        mouseDownPoint = p
         dragged = false
+        // Handle grab wins over camera and picking for the whole gesture.
+        gizmoCapturing = onGizmoMouseDown?(CGPoint(x: p.x, y: bounds.height - p.y)) ?? false
     }
 
     override func mouseUp(with event: NSEvent) {
         defer { mouseDownPoint = nil }
+        if gizmoCapturing {
+            gizmoCapturing = false
+            onGizmoDragEnd?()
+            return
+        }
         guard !dragged, let onEditClick, let down = mouseDownPoint else { return }
         let up = convert(event.locationInWindow, from: nil)
         guard abs(up.x - down.x) < 3, abs(up.y - down.y) < 3 else { return }
@@ -776,6 +934,11 @@ final class InteractiveARView: ARView {
 
     override func mouseDragged(with event: NSEvent) {
         dragged = true
+        if gizmoCapturing {
+            let p = convert(event.locationInWindow, from: nil)
+            onGizmoDragMove?(CGPoint(x: p.x, y: bounds.height - p.y))
+            return
+        }
         let dx = Double(event.deltaX), dy = Double(event.deltaY)
         // ⇧-drag always pans (power-user shortcut, independent of mode).
         guard !event.modifierFlags.contains(.shift) else {

@@ -4,6 +4,8 @@
 
 **Coverage is a CI-enforced gate, not an aspiration.** Every PR runs the full suite with code coverage; the build fails if any module drops below its floor. Logic modules are held to 100%; rendering/UI modules are held to high floors plus mandatory non-line-coverage verification (snapshot, golden-image, UI tests) because line coverage is the wrong instrument there.
 
+> **Enforcement status.** The floors below are the *targets*. They are live and enforced today for the six logic modules, DicyaninDesignSystem, and CLI. USDBridge, ViewportKit, and EditorUI currently run on **ratchet floors** (pinned at measured coverage, raised as the golden-image/snapshot/XCUITest harnesses land) rather than the targets here. The authoritative, machine-checked floors are the `MODULES` table in `scripts/coverage-gate.sh`; the gap to the targets below is tracked in ROADMAP Phase T. This note and that table change together.
+
 ## Per-Module Coverage Floors (enforced via xccov + CI script)
 
 | Module | Floor | Primary test style |

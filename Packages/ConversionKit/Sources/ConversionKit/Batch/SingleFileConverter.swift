@@ -78,6 +78,7 @@ public enum SingleFileConverter {
         context = try await ConversionPipeline.standard(texturePolicy: texturePolicy).run(context)
 
         guard let stage = context.authoredStage else {
+            // coverage:disable — unreachable via the standard pipeline, whose USDAuthorStage always sets authoredStage; kept as a defensive guard against a mis-assembled custom pipeline.
             throw ConversionError.noAuthoredStage
         }
 

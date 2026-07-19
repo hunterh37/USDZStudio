@@ -208,6 +208,7 @@ enum ThumbnailCommand {
         return 1
     }
 
+    // coverage:disable — real subprocess launch of usdrecord with inherited stdio; exercised by integration runs, not unit tests.
     static func defaultSpawn(_ invocation: Invocation) -> Int32 {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: invocation.usdrecord)
@@ -222,4 +223,5 @@ enum ThumbnailCommand {
         process.waitUntilExit()
         return process.terminationStatus
     }
+    // coverage:enable
 }

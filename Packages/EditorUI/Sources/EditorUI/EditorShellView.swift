@@ -386,6 +386,10 @@ public struct EditorShellView: View {
                 },
                 hoverPreview: document?.meshEdit?.hoverPreviewEnabled ?? false,
                 onHoverFace: { [weak document] index in document?.hoverMeshFace(index: index) },
+                extrudeGizmo: document?.meshEditExtrudeGizmo,
+                onGizmoDrag: { [weak document] phase in
+                    document?.handleExtrudeGizmoDrag(phase)
+                },
                 cameraPose: tutorial?.cameraPose,
                 liveTransforms: tutorial?.liveTransforms,
                 materialOverrides: document?.viewportMaterialOverrides)
