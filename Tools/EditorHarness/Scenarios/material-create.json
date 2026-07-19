@@ -1,0 +1,28 @@
+{ "name": "material-create",
+  "open": "Tests/Fixtures/unpainted-model.usda",
+  "steps": [
+    { "do": "select", "path": "/Model" },
+    { "do": "expect", "hasMaterial": false },
+    { "do": "shot", "name": "1-no-material", "tab": "material" },
+
+    { "do": "material.create", "color": [0.8, 0.1, 0.1] },
+    { "do": "expect", "hasMaterial": true },
+    { "do": "expect", "materialInput": "diffuseColor", "color": [0.8, 0.1, 0.1] },
+    { "do": "shot", "name": "2-created-and-bound", "tab": "material" },
+
+    { "do": "select", "path": "/Model/Body" },
+    { "do": "expect", "hasMaterial": true },
+    { "do": "expect", "materialInput": "diffuseColor", "color": [0.8, 0.1, 0.1] },
+
+    { "do": "select", "path": "/Model" },
+    { "do": "material.recolor", "input": "diffuseColor", "color": [0.1, 0.5, 0.9] },
+    { "do": "expect", "materialInput": "diffuseColor", "color": [0.1, 0.5, 0.9] },
+    { "do": "shot", "name": "3-recolored", "tab": "material" },
+
+    { "do": "undo" },
+    { "do": "expect", "materialInput": "diffuseColor", "color": [0.8, 0.1, 0.1] },
+
+    { "do": "undo" },
+    { "do": "expect", "hasMaterial": false },
+    { "do": "shot", "name": "4-undone", "tab": "material" }
+  ] }

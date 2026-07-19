@@ -4,6 +4,7 @@ import USDCore
 import USDBridge
 import EditingKit
 import ValidationKit
+import ViewportKit
 
 /// The editor's live, mutable document — the single source of truth once a file
 /// is open.
@@ -68,6 +69,11 @@ public final class EditorDocument {
     }
     @ObservationIgnored private var pathsCacheRevision: Int = -1
     @ObservationIgnored private var pathsCache: Set<String> = []
+
+    /// Cache backing `viewportMaterialOverrides` (see EditorDocument+ViewportMaterial),
+    /// keyed by the revision it was computed at.
+    @ObservationIgnored var materialOverrideCacheRevision: Int = -1
+    @ObservationIgnored var materialOverrideCache: [String: ViewportKit.MaterialOverride] = [:]
 
     private let stage: InMemoryStage
     private let stack: CommandStack
@@ -277,6 +283,21 @@ public final class EditorDocument {
             }
         }
         return result
+    }
+
+    /// Creates a new UsdPreviewSurface material and binds it to `path`, undoably.
+    /// Because bindings inherit down namespace, binding on a model's root gives
+    /// every part under it the material — the "this model has no material yet,
+    /// give it one I can recolour" path. Returns `true` when the material was
+    /// created.
+    @discardableResult
+    public func createAndBindMaterial(
+        to path: PrimPath,
+        baseColor: [Double] = [0.18, 0.18, 0.18]
+    ) -> Bool {
+        guard let command = CreateMaterialCommand.make(
+            bindingTo: path, baseColor: baseColor, in: snapshot) else { return false }
+        return run(command) != nil
     }
 
     /// Sets one UsdPreviewSurface input across several materials as a single

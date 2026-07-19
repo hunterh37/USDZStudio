@@ -33,6 +33,7 @@ Scripts panel, so this module never shows up as a runnable script.
 """
 
 import argparse
+import json
 import os
 import sys
 
@@ -138,9 +139,37 @@ def _injected_args(manifest, g):
     return ns
 
 
+def _emit_manifest(manifest):
+    """Print the MANIFEST as JSON on stdout for the in-app host to build its
+    parameter sheet, then exit. Normalized so the Swift decoder always sees the
+    same shape (name/description/mutates/args)."""
+    payload = {
+        "name": manifest.get("name", "script"),
+        "description": manifest.get("description", ""),
+        "mutates": bool(manifest.get("mutates")),
+        "args": [
+            {
+                "name": spec["name"],
+                "type": spec.get("type", "str"),
+                "default": spec.get("default"),
+                "help": spec.get("help", ""),
+            }
+            for spec in manifest.get("args", [])
+        ],
+    }
+    json.dump(payload, sys.stdout)
+    sys.stdout.write("\n")
+    sys.exit(0)
+
+
 def begin(g, manifest):
     """Resolve the execution context. `g` is the caller's globals()."""
     injected = g.get("stage") is not None
+
+    # Host introspection: `python3 script.py --emit-manifest` (headless only).
+    if not injected and "--emit-manifest" in sys.argv[1:]:
+        _emit_manifest(manifest)
+
     mutates = bool(manifest.get("mutates"))
 
     if injected:

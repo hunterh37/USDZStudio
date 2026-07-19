@@ -49,6 +49,8 @@ struct Scenario: Decodable {
         var isNull: Bool?
         /// Assert which prim the selection's material inputs resolve to.
         var surfacePath: String?
+        /// Assert whether a material is bound to the step's path/selection.
+        var hasMaterial: Bool?
         /// Assert the face count — of the edit session's working mesh while in
         /// edit mode, else of the selected prim's authored faceVertexCounts.
         var faceCount: Int?

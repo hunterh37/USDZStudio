@@ -238,10 +238,32 @@ public struct InspectorView: View {
                 MaterialEditor(document: document, material: subtreeMaterial, selected: prim.path)
                     .id(prim.path)
             } else {
-                emptyState("No material bound to \(prim.name).")
+                noMaterialState(document: document, prim: prim)
             }
         } else {
             emptyState("No selection")
+        }
+    }
+
+    /// Shown when the selection has no material anywhere: offers to create and
+    /// bind one so the model becomes recolourable. Binding on the selected prim
+    /// inherits down, so a model root gets its whole subtree covered.
+    private func noMaterialState(document: EditorDocument, prim: Prim) -> some View {
+        InspectorSection(title: "Material") {
+            Text("No material is bound to \(prim.name).")
+                .font(.system(size: TypeScale.body))
+                .foregroundStyle(Palette.textSecondary.color)
+            Button("Create & assign material") {
+                document.createAndBindMaterial(to: prim.path)
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.small)
+            .accessibilityIdentifier("material.create")
+            Text("Adds a new UsdPreviewSurface material and binds it here. "
+                 + "Parts under this prim inherit it, so the whole model becomes "
+                 + "recolourable.")
+                .font(.system(size: TypeScale.caption))
+                .foregroundStyle(Palette.textSecondary.color)
         }
     }
 

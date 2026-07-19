@@ -38,6 +38,24 @@ public enum CameraInteractionMode: String, CaseIterable, Identifiable {
     }
 }
 
+/// A programmatic camera pose (guided tour / scripted flythroughs). While
+/// non-nil it overrides the user-driven orbit camera each frame; pass `nil`
+/// to hand control back to mouse gestures.
+public struct ViewportCameraPose: Equatable, Sendable {
+    public var target: SIMD3<Double>
+    public var distance: Double
+    public var azimuth: Double
+    public var elevation: Double
+
+    public init(target: SIMD3<Double> = .zero, distance: Double = 2,
+                azimuth: Double = 0, elevation: Double = 0.3) {
+        self.target = target
+        self.distance = distance
+        self.azimuth = azimuth
+        self.elevation = elevation
+    }
+}
+
 public struct ViewportPane: View {
 
     let modelURL: URL?
@@ -59,10 +77,22 @@ public struct ViewportPane: View {
     /// click / op would target). Reported up so the HUD can name it.
     let hoverPreview: Bool
     let onHoverFace: ((Int?) -> Void)?
+    /// Scripted camera (guided tour): while non-nil the pose overrides the
+    /// user-driven orbit camera. `nil` = normal mouse control.
+    let cameraPose: ViewportCameraPose?
+    /// Live per-prim local transforms (column-major, RealityKit convention)
+    /// keyed by absolute prim path — applied onto the file-loaded entities so
+    /// scripted/tweened transform edits are visible without a reload.
+    let liveTransforms: [String: float4x4]?
+    /// Live material overrides keyed by absolute (mesh) prim path — applied onto
+    /// the file-loaded entities so recolour/roughness/etc. edits are visible
+    /// without a reload. `nil` = leave the file's baked materials as-is.
+    let materialOverrides: [String: MaterialOverride]?
     @State private var stats: SceneStats?
     @State private var showStats = true
     @State private var loadError: String?
     @State private var cameraMode: CameraInteractionMode = .rotate
+    @StateObject private var cameraLink = ViewportCameraLink()
 
     public init(modelURL: URL?,
                 livePrimPaths: Set<String>? = nil,
@@ -70,7 +100,10 @@ public struct ViewportPane: View {
                 editedMesh: EditedMeshData? = nil,
                 onPickFace: ((Int, Bool) -> Void)? = nil,
                 hoverPreview: Bool = false,
-                onHoverFace: ((Int?) -> Void)? = nil) {
+                onHoverFace: ((Int?) -> Void)? = nil,
+                cameraPose: ViewportCameraPose? = nil,
+                liveTransforms: [String: float4x4]? = nil,
+                materialOverrides: [String: MaterialOverride]? = nil) {
         self.modelURL = modelURL
         self.livePrimPaths = livePrimPaths
         self.sceneRevision = sceneRevision
@@ -78,6 +111,9 @@ public struct ViewportPane: View {
         self.onPickFace = onPickFace
         self.hoverPreview = hoverPreview
         self.onHoverFace = onHoverFace
+        self.cameraPose = cameraPose
+        self.liveTransforms = liveTransforms
+        self.materialOverrides = materialOverrides
     }
 
     public var body: some View {
@@ -86,8 +122,15 @@ public struct ViewportPane: View {
                                   livePrimPaths: livePrimPaths, sceneRevision: sceneRevision,
                                   editedMesh: editedMesh, onPickFace: onPickFace,
                                   hoverPreview: hoverPreview, onHoverFace: onHoverFace,
+                                  cameraLink: cameraLink,
+                                  cameraPose: cameraPose, liveTransforms: liveTransforms,
+                                  materialOverrides: materialOverrides,
                                   stats: $stats, loadError: $loadError)
             cameraModeControl
+            AxisGizmoView(link: cameraLink)
+                .padding(10)
+                .frame(maxWidth: .infinity, maxHeight: .infinity,
+                       alignment: .bottomTrailing)
             if showStats, let stats {
                 VStack(alignment: .trailing, spacing: 2) {
                     Text(stats.countsLine)
@@ -139,6 +182,10 @@ struct ViewportRepresentable: NSViewRepresentable {
     let onPickFace: ((Int, Bool) -> Void)?
     let hoverPreview: Bool
     let onHoverFace: ((Int?) -> Void)?
+    let cameraLink: ViewportCameraLink
+    let cameraPose: ViewportCameraPose?
+    let liveTransforms: [String: float4x4]?
+    let materialOverrides: [String: MaterialOverride]?
     @Binding var stats: SceneStats?
     @Binding var loadError: String?
 
@@ -146,7 +193,7 @@ struct ViewportRepresentable: NSViewRepresentable {
 
     func makeNSView(context: Context) -> InteractiveARView {
         let view = InteractiveARView(frame: .zero)
-        context.coordinator.attach(to: view)
+        context.coordinator.attach(to: view, cameraLink: cameraLink)
         context.coordinator.onStats = { stats = $0 }
         context.coordinator.onError = { loadError = $0 }
         view.interactionMode = mode
@@ -163,6 +210,9 @@ struct ViewportRepresentable: NSViewRepresentable {
         }
         context.coordinator.applyEditedMesh(editedMesh, onPickFace: onPickFace,
                                             hoverPreview: hoverPreview, onHoverFace: onHoverFace)
+        context.coordinator.applyCameraPose(cameraPose)
+        context.coordinator.applyLiveTransforms(liveTransforms)
+        context.coordinator.applyMaterialOverrides(materialOverrides)
     }
 }
 
@@ -184,9 +234,18 @@ final class ViewportCoordinator {
 
     var onStats: ((SceneStats?) -> Void)?
     var onError: ((String?) -> Void)?
+    private weak var cameraLink: ViewportCameraLink?
 
-    func attach(to view: InteractiveARView) {
+    func attach(to view: InteractiveARView, cameraLink: ViewportCameraLink? = nil) {
         self.view = view
+        self.cameraLink = cameraLink
+        cameraLink?.snapHandler = { [weak self] axis in
+            guard let self else { return }
+            let preset = AxisGizmoModel.preset(for: axis, currentAzimuth: self.camera.azimuth)
+            self.camera.azimuth = preset.azimuth
+            self.camera.elevation = preset.elevation
+            self.applyCamera()
+        }
         view.environment.background = .color(NSColor(srgbRed: 0.11, green: 0.11, blue: 0.13, alpha: 1))
         cameraEntity.camera.fieldOfViewInDegrees = Float(OrbitCamera.verticalFOV * 180 / .pi)
         cameraAnchor.addChild(cameraEntity)
@@ -237,6 +296,8 @@ final class ViewportCoordinator {
                 // Edits may have landed while the file was loading; bring the
                 // freshly loaded entities in line with the live stage.
                 self.pruneModelEntities()
+                self.reapplyLiveTransforms()
+                self.reapplyMaterialOverrides()
             } catch {
                 guard !Task.isCancelled else { return }
                 self?.onError?("Viewport could not load model: \(error.localizedDescription)")
@@ -249,6 +310,104 @@ final class ViewportCoordinator {
     /// Phase 1 typical asset sizes, revisit with off-main streaming later.
     private static func loadEntity(_ url: URL) throws -> Entity {
         try Entity.load(contentsOf: url)
+    }
+
+    // MARK: Scripted camera + live transforms (guided tour / scripted edits)
+
+    private var appliedPose: ViewportCameraPose?
+    private var appliedTransforms: [String: float4x4]?
+
+    /// While a pose is supplied it drives the camera absolutely (the guided
+    /// tour's slow orbit). User gestures keep mutating `camera`, but each new
+    /// pose reasserts the scripted view; a `nil` pose returns control.
+    func applyCameraPose(_ pose: ViewportCameraPose?) {
+        guard pose != appliedPose else { return }
+        appliedPose = pose
+        guard let pose else { return }
+        camera.target = pose.target
+        camera.distance = OrbitCamera.clampDistance(pose.distance)
+        camera.azimuth = OrbitCamera.wrapAzimuth(pose.azimuth)
+        camera.elevation = OrbitCamera.clampElevation(pose.elevation)
+        applyCamera()
+    }
+
+    /// Applies per-prim local transforms onto the matching file-loaded
+    /// entities so scripted transform tweens render live. Re-applied after an
+    /// async model load so early frames aren't lost.
+    func applyLiveTransforms(_ transforms: [String: float4x4]?) {
+        guard transforms != appliedTransforms else { return }
+        appliedTransforms = transforms
+        reapplyLiveTransforms()
+    }
+
+    private func reapplyLiveTransforms() {
+        guard let transforms = appliedTransforms else { return }
+        for (path, matrix) in transforms {
+            guard let entity = modelAnchor.findEntity(primPath: path) else { continue }
+            entity.transform = Transform(matrix: matrix)
+        }
+    }
+
+    // MARK: Live material overrides (recolour / surface-input edits)
+
+    private var appliedMaterialOverrides: [String: MaterialOverride]?
+
+    /// Applies resolved material values onto the matching file-loaded entities
+    /// so recolour and other surface-input edits render live. Re-applied after
+    /// an async model load so edits made while loading aren't lost.
+    ///
+    /// Each edited material's slot is replaced with a `PhysicallyBasedMaterial`
+    /// built from its UsdPreviewSurface inputs. Untouched materials keep the
+    /// loader's original (higher-fidelity, texture-preserving) material — the
+    /// document only emits an override for a material whose inputs it actually
+    /// authored, so this never flattens a material the user didn't edit.
+    func applyMaterialOverrides(_ overrides: [String: MaterialOverride]?) {
+        guard overrides != appliedMaterialOverrides else { return }
+        appliedMaterialOverrides = overrides
+        reapplyMaterialOverrides()
+    }
+
+    private func reapplyMaterialOverrides() {
+        guard let overrides = appliedMaterialOverrides else { return }
+        for (path, override) in overrides {
+            guard let entity = modelAnchor.findEntity(primPath: path) else { continue }
+            applyOverride(override, toSubtreeOf: entity)
+        }
+    }
+
+    /// Sets the material on `entity` and any *unnamed* wrapper descendants the
+    /// loader inserted between the prim's entity and its `ModelComponent` — but
+    /// stops at named children, which are other prims with their own overrides.
+    private func applyOverride(_ override: MaterialOverride, toSubtreeOf entity: Entity) {
+        if var model = entity.components[ModelComponent.self] {
+            let material = Self.physicallyBasedMaterial(override)
+            model.materials = Array(repeating: material, count: max(1, model.materials.count))
+            entity.components.set(model)
+        }
+        for child in entity.children where child.name.isEmpty {
+            applyOverride(override, toSubtreeOf: child)
+        }
+    }
+
+    /// A `PhysicallyBasedMaterial` from resolved surface values. Colours arrive
+    /// sRGB (converted by the document), ready for `NSColor(srgbRed:…)`.
+    static func physicallyBasedMaterial(_ o: MaterialOverride) -> PhysicallyBasedMaterial {
+        var material = PhysicallyBasedMaterial()
+        material.baseColor = .init(tint: nsColor(o.baseColor, alpha: o.opacity))
+        material.roughness = .init(floatLiteral: o.roughness)
+        material.metallic = .init(floatLiteral: o.metallic)
+        if o.emissiveColor != .zero {
+            material.emissiveColor = .init(color: nsColor(o.emissiveColor))
+            material.emissiveIntensity = 1
+        }
+        if o.opacity < 1 {
+            material.blending = .transparent(opacity: .init(floatLiteral: o.opacity))
+        }
+        return material
+    }
+
+    private static func nsColor(_ c: SIMD3<Float>, alpha: Float = 1) -> NSColor {
+        NSColor(srgbRed: CGFloat(c.x), green: CGFloat(c.y), blue: CGFloat(c.z), alpha: CGFloat(alpha))
     }
 
     // MARK: Live-stage sync (structural edits)
@@ -352,9 +511,19 @@ final class ViewportCoordinator {
             ?? matrix_identity_float4x4
 
         if let mesh = Self.meshResource(MeshFlattener.flatten(data)) {
-            var material = PhysicallyBasedMaterial()
-            material.baseColor = .init(tint: NSColor(srgbRed: 0.62, green: 0.65, blue: 0.7, alpha: 1))
-            material.roughness = 0.6
+            // Use the prim's edited material if one is overridden, so the mesh
+            // being edited keeps its real colour rather than a flat grey.
+            let material: PhysicallyBasedMaterial
+            if let override = appliedMaterialOverrides?[data.primPath] {
+                material = Self.physicallyBasedMaterial(override)
+            } else {
+                material = {
+                    var m = PhysicallyBasedMaterial()
+                    m.baseColor = .init(tint: NSColor(srgbRed: 0.62, green: 0.65, blue: 0.7, alpha: 1))
+                    m.roughness = 0.6
+                    return m
+                }()
+            }
             let entity = ModelEntity(mesh: mesh, materials: [material])
             entity.transform = Transform(matrix: worldMatrix)
             editAnchor.addChild(entity)
@@ -431,7 +600,8 @@ final class ViewportCoordinator {
     }
 
     private func frameModel() {
-        guard let modelBounds else { return }
+        // A scripted pose owns the camera; auto-framing would fight it.
+        guard appliedPose == nil, let modelBounds else { return }
         camera.frame(
             center: SIMD3<Double>(modelBounds.center),
             radius: Double(modelBounds.radius))
@@ -441,12 +611,17 @@ final class ViewportCoordinator {
     private func applyCamera() {
         cameraEntity.transform = Transform(matrix: float4x4(lookAtFrom: SIMD3<Float>(camera.position),
                                                             target: SIMD3<Float>(camera.target)))
+        cameraLink?.publish(camera)
     }
 
     private func rebuildGrid(halfExtent: Float) {
         gridAnchor.children.removeAll()
         let lineMaterial = UnlitMaterial(color: NSColor(white: 1, alpha: 0.12))
-        let axisMaterial = UnlitMaterial(color: NSColor(white: 1, alpha: 0.35))
+        // DCC-standard axis tints (matching the orientation gizmo): X red, Z blue.
+        let xAxisMaterial = UnlitMaterial(
+            color: NSColor(srgbRed: 0.91, green: 0.34, blue: 0.30, alpha: 0.6))
+        let zAxisMaterial = UnlitMaterial(
+            color: NSColor(srgbRed: 0.34, green: 0.55, blue: 0.98, alpha: 0.6))
         let thickness = halfExtent / 900
         for segment in GridModel.segments(halfExtent: halfExtent, divisions: 10) {
             let alongX = segment.start.z == segment.end.z
@@ -454,9 +629,14 @@ final class ViewportCoordinator {
                 alongX ? segment.length : thickness,
                 thickness,
                 alongX ? thickness : segment.length)
+            let material: UnlitMaterial = switch segment.axis {
+            case .x: xAxisMaterial
+            case .z: zAxisMaterial
+            case nil: lineMaterial
+            }
             let entity = ModelEntity(
                 mesh: .generateBox(size: size),
-                materials: [segment.isAxis ? axisMaterial : lineMaterial])
+                materials: [material])
             entity.position = segment.midpoint
             gridAnchor.addChild(entity)
         }

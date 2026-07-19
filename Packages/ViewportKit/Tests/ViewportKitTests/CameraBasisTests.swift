@@ -79,6 +79,8 @@ struct GridModelTests {
         let segments = GridModel.segments(halfExtent: 5, divisions: 10)
         #expect(segments.count == 2 * (2 * 10 + 1))
         #expect(segments.filter(\.isAxis).count == 2)
+        #expect(segments.filter { $0.axis == .x }.count == 1)
+        #expect(segments.filter { $0.axis == .z }.count == 1)
     }
 
     @Test func segmentsSpanFullExtentOnGroundPlane() {
@@ -90,7 +92,7 @@ struct GridModelTests {
     }
 
     @Test func midpointAndLength() {
-        let segment = GridModel.Segment(start: SIMD3(-5, 0, 1), end: SIMD3(5, 0, 1), isAxis: false)
+        let segment = GridModel.Segment(start: SIMD3(-5, 0, 1), end: SIMD3(5, 0, 1))
         #expect(segment.midpoint == SIMD3(0, 0, 1))
         #expect(abs(segment.length - 10) < 1e-6)
     }
