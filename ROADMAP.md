@@ -45,7 +45,7 @@ This is a full 3D **editor**. The roadmap is organized around two spines that ru
 
 ---
 
-## Phase 0 — Foundation (weeks 1–3)
+## Phase 0 — Foundation
 
 - [x] SPM workspace with all package stubs + dependency-lint CI
 - [x] Document-based app shell, split-view chrome, DicyaninDesignSystem tokens + core controls
@@ -55,7 +55,7 @@ This is a full 3D **editor**. The roadmap is organized around two spines that ru
 
 **Exit:** open a USDZ, see its prim tree in a native outliner.
 
-## Phase 1 — Best-in-class Viewer (v0.1, weeks 4–8)
+## Phase 1 — Best-in-class Viewer (v0.1)
 
 - [x] RealityKit viewport: fast-path loading, orbit/pan/dolly, frame selection, grid/axes
 - [ ] IBL presets + custom HDR, exposure, background modes
@@ -68,7 +68,7 @@ This is a full 3D **editor**. The roadmap is organized around two spines that ru
 
 **Exit:** the best free USDZ viewer on macOS. Ship publicly, start collecting issues.
 
-## Phase 2 — Conversion (v0.2, weeks 9–14)
+## Phase 2 — Conversion (v0.2)
 
 - [x] IntermediateScene IR + `AssetImporter` protocol
 - [ ] Native GLB/glTF importer — PBR ✓, KHR subset ✓, skinning + animations ✓ (UsdSkel); Draco decode still TODO
@@ -76,12 +76,12 @@ This is a full 3D **editor**. The roadmap is organized around two spines that ru
 - [x] Texture pipeline (resize, re-encode, channel handling)
 - [x] Conversion sheet UI with per-stage options + live log; presets (ecommerce, quicklook-strict, lossless) — preset model + CLI `--preset` ✓; sheet UI + live log ✓
 - [x] Batch converter window + CSV/JSON reports — engine + CSV/JSON reports ✓ (BatchConverter); window UI ✓
-- [ ] `openusdz` CLI: convert ✓ (with `--preset`), convert-batch ✓ (with `--preset`), info ✓, thumbnail TODO
+- [x] `openusdz` CLI: convert ✓ (with `--preset`), convert-batch ✓ (with `--preset`), info ✓, thumbnail ✓
 - [ ] glTF sample-model corpus in CI with success-rate gate
 
 **Exit:** drop a GLB, get a validated USDZ. CLI usable in pipelines.
 
-## Phase 3 — Editing (v0.3, weeks 15–22)
+## Phase 3 — Editing (v0.3)
 
 - [x] EditingKit command layer + undo/redo bridged to NSUndoManager — `CommandStack` + `InMemoryStage` + full command set (visibility/active/rename/remove/set-attr/composite) + `UndoManagerBridge`
 - [ ] Transform gizmos (translate/rotate/scale, snapping, coalesced undo) — edit backbone done (`TRS`↔matrix compose/decompose, `SnapSettings`, `TransformDragSession` → one coalesced `SetTransformCommand`); viewport gizmo overlay TODO
@@ -101,7 +101,7 @@ This is a full 3D **editor**. The roadmap is organized around two spines that ru
 
 **Exit:** real editor. Open → fix scale → swap texture → rename → export, all undoable.
 
-## Phase 4 — Validation & Scripting (v0.4, weeks 23–28)
+## Phase 4 — Validation & Scripting (v0.4)
 
 - [ ] ValidationRule engine + v1 rule catalog, live diagnostics drawer (engine ✓; catalog: scale/upAxis/defaultPrim/duplicate-name/mesh-topology/empty/unbound/normals ✓; drawer ✓; quick-fixes: `QuickFixRegistry` maps diagnostics → undoable `EditCommand`s for metersPerUnit (reuses ScaleFixer) and defaultPrim, wired to a per-row "Fix" button in the drawer via `EditorDocument.applyQuickFix`; duplicate-name/topology/normals/unbound intentionally have no auto-fix — see QuickFix.swift)
 - [x] ComplianceChecker (ARKit profile) integration, export gating — `ValidationProfile` (named catalog + `blockingSeverity`): `.arkit` (blocks on error), `.arkitStrict` (blocks on warning); `ComplianceChecker` runs a profile → `ComplianceResult` with `isExportAllowed`/`blockingDiagnostics`/`summary` for the export path. CLI `validate` now takes `--profile NAME` (arkit|arkit-strict) with `--strict` as shorthand and conflict-guarded, gating exit code on the profile's decision. Drawer still reads the engine directly; app export flow lands with Phase 3 Save/Save As
@@ -112,7 +112,7 @@ This is a full 3D **editor**. The roadmap is organized around two spines that ru
 
 **Exit:** the "will it work in AR?" answer machine + platform for power users.
 
-## Phase 4.5 — Perceptual Texture Recoloring (v0.5, weeks 27–31, overlaps Phase 5 start)
+## Phase 4.5 — Perceptual Texture Recoloring (v0.5, overlaps Phase 5 start)
 
 - [ ] RecolorEngine: OKLab hue/chroma remap, Metal kernel + CPU reference implementation, parity-tested
 - [ ] Color management: explicit sRGB/linear/P3 handling, sourceColorSpace honoring, reference-value tests
@@ -125,7 +125,7 @@ This is a full 3D **editor**. The roadmap is organized around two spines that ru
 
 **Exit:** recolor red leather to blue without losing the grain — live, accurate, batchable. Nothing else in the USDZ ecosystem does this.
 
-## Phase 5 — 1.0 Polish (weeks 29–34)
+## Phase 5 — 1.0 Polish
 
 - [ ] Command palette (⌘K) + ActionRegistry (menu/shortcut/palette unification)
 - [ ] Camera bookmarks, turntable/thumbnail rendering, "AirDrop to test on iPhone"
@@ -153,7 +153,7 @@ Targeted mesh repair & adjustment — extrude a mounting tab, close a hole, merg
 - [ ] LoopCut (quad-strip traversal)
 - [ ] Multi-segment bevel, skin-weight propagation investigation
 
-# Editing-Tools Spine (post-1.0) — the "god level" authoring roadmap
+# Editing-Tools Spine (post-1.0) — the authoring roadmap
 
 The v1 editor establishes the stage-as-truth + command-layer + invariant-harness foundation. Phases 7–12 turn it into a complete USDZ authoring tool. Each phase is ordered by **(value to the target users) × (verifiability today)**. Every op is a pure-function command with a machine-checkable invariant harness landing in the same PR (Phase T rule). Every phase carries an export-profile matrix: what it authors, and what each construct degrades to under the RealityKit profile.
 
@@ -208,7 +208,7 @@ Playback ships in Phase 1; this authors it.
 
 ## Phase 12 — Advanced USD & Composition Authoring (v2)
 
-The "we author everything USD supports" endgame — always profile-flagged.
+The comprehensive USD authoring endgame — always profile-flagged.
 
 - [ ] Composition authoring: references/payloads/sublayers/variant-set *creation* (Phase 1–3 made these read-only).
 - [ ] Variant set authoring (build a variant set from selected prim states).
@@ -224,7 +224,3 @@ The "we author everything USD supports" endgame — always profile-flagged.
 - [ ] USD stage **diff view** (compare two files / before-after an edit batch).
 - [ ] Plugin API v2: native Swift plugin bundles for importers/panels/tools.
 - [ ] visionOS companion viewer (edit on Mac, view synced over network).
-
-## Genuine Non-Goals (see PRD §6)
-
-Digital sculpting/voxel workflows, a general node-graph shading DCC UI, cloud accounts/telemetry, Windows/Linux ports. Everything else that USD can express is on this roadmap.

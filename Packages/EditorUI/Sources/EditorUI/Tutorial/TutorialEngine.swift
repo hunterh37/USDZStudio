@@ -172,8 +172,30 @@ public final class TutorialEngine {
         publish(trs)
     }
 
+    /// The camera target that keeps the cube centered given its current
+    /// translation. Mirrors the tour's baseline 0.25 lift above the cube's base.
+    private var centeredTarget: SIMD3<Double> {
+        SIMD3<Double>(trs.translation[0], trs.translation[1], trs.translation[2])
+            + SIMD3<Double>(0, 0.25, 0)
+    }
+
+    /// Ease the camera target onto the cube's current position so it sits in
+    /// the middle of the viewport. The orbit keeps running underneath.
+    private func recenterOnCube(duration: TimeInterval = 0.6) async {
+        let start = cameraTarget
+        let end = centeredTarget
+        await tween(duration: duration) { t in
+            let e = Self.easeInOut(t)
+            self.cameraTarget = start + (end - start) * e
+            self.publishPose()
+        }
+    }
+
     /// A full turn plus a 30° resting tilt, committed as one "Rotate" command.
     private func rotateCube() async {
+        // The cube was moved off-origin in the previous step; bring it back to
+        // the center of the viewport before spinning it.
+        await recenterOnCube()
         let endY = 390.0
         await tween(duration: 1.4) { t in
             var live = self.trs
@@ -189,10 +211,15 @@ public final class TutorialEngine {
     /// the extrusion live by re-applying the op at increasing distances, and
     /// commit the session as one undoable command.
     private func extrudeTopFace() async {
-        // Lift the camera so the top face is clearly visible.
+        // Keep the cube centered and lift the camera so the top face is
+        // clearly visible.
         let startElevation = elevation
+        let startTarget = cameraTarget
+        let endTarget = centeredTarget
         await tween(duration: 0.6) { t in
-            self.elevation = startElevation + (0.62 - startElevation) * Self.easeInOut(t)
+            let e = Self.easeInOut(t)
+            self.elevation = startElevation + (0.62 - startElevation) * e
+            self.cameraTarget = startTarget + (endTarget - startTarget) * e
             self.publishPose()
         }
 

@@ -18,6 +18,13 @@ struct ScriptProgressTests {
 
     @Test func clampsOutOfRangePercent() throws {
         #expect(ScriptProgress.parse(line: "[150%] over")?.fraction == 1)
+        // Low-end clamp: a negative percent floors to 0 rather than going below.
+        #expect(ScriptProgress.parse(line: "[-10%] under")?.fraction == 0)
+    }
+
+    @Test func toleratesInteriorWhitespaceAroundPercent() throws {
+        // The harness pads to a fixed width; a value like "[  5 %]" still parses.
+        #expect(ScriptProgress.parse(line: "[  5 %] tick")?.fraction == 0.05)
     }
 
     @Test func toleratesNoMessage() throws {

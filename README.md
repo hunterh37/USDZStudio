@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="Resources/AppIcon/icon.png" alt="OpenUSDZEditor app icon" width="128" height="128" />
+
 # OpenUSDZEditor
 
 **The professional, open-source USDZ viewer and editor for macOS.**
@@ -91,8 +93,8 @@ Requires Xcode 16+ / Swift 6 on macOS 14+ (Apple Silicon primary, Intel best-eff
 The SPM packages under `Packages/` are the source of truth for all library code, tests, and the CLI — build them with `swift build` / `swift test`. The editor *shell* additionally needs a real `.app` bundle (Info.plist, bundle id, USD document-type registration, embedded Python scripts), which a bare `swift run` executable can't produce. That bundle is generated from [`project.yml`](project.yml) with [XcodeGen](https://github.com/yonaskolb/XcodeGen) (`brew install xcodegen`):
 
 ```sh
-bash scripts/generate-xcodeproj.sh     # project.yml -> DicyaninUSDZEditor.xcodeproj
-open DicyaninUSDZEditor.xcodeproj       # or work in Xcode directly
+bash scripts/generate-xcodeproj.sh     # project.yml -> OpenUSDZEditor.xcodeproj
+open OpenUSDZEditor.xcodeproj       # or work in Xcode directly
 bash scripts/run-app.sh [model.usdz]    # build + launch the bundle in one step
 ```
 
@@ -100,7 +102,18 @@ bash scripts/run-app.sh [model.usdz]    # build + launch the bundle in one step
 
 ## Status
 
-Phase 0 (foundation) is complete. Phase 1 (best-in-class viewer) and Phase 2 (conversion) are well underway — viewport, outliner, inspectors, conversion pipeline, batch converter, and CLI are live, with mesh editing and material recoloring already landing ahead of schedule. See [`ROADMAP.md`](ROADMAP.md) for the live checklist.
+Development has run **depth-first, not strictly phase-by-phase** — the high-value mesh-editing work was pulled forward, so the frontier is wider than a single phase number.
+
+- **Phase 0 — Foundation:** complete.
+- **Phase 1 — Viewer:** core shipped (RealityKit viewport, outliner, read-only inspectors, stats HUD). Open: IBL/HDR presets, animation transport, debug view modes, QuickLook thumbnails, release docs.
+- **Phase 2 — Conversion:** mostly shipped (IntermediateScene IR, OBJ/STL/PLY/DAE, texture pipeline, conversion sheet + presets, batch converter, `openusdz` CLI with `info`/`convert`/`convert-batch`/`thumbnail`). Open: Draco decode, glTF sample-model corpus gate.
+- **Phase 3 — Editing:** command layer + undo/redo, editable inspectors, rename/reparent/duplicate/group, variant switching, scale fixer, PreviewSurface material params, and Save/Save As are live. Open: viewport transform gizmos, part-level drill-down, texture replace/resize, Recolor Tier A, crash-safe journal.
+- **Phase 4 — Validation & Scripting:** validation engine + ARKit ComplianceChecker + `validate`/`run` CLI + script library shipped. Open: interactive Python REPL, FBX import.
+- **Phase 4.5 & Phase 5:** not started (perceptual recoloring; 1.0 polish).
+- **Phase 6 — Mesh Editing:** **essentially complete, ahead of schedule** — MeshKit half-edge core, delete/merge/extrude/inset/fill/bevel, edit-mode UI, mesh-edit commands + crash journal, skinned-mesh refusal, and the 100% coverage + fuzz + golden-mesh gate. Only the v1.15 follow-ups (LoopCut, multi-segment bevel) remain.
+- **Phases 7–12** (authoring spine) and **Phase T** cross-cutting coverage gates: not yet started.
+
+So we've reached **Phase 6 on the mesh-editing track**, but Phases 1–5 still carry open items rather than being fully closed. See [`ROADMAP.md`](ROADMAP.md) for the live checklist.
 
 ## Contributing
 
@@ -109,3 +122,13 @@ Read the relevant spec in `specs/` before touching a module, keep the dependency
 ## License
 
 [MIT](LICENSE).
+
+---
+
+<p align="center">
+  <em>Proudly created and maintained by</em>
+  <br><br>
+  <a href="https://dicyaninlabs.com">
+    <img src="docs/assets/dicyanin-labs-logo.png" alt="Dicyanin Labs" width="460">
+  </a>
+</p>
