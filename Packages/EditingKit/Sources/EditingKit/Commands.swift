@@ -83,6 +83,36 @@ public struct RemovePrimCommand: EditCommand {
     }
 }
 
+/// Insert a new prim (and its subtree) — the inverse of `RemovePrimCommand`.
+/// The prim's `path` must already be consistent with `parent`; undo removes it
+/// again by that path. Used by "add primitive" flows (e.g. the guided tour's
+/// cube) so creation is one Edit ▸ Undo entry.
+public struct InsertPrimCommand: EditCommand {
+    public let prim: Prim
+    public let parent: PrimPath?
+    public let index: Int
+
+    /// - Parameters:
+    ///   - prim: the prim snapshot to insert (its path names its destination).
+    ///   - parent: the parent path, or `nil` for a root prim.
+    ///   - index: the sibling index to insert at.
+    public init(prim: Prim, parent: PrimPath?, index: Int) {
+        self.prim = prim
+        self.parent = parent
+        self.index = index
+    }
+
+    public var label: String { "Add \(prim.name)" }
+
+    public func execute(on stage: any USDStageMutable) throws {
+        try stage.apply(.insertPrim(parent: parent, index: index, prim: prim))
+    }
+
+    public func undo(on stage: any USDStageMutable) throws {
+        try stage.apply(.removePrim(path: prim.path))
+    }
+}
+
 /// Author (or replace) a single attribute on a prim.
 public struct SetAttributeCommand: EditCommand {
     public let path: PrimPath

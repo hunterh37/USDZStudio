@@ -3,15 +3,31 @@ import UniformTypeIdentifiers
 import ScriptingKit
 import DicyaninDesignSystem
 
-/// Script library panel (Phase 4 seam). Lists bundled starter scripts plus any
-/// the user adds; the embedded Python console that actually runs them arrives
-/// with ScriptingKit's REPL. For now selecting a script previews its source.
+/// Script library panel. Lists bundled starter scripts plus any the user adds,
+/// previews source, and — via the Run button — executes the selected script
+/// against the open document through `ScriptRunController`, streaming live
+/// progress and re-importing the result into the scene.
 struct ScriptsPanel: View {
     let onClose: () -> Void
+
+    /// The open document's source file — the input a mutating script edits.
+    var inputURL: URL?
+    /// Builds the interpreter-backed executor (nil when no Python is available).
+    var makeExecutor: () -> (any ScriptExecuting)? = { nil }
+    /// Re-imports a script-produced file into the scene.
+    var onReimport: (URL) async -> Void = { _ in }
 
     @State private var entries: [ScriptEntry] = []
     @State private var selected: ScriptEntry?
     @State private var source: String = ""
+    @State private var runSession: RunSession?
+    @State private var runUnavailable: String?
+
+    /// Identifiable wrapper so a nested `.sheet(item:)` presents the run UI.
+    private struct RunSession: Identifiable {
+        let id = UUID()
+        let controller: ScriptRunController
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -25,6 +41,15 @@ struct ScriptsPanel: View {
         .frame(width: 640, height: 460)
         .background(Palette.windowBackground.color)
         .onAppear(perform: reload)
+        .sheet(item: $runSession) { session in
+            ScriptRunSheet(controller: session.controller) { runSession = nil }
+        }
+        .alert("Can't Run Script", isPresented: Binding(
+            get: { runUnavailable != nil }, set: { if !$0 { runUnavailable = nil } })) {
+            Button("OK") { runUnavailable = nil }
+        } message: {
+            Text(runUnavailable ?? "")
+        }
     }
 
     private var header: some View {
@@ -33,10 +58,33 @@ struct ScriptsPanel: View {
                 .font(.system(size: TypeScale.title, weight: .semibold))
                 .foregroundStyle(Palette.textPrimary.color)
             Spacer()
+            Button {
+                startRun()
+            } label: {
+                Label("Run", systemImage: "play.fill")
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(selected == nil)
+            .accessibilityIdentifier("scripts.runSelected")
             Button("Add…", action: addScripts)
             Button("Close", action: onClose)
         }
         .padding(Spacing.sm)
+    }
+
+    /// Builds a run controller for the selected script and presents the run
+    /// sheet, or explains why it can't (no interpreter located).
+    private func startRun() {
+        guard let entry = selected else { return }
+        guard let executor = makeExecutor() else {
+            runUnavailable = "No Python interpreter with usd-core was found — "
+                + "the same dependency as Open…. Install it, then try again."
+            return
+        }
+        let controller = ScriptRunController(
+            entry: entry, inputURL: inputURL, executor: executor,
+            onReimport: onReimport)
+        runSession = RunSession(controller: controller)
     }
 
     private var list: some View {

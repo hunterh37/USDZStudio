@@ -78,6 +78,35 @@ final class Driver {
             }
             log("material.clear \(input.name) on \(material.name)")
 
+        case "material.create":
+            let path: PrimPath
+            if let raw = step.path { path = try primPath(raw, step: index, verb: step.do) }
+            else if let primary = document.selection.primary { path = primary }
+            else { throw HarnessError.stepFailed(step: index, verb: step.do, detail: "no path and no selection") }
+            let color = step.color ?? [0.18, 0.18, 0.18]
+            guard document.createAndBindMaterial(to: path, baseColor: color) else {
+                throw HarnessError.stepFailed(
+                    step: index, verb: step.do, detail: "could not create material on \(path)")
+            }
+            log("material.create on \(path) → \(document.undoLabel ?? "?")")
+
+        case "material.recolor":
+            let scope = document.selection.paths.isEmpty
+                ? (step.path.flatMap(PrimPath.init).map { [$0] } ?? [])
+                : document.selection.paths
+            let materials = document.materials(under: scope)
+            guard let name = step.input ?? "diffuseColor" as String?,
+                  let input = PreviewSurfaceInput.named(name) else {
+                throw HarnessError.stepFailed(step: index, verb: step.do, detail: "unknown input")
+            }
+            let value = try attributeValue(step, input: input, index: index)
+            guard document.recolorMaterials(materials, input: input, to: value) else {
+                throw HarnessError.stepFailed(
+                    step: index, verb: step.do,
+                    detail: "recolor of \(materials.count) materials was a no-op")
+            }
+            log("material.recolor \(input.name)=\(describe(value)) across \(materials.count) materials → \(document.undoLabel ?? "?")")
+
         case "undo":
             let n = step.count ?? 1
             for _ in 0..<n {
@@ -252,6 +281,19 @@ final class Driver {
                     step: index, detail: "meshDiagnostic expected '\(wanted)', got '\(actual)'")
             }
             log("expect meshDiagnostic \(wanted.isEmpty ? "none" : "contains '\(wanted)'") ✓")
+            return
+        }
+        if let wanted = step.hasMaterial {
+            let path: PrimPath
+            if let raw = step.path, let parsed = PrimPath(raw) { path = parsed }
+            else if let primary = document.selection.primary { path = primary }
+            else { throw HarnessError.stepFailed(step: index, verb: step.do, detail: "no path and no selection") }
+            let actual = document.boundMaterial(for: path) != nil
+            guard actual == wanted else {
+                throw HarnessError.expectationFailed(
+                    step: index, detail: "hasMaterial expected \(wanted), got \(actual) at \(path)")
+            }
+            log("expect hasMaterial == \(wanted) at \(path) ✓")
             return
         }
         if let wanted = step.surfacePath {

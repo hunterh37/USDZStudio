@@ -2,6 +2,7 @@ import SwiftUI
 import EditorUI
 import USDBridge
 import USDCore
+import ScriptingKit
 
 /// Thin app target: SwiftUI lifecycle + DI wiring only (<200 lines by design,
 /// specs/testing.md). The real document-based architecture arrives with the
@@ -29,11 +30,23 @@ struct OpenUSDZEditorApp: App {
     @State private var isImporting = false
     @State private var importingFileName: String?
 
+    /// The guided first-run tour. Auto-launches once (per `hasSeenTutorial`)
+    /// when the app opens with no document; replayable via Help ▸ Welcome Tour.
+    @State private var tutorial: TutorialEngine?
+    @State private var documentBeforeTutorial: EditorDocument?
+    @AppStorage("editor.hasSeenTutorial") private var hasSeenTutorial = false
+
     var body: some Scene {
         WindowGroup("Open USDZ Editor") {
             EditorShellView(document: document,
                             isImporting: isImporting,
-                            importingFileName: importingFileName)
+                            importingFileName: importingFileName,
+                            tutorial: tutorial,
+                            makeScriptExecutor: {
+                                ProcessScriptExecutor(
+                                    bridge: ProcessBridgeExecutor(scriptPath: Self.snapshotScriptPath))
+                            },
+                            onReimportFile: { url in await reimport(url) })
                 .frame(minWidth: 1000, minHeight: 620)
                 .alert("Could Not Open File", isPresented: .constant(openError != nil)) {
                     Button("OK") { openError = nil }
@@ -49,6 +62,10 @@ struct OpenUSDZEditorApp: App {
                            ["usda", "usdz", "usdc", "usd"].contains(URL(fileURLWithPath: $0).pathExtension)
                        }) {
                         open(URL(fileURLWithPath: arg))
+                    }
+                    // First run, nothing open: show the guided tour.
+                    if document == nil && !hasSeenTutorial {
+                        startTutorial()
                     }
                 }
                 .onDrop(of: [.fileURL], isTargeted: nil) { providers in
@@ -94,7 +111,27 @@ struct OpenUSDZEditorApp: App {
                     .disabled(document == nil)
                 Button("Scripts…") { postMenu(.scripts) }
             }
+            CommandGroup(before: .help) {
+                Button("Welcome Tour") { startTutorial() }
+                    .disabled(tutorial != nil)
+            }
         }
+    }
+
+    /// Swaps in the tour's sandbox document; the user's document (if any)
+    /// returns untouched when the tour ends.
+    private func startTutorial() {
+        guard tutorial == nil, let engine = try? TutorialEngine() else { return }
+        documentBeforeTutorial = document
+        document = engine.document
+        engine.onFinished = {
+            document = documentBeforeTutorial
+            documentBeforeTutorial = nil
+            tutorial = nil
+            hasSeenTutorial = true
+        }
+        tutorial = engine
+        engine.start()
     }
 
     private func postMenu(_ command: EditorShellView.MenuCommand) {
@@ -134,6 +171,32 @@ struct OpenUSDZEditorApp: App {
                                      .init(filenameExtension: "usdc"),
                                      .init(filenameExtension: "usd")].compactMap { $0 }
         if panel.runModal() == .OK, let url = panel.url { open(url) }
+    }
+
+    /// Re-imports a script-produced file into the scene: snapshots it through
+    /// the bridge (behind the same import veil) and replaces the live document.
+    /// Awaitable so a script runner can mark itself finished once the scene has
+    /// actually updated.
+    @MainActor
+    private func reimport(_ url: URL) async {
+        isImporting = true
+        importingFileName = url.lastPathComponent
+        defer {
+            isImporting = false
+            importingFileName = nil
+        }
+        do {
+            guard let executor = ProcessBridgeExecutor(scriptPath: Self.snapshotScriptPath) else {
+                throw BridgeError.pythonUnavailable(detail: "no Python interpreter found")
+            }
+            let snapshot = try await BridgedStage.open(url: url, executor: executor).snapshot
+            document = EditorDocument(snapshot: snapshot, modelURL: url)
+        } catch {
+            let bridgeError = error as? BridgeError
+            openError = [bridgeError?.errorDescription, bridgeError?.recoverySuggestion]
+                .compactMap(\.self).joined(separator: "\n\n")
+            if openError?.isEmpty != false { openError = error.localizedDescription }
+        }
     }
 
     private func open(_ url: URL) {

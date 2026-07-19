@@ -2,6 +2,7 @@ import SwiftUI
 import AppKit
 import USDCore
 import ViewportKit
+import ScriptingKit
 import DicyaninDesignSystem
 
 /// The editor shell: a top action bar, then outliner / viewport / inspector,
@@ -19,6 +20,19 @@ public struct EditorShellView: View {
     /// the viewport shows a circular progress veil. Name is surfaced under it.
     let isImporting: Bool
     let importingFileName: String?
+
+    /// The guided first-run tour, when running: drives a scripted camera and
+    /// live transforms in the viewport, plus the narration card overlay.
+    let tutorial: TutorialEngine?
+
+    /// Builds the interpreter-backed executor for the Scripts panel (nil when
+    /// no Python is available). Supplied by the app so a single located
+    /// interpreter serves open/save/scripts.
+    let makeScriptExecutor: () -> (any ScriptExecuting)?
+    /// Re-imports a script-produced file into the scene (owned by the app,
+    /// which holds the document).
+    let onReimportFile: (URL) async -> Void
+
     @State private var searchText = ""
     @State private var collapsed: Set<PrimPath> = []
 
@@ -58,10 +72,16 @@ public struct EditorShellView: View {
 
     public init(document: EditorDocument? = nil,
                 isImporting: Bool = false,
-                importingFileName: String? = nil) {
+                importingFileName: String? = nil,
+                tutorial: TutorialEngine? = nil,
+                makeScriptExecutor: @escaping () -> (any ScriptExecuting)? = { nil },
+                onReimportFile: @escaping (URL) async -> Void = { _ in }) {
         self.document = document
         self.isImporting = isImporting
         self.importingFileName = importingFileName
+        self.tutorial = tutorial
+        self.makeScriptExecutor = makeScriptExecutor
+        self.onReimportFile = onReimportFile
     }
 
     public var body: some View {
@@ -70,11 +90,11 @@ public struct EditorShellView: View {
             Divider().overlay(Palette.panelBorder.color)
             HSplitView {
                 outliner
-                    .frame(minWidth: 220, idealWidth: 260)
+                    .frame(minWidth: 180, idealWidth: 210, maxWidth: 320)
                 centerColumn
-                    .frame(minWidth: 400, maxWidth: .infinity, maxHeight: .infinity)
+                    .frame(minWidth: 480, maxWidth: .infinity, maxHeight: .infinity)
                 InspectorView(document: document)
-                    .frame(minWidth: 260, idealWidth: 300)
+                    .frame(minWidth: 200, idealWidth: 230, maxWidth: 360)
             }
         }
         .background(Palette.windowBackground.color)
@@ -82,7 +102,11 @@ public struct EditorShellView: View {
             switch sheet {
             case .convert: ConversionSheet(onClose: dismissSheet)
             case .batch: BatchView(onClose: dismissSheet)
-            case .scripts: ScriptsPanel(onClose: dismissSheet)
+            case .scripts:
+                ScriptsPanel(onClose: dismissSheet,
+                             inputURL: modelURL,
+                             makeExecutor: makeScriptExecutor,
+                             onReimport: onReimportFile)
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: MenuCommand.notification)) { note in
@@ -349,8 +373,10 @@ public struct EditorShellView: View {
 
     @ViewBuilder
     private var viewport: some View {
-        if let modelURL {
-            ViewportPane(
+        // Always render the live viewport — with no document open it shows the
+        // default empty scene (grid + axis gizmo wireframe) rather than an
+        // "open a file" placeholder, so the app opens straight into 3D space.
+        ViewportPane(
                 modelURL: modelURL,
                 livePrimPaths: document?.scenePrimPaths,
                 sceneRevision: document?.revision ?? 0,
@@ -359,31 +385,24 @@ public struct EditorShellView: View {
                     document?.pickMeshFace(index: index, additive: additive)
                 },
                 hoverPreview: document?.meshEdit?.hoverPreviewEnabled ?? false,
-                onHoverFace: { [weak document] index in document?.hoverMeshFace(index: index) })
+                onHoverFace: { [weak document] index in document?.hoverMeshFace(index: index) },
+                cameraPose: tutorial?.cameraPose,
+                liveTransforms: tutorial?.liveTransforms,
+                materialOverrides: document?.viewportMaterialOverrides)
                 .overlay {
                     // Mesh edit mode: tool strip + active-tool indicator over
                     // the viewport (Phase 6; specs/mesh-editing.md).
                     if let document { MeshEditOverlay(document: document) }
                 }
                 .overlay(alignment: .bottom) {
-                    if let document { ViewportHintOverlay(document: document) }
+                    // The tour's narration card owns the bottom edge while it
+                    // runs; the hotkey hints return afterwards.
+                    if let tutorial {
+                        TutorialOverlay(engine: tutorial)
+                    } else if let document {
+                        ViewportHintOverlay(document: document)
+                    }
                 }
                 .background(editModeToggleShortcut)
-        } else {
-            ZStack {
-                Palette.viewportBackground.color
-                VStack(spacing: Spacing.sm) {
-                    Image(systemName: "cube.transparent")
-                        .font(.system(size: 40, weight: .light))
-                        .foregroundStyle(Palette.textTertiary.color)
-                    Text("Open a USDZ to begin")
-                        .font(.system(size: TypeScale.title, weight: .medium))
-                        .foregroundStyle(Palette.textSecondary.color)
-                    Text("File → Open, or drop a file on the window")
-                        .font(.system(size: TypeScale.body))
-                        .foregroundStyle(Palette.textTertiary.color)
-                }
-            }
-        }
     }
 }

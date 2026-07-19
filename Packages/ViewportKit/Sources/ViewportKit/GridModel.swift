@@ -5,17 +5,26 @@ import Foundation
 /// thin box entity.
 public enum GridModel {
 
+    /// World axis a center grid line runs along, for DCC-standard tinting
+    /// (X = red, Z = blue).
+    public enum Axis: Hashable, Sendable {
+        case x, z
+    }
+
     public struct Segment: Hashable, Sendable {
         public let start: SIMD3<Float>
         public let end: SIMD3<Float>
-        /// True for the two center lines (drawn brighter, as the axes).
-        public let isAxis: Bool
+        /// Non-nil for the two center lines (drawn brighter, tinted as the axes).
+        public let axis: Axis?
 
-        public init(start: SIMD3<Float>, end: SIMD3<Float>, isAxis: Bool) {
+        public init(start: SIMD3<Float>, end: SIMD3<Float>, axis: Axis? = nil) {
             self.start = start
             self.end = end
-            self.isAxis = isAxis
+            self.axis = axis
         }
+
+        /// True for the two center lines.
+        public var isAxis: Bool { axis != nil }
 
         public var length: Float {
             let d = end - start
@@ -35,17 +44,17 @@ public enum GridModel {
         var result: [Segment] = []
         for i in -divisions...divisions {
             let offset = Float(i) * spacing
-            let isAxis = i == 0
+            let isCenter = i == 0
             // Line parallel to X at z = offset.
             result.append(Segment(
                 start: SIMD3(-halfExtent, 0, offset),
                 end: SIMD3(halfExtent, 0, offset),
-                isAxis: isAxis))
+                axis: isCenter ? .x : nil))
             // Line parallel to Z at x = offset.
             result.append(Segment(
                 start: SIMD3(offset, 0, -halfExtent),
                 end: SIMD3(offset, 0, halfExtent),
-                isAxis: isAxis))
+                axis: isCenter ? .z : nil))
         }
         return result
     }

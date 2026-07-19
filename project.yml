@@ -7,13 +7,13 @@
 # registration, no place to carry the Python runtime).
 #
 # Regenerate with:  xcodegen generate   (or: bash scripts/generate-xcodeproj.sh)
-# The generated DicyaninUSDZEditor.xcodeproj is git-ignored — the spec is the
+# The generated OpenUSDZEditor.xcodeproj is git-ignored — the spec is the
 # checked-in source of truth, per the repo's specs-as-contract ethos.
 
-name: DicyaninUSDZEditor
+name: OpenUSDZEditor
 
 options:
-  bundleIdPrefix: io.medvr.dicyanin
+  bundleIdPrefix: com.dicyanin
   deploymentTarget:
     macOS: "14.0"
   generateEmptyDirectories: true
@@ -38,7 +38,7 @@ packages:
     path: Packages/USDCore
 
 targets:
-  DicyaninUSDZEditor:
+  OpenUSDZEditor:
     type: application
     platform: macOS
     sources:
@@ -47,6 +47,9 @@ targets:
       # so the app resolves them via Bundle.main instead of walking up from the cwd.
       - path: Resources/Python
         type: folder
+        buildPhase: resources
+      # CLI-generated app icon (scripts/icon/generate_app_icon.py -> Assets.xcassets).
+      - path: Resources/Assets.xcassets
         buildPhase: resources
     dependencies:
       - package: EditorUI
@@ -57,20 +60,21 @@ targets:
         product: USDCore
     settings:
       base:
-        PRODUCT_NAME: DicyaninUSDZEditor
-        PRODUCT_BUNDLE_IDENTIFIER: io.medvr.dicyanin.usdzeditor
+        PRODUCT_NAME: OpenUSDZEditor
+        PRODUCT_BUNDLE_IDENTIFIER: com.dicyanin.usdzedit
         INFOPLIST_FILE: App/Info.plist
         GENERATE_INFOPLIST_FILE: NO
         COMBINE_HIDPI_IMAGES: YES
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         LD_RUNPATH_SEARCH_PATHS:
           - "$(inherited)"
           - "@executable_path/../Frameworks"
 
 schemes:
-  DicyaninUSDZEditor:
+  OpenUSDZEditor:
     build:
       targets:
-        DicyaninUSDZEditor: all
+        OpenUSDZEditor: all
     run:
       config: Debug
     archive:

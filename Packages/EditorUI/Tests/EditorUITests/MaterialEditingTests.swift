@@ -1,6 +1,7 @@
 import Testing
 import USDCore
 import EditingKit
+import ViewportKit
 @testable import EditorUI
 
 /// /Looks/Paint bound to /Car/Body, which /Car/Body/Trim inherits.
@@ -101,6 +102,146 @@ struct EditorDocumentRecolorTests {
         let doc = twoMaterialCarDocument()
         #expect(!doc.recolorMaterials([], input: try input("diffuseColor"), to: .vector([1, 0, 0])))
         #expect(!doc.canUndo)
+    }
+}
+
+/// A bare model with no materials at all: /Model/Body mesh under an Xform root.
+@MainActor
+private func unpaintedModelDocument() -> EditorDocument {
+    let body = Prim(path: PrimPath("/Model/Body")!, typeName: "Mesh")
+    let model = Prim(path: PrimPath("/Model")!, typeName: "Xform", children: [body])
+    return EditorDocument(snapshot: StageSnapshot(rootPrims: [model]))
+}
+
+@Suite("EditorDocument create & bind material")
+@MainActor
+struct EditorDocumentCreateMaterialTests {
+
+    let model = PrimPath("/Model")!
+    let body = PrimPath("/Model/Body")!
+
+    private func input(_ name: String) throws -> PreviewSurfaceInput {
+        try #require(PreviewSurfaceInput.named(name))
+    }
+
+    @Test func createsAndBindsMaterialToModelRoot() throws {
+        let doc = unpaintedModelDocument()
+        #expect(doc.boundMaterial(for: model) == nil)
+
+        #expect(doc.createAndBindMaterial(to: model, baseColor: [0.8, 0.1, 0.1]))
+
+        // The root now binds a material, and the child mesh inherits it.
+        let bound = try #require(doc.boundMaterial(for: model))
+        #expect(bound.material.typeName == "Material")
+        #expect(doc.boundMaterial(for: body)?.material.path == bound.material.path)
+        // The initial colour is authored on the shader child.
+        #expect(doc.materialInput(try input("diffuseColor"), on: bound) == .vector([0.8, 0.1, 0.1]))
+        #expect(doc.undoLabel == "Create Material on Model")
+    }
+
+    @Test func newMaterialIsThenRecolorable() throws {
+        let doc = unpaintedModelDocument()
+        #expect(doc.createAndBindMaterial(to: model))
+        let materials = doc.materials(under: [model])
+        #expect(materials.count == 1)
+        #expect(doc.recolorMaterials(materials, input: try input("diffuseColor"), to: .vector([0, 1, 0])))
+        #expect(doc.materialInput(try input("diffuseColor"), on: materials[0]) == .vector([0, 1, 0]))
+    }
+
+    @Test func undoRemovesMaterialAndBinding() throws {
+        let doc = unpaintedModelDocument()
+        #expect(doc.createAndBindMaterial(to: model))
+        doc.undo()
+        // Binding gone, and the material scope removed — stage back to original.
+        #expect(doc.boundMaterial(for: model) == nil)
+        #expect(doc.snapshot.rootPrims.map(\.name) == ["Model"])
+    }
+
+    @Test func secondCreateGetsUniqueName() throws {
+        let doc = unpaintedModelDocument()
+        #expect(doc.createAndBindMaterial(to: body))
+        #expect(doc.createAndBindMaterial(to: model))
+        let names = Set(doc.materials(under: [model]).map(\.material.name))
+        #expect(names == ["Material", "Material_1"])
+    }
+
+    @Test func createOnMissingPrimIsNoOp() {
+        let doc = unpaintedModelDocument()
+        #expect(!doc.createAndBindMaterial(to: PrimPath("/Nope")!))
+        #expect(!doc.canUndo)
+    }
+}
+
+@Suite("EditorDocument viewport material overrides")
+@MainActor
+struct EditorDocumentViewportMaterialTests {
+
+    let body = PrimPath("/Car/Body")!
+    let trim = PrimPath("/Car/Body/Trim")!
+    let model = PrimPath("/Model")!
+
+    private func input(_ name: String) throws -> PreviewSurfaceInput {
+        try #require(PreviewSurfaceInput.named(name))
+    }
+
+    private func material(_ doc: EditorDocument, _ path: PrimPath) throws -> ResolvedMaterial {
+        try #require(doc.boundMaterial(for: path))
+    }
+
+    @Test func modelWithNoMaterialsEmitsNoOverrides() {
+        // No bound materials anywhere → nothing to override; the loader's own
+        // materials stand.
+        #expect(unpaintedModelDocument().viewportMaterialOverrides.isEmpty)
+    }
+
+    @Test func materialWithPlainAuthoredInputIsMirrored() {
+        // paintedCarDocument authors a plain roughness on /Looks/Paint, so its
+        // meshes are mirrored to the viewport keyed by mesh prim path.
+        let overrides = paintedCarDocument().viewportMaterialOverrides
+        #expect(overrides.keys.contains(body.description))
+    }
+
+    @Test func editedColorProducesMeshKeyedOverride() throws {
+        let doc = paintedCarDocument()
+        try _ = doc.setMaterialInput(input("diffuseColor"), on: material(doc, body), to: .vector([1, 0, 0]))
+
+        let overrides = doc.viewportMaterialOverrides
+        // Both the bound mesh and the inheriting child mesh get the override,
+        // keyed by their own prim paths (that's how the viewport finds them).
+        #expect(overrides.keys.contains(body.description))
+        #expect(overrides.keys.contains(trim.description))
+        // diffuseColor 1,0,0 is already ~sRGB for pure red/black channels.
+        let o = try #require(overrides[body.description])
+        #expect(abs(o.baseColor.x - 1) < 1e-5)
+        #expect(o.baseColor.y < 1e-5)
+    }
+
+    @Test func linearColorConvertedToSRGB() throws {
+        let doc = paintedCarDocument()
+        // Linear 0.5 → sRGB ~0.735; this is the conversion the viewport needs.
+        try _ = doc.setMaterialInput(input("diffuseColor"), on: material(doc, body), to: .vector([0.5, 0.5, 0.5]))
+        let o = try #require(doc.viewportMaterialOverrides[body.description])
+        #expect(abs(o.baseColor.x - 0.7354) < 1e-3)
+    }
+
+    @Test func overrideUpdatesThenClearsAcrossUndo() throws {
+        let doc = unpaintedModelDocument()
+        #expect(doc.viewportMaterialOverrides.isEmpty)  // no materials at all
+
+        #expect(doc.createAndBindMaterial(to: model, baseColor: [1, 0, 0]))
+        // The created material binds on the root; the mesh under it is keyed.
+        #expect(doc.viewportMaterialOverrides.keys.contains("/Model/Body"))
+
+        doc.undo()
+        #expect(doc.viewportMaterialOverrides.isEmpty)
+    }
+
+    @Test func cacheReflectsLatestRevision() throws {
+        let doc = paintedCarDocument()
+        try _ = doc.setMaterialInput(input("roughness"), on: material(doc, body), to: .double(0.9))
+        #expect(abs(doc.viewportMaterialOverrides[body.description]!.roughness - 0.9) < 1e-5)
+        try _ = doc.setMaterialInput(input("roughness"), on: material(doc, body), to: .double(0.2))
+        #expect(abs(doc.viewportMaterialOverrides[body.description]!.roughness - 0.2) < 1e-5)
     }
 }
 

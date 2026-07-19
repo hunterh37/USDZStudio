@@ -8,5 +8,5 @@ Resources/Python/runtime/
 .DS_Store
 
 # Generated Xcode project (source of truth is project.yml)
-DicyaninUSDZEditor.xcodeproj/
+OpenUSDZEditor.xcodeproj/
 .build/xcode/
