@@ -373,8 +373,10 @@ public struct EditorShellView: View {
 
     @ViewBuilder
     private var viewport: some View {
-        if let modelURL {
-            ViewportPane(
+        // Always render the live viewport — with no document open it shows the
+        // default empty scene (grid + axis gizmo wireframe) rather than an
+        // "open a file" placeholder, so the app opens straight into 3D space.
+        ViewportPane(
                 modelURL: modelURL,
                 livePrimPaths: document?.scenePrimPaths,
                 sceneRevision: document?.revision ?? 0,
@@ -402,21 +404,5 @@ public struct EditorShellView: View {
                     }
                 }
                 .background(editModeToggleShortcut)
-        } else {
-            ZStack {
-                Palette.viewportBackground.color
-                VStack(spacing: Spacing.sm) {
-                    Image(systemName: "cube.transparent")
-                        .font(.system(size: 40, weight: .light))
-                        .foregroundStyle(Palette.textTertiary.color)
-                    Text("Open a USDZ to begin")
-                        .font(.system(size: TypeScale.title, weight: .medium))
-                        .foregroundStyle(Palette.textSecondary.color)
-                    Text("File → Open, or drop a file on the window")
-                        .font(.system(size: TypeScale.body))
-                        .foregroundStyle(Palette.textTertiary.color)
-                }
-            }
-        }
     }
 }
