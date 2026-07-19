@@ -127,3 +127,109 @@ struct ThumbnailCommandTests {
         }
     }
 }
+
+/// Drives `run()` through its spawn + `finish` branches deterministically.
+/// `run()` locates `usdrecord` via the process environment (not injectable),
+/// so these force resolution with `DICYANIN_USDRECORD` and a real temp file,
+/// then inject `spawn` to exercise the wrapper-write, success, and failure
+/// paths without launching a real subprocess. Serialized because it mutates
+/// the process environment.
+@Suite("thumbnail run() spawn paths", .serialized)
+struct ThumbnailRunTests {
+
+    private final class Box: @unchecked Sendable {
+        var out: [String] = []
+        var err: [String] = []
+        var spawned: [ThumbnailCommand.Invocation] = []
+        var wrapperExistedAtSpawn = false
+    }
+
+    /// A fresh temp dir containing a real `.usda` model and a fake `usdrecord`
+    /// pointed at by `DICYANIN_USDRECORD`, so `resolve()` yields an invocation.
+    private func withFixture(_ body: (URL, Box) throws -> Void) throws {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("thumb-run-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let usdrecord = dir.appendingPathComponent("usdrecord")
+        try Data("#!/bin/sh\n".utf8).write(to: usdrecord)
+        setenv("DICYANIN_USDRECORD", usdrecord.path, 1)
+        defer { unsetenv("DICYANIN_USDRECORD") }
+        try body(dir, Box())
+    }
+
+    @Test func singleFrameSpawnsAndReportsTheOutput() throws {
+        try withFixture { dir, box in
+            let model = dir.appendingPathComponent("fox.usda")
+            try Data("#usda 1.0\n".utf8).write(to: model)
+            let out = dir.appendingPathComponent("fox.png").path
+            let code = ThumbnailCommand.run(
+                arguments: [model.path, "-o", out],
+                print: { box.out.append($0) },
+                printError: { box.err.append($0) },
+                spawn: { box.spawned.append($0); return 0 })
+            #expect(code == 0)
+            #expect(box.spawned.count == 1)
+            #expect(box.spawned.first?.wrapper == nil)
+            #expect(box.out.contains { $0.hasPrefix("wrote ") && $0.hasSuffix(out) })
+            #expect(box.err.isEmpty)
+        }
+    }
+
+    @Test func nonZeroSpawnStatusReportsError() throws {
+        try withFixture { dir, box in
+            let model = dir.appendingPathComponent("fox.usda")
+            try Data("#usda 1.0\n".utf8).write(to: model)
+            let code = ThumbnailCommand.run(
+                arguments: [model.path],
+                print: { box.out.append($0) },
+                printError: { box.err.append($0) },
+                spawn: { box.spawned.append($0); return 3 })
+            #expect(code == 1)
+            #expect(box.spawned.count == 1)
+            #expect(box.err.contains { $0.contains("status 3") })
+        }
+    }
+
+    @Test func turntableWritesWrapperBeforeSpawningThenCleansUp() throws {
+        try withFixture { dir, box in
+            let model = dir.appendingPathComponent("fox.usda")
+            try Data("#usda 1.0\n".utf8).write(to: model)
+            let wrapperPath = dir.appendingPathComponent(".fox.turntable.usda").path
+            let code = ThumbnailCommand.run(
+                arguments: [model.path, "-o", dir.appendingPathComponent("turn.###.png").path,
+                            "--frames", "4"],
+                print: { box.out.append($0) },
+                printError: { box.err.append($0) },
+                spawn: {
+                    box.spawned.append($0)
+                    box.wrapperExistedAtSpawn =
+                        FileManager.default.fileExists(atPath: $0.wrapper?.path ?? "")
+                    return 0
+                })
+            #expect(code == 0)
+            #expect(box.spawned.count == 1)
+            #expect(box.wrapperExistedAtSpawn)                                   // written before spawn
+            #expect(!FileManager.default.fileExists(atPath: wrapperPath))        // removed after
+        }
+    }
+
+    @Test func turntableWrapperWriteFailureReturnsOne() throws {
+        try withFixture { dir, box in
+            let model = dir.appendingPathComponent("fox.usda")
+            try Data("#usda 1.0\n".utf8).write(to: model)
+            // Occupy the wrapper path with a directory so writing the stage throws.
+            let wrapperPath = dir.appendingPathComponent(".fox.turntable.usda")
+            try FileManager.default.createDirectory(at: wrapperPath, withIntermediateDirectories: true)
+            let code = ThumbnailCommand.run(
+                arguments: [model.path, "-o", dir.appendingPathComponent("turn.###.png").path,
+                            "--frames", "4"],
+                print: { box.out.append($0) },
+                printError: { box.err.append($0) },
+                spawn: { box.spawned.append($0); return 0 })
+            #expect(code == 1)
+            #expect(box.spawned.isEmpty)                                         // never reached spawn
+            #expect(box.err.contains { $0.contains("could not write turntable stage") })
+        }
+    }
+}
