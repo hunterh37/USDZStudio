@@ -16,6 +16,7 @@
 | ValidationKit | **100%** | Unit: every rule × pass/fail/edge fixture, quick-fix round-trips |
 | ConversionKit | **100%** (logic) | Unit + corpus integration (glTF-Sample-Models in CI) |
 | ScriptingKit | **100%** (logic) | Unit + scripted-session integration tests |
+| AgentMCP | **100%** (logic) | Unit: JSON-RPC dispatch, every tool × valid/invalid params, session diff/undo semantics; process seams (stdio loop, usdrecord, Python) injected + excluded |
 | USDBridge | **95%** | Golden-file integration (real usd-core, real assets); the uncovered remainder is interpreter-crash handlers, each annotated |
 | DicyaninDesignSystem | **95%** + snapshots | Unit for logic (numeric parsing, scrub math) + snapshot tests for every component state in the preview catalog |
 | ViewportKit | **90%** + golden images | Unit for camera math/selection/diffing; golden-image rendering tests for view modes; GPU submission glue excluded with annotation |
