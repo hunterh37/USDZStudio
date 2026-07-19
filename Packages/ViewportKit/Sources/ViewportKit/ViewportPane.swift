@@ -41,6 +41,13 @@ public enum CameraInteractionMode: String, CaseIterable, Identifiable {
 public struct ViewportPane: View {
 
     let modelURL: URL?
+    /// Absolute path strings of every prim currently on the live stage, plus a
+    /// revision that bumps on each document mutation. The viewport prunes
+    /// file-loaded entities whose prim was deleted (and restores them on undo)
+    /// so structural edits show up without a full reload. `nil` = no live
+    /// stage; render the file as-is.
+    let livePrimPaths: Set<String>?
+    let sceneRevision: Int
     /// Live component-edit geometry replacing the file-loaded model for one
     /// prim (Phase 6). `nil` = plain file rendering.
     let editedMesh: EditedMeshData?
@@ -58,11 +65,15 @@ public struct ViewportPane: View {
     @State private var cameraMode: CameraInteractionMode = .rotate
 
     public init(modelURL: URL?,
+                livePrimPaths: Set<String>? = nil,
+                sceneRevision: Int = 0,
                 editedMesh: EditedMeshData? = nil,
                 onPickFace: ((Int, Bool) -> Void)? = nil,
                 hoverPreview: Bool = false,
                 onHoverFace: ((Int?) -> Void)? = nil) {
         self.modelURL = modelURL
+        self.livePrimPaths = livePrimPaths
+        self.sceneRevision = sceneRevision
         self.editedMesh = editedMesh
         self.onPickFace = onPickFace
         self.hoverPreview = hoverPreview
@@ -72,6 +83,7 @@ public struct ViewportPane: View {
     public var body: some View {
         ZStack(alignment: .topTrailing) {
             ViewportRepresentable(modelURL: modelURL, mode: cameraMode,
+                                  livePrimPaths: livePrimPaths, sceneRevision: sceneRevision,
                                   editedMesh: editedMesh, onPickFace: onPickFace,
                                   hoverPreview: hoverPreview, onHoverFace: onHoverFace,
                                   stats: $stats, loadError: $loadError)
@@ -121,6 +133,8 @@ struct ViewportRepresentable: NSViewRepresentable {
 
     let modelURL: URL?
     let mode: CameraInteractionMode
+    let livePrimPaths: Set<String>?
+    let sceneRevision: Int
     let editedMesh: EditedMeshData?
     let onPickFace: ((Int, Bool) -> Void)?
     let hoverPreview: Bool
@@ -144,6 +158,9 @@ struct ViewportRepresentable: NSViewRepresentable {
         context.coordinator.onError = { loadError = $0 }
         view.interactionMode = mode
         context.coordinator.load(url: modelURL)
+        if let livePrimPaths {
+            context.coordinator.applyLivePrimPaths(livePrimPaths, revision: sceneRevision)
+        }
         context.coordinator.applyEditedMesh(editedMesh, onPickFace: onPickFace,
                                             hoverPreview: hoverPreview, onHoverFace: onHoverFace)
     }
@@ -199,6 +216,8 @@ final class ViewportCoordinator {
         guard url != loadedURL else { return }
         loadedURL = url
         loadTask?.cancel()
+        baselinePrimPaths = nil
+        appliedSceneRevision = nil
         modelAnchor.children.removeAll()
         onStats?(nil)
         onError?(nil)
@@ -215,6 +234,9 @@ final class ViewportCoordinator {
                 self.rebuildGrid(halfExtent: GridModel.fittingHalfExtent(forModelRadius: bounds.boundingRadius))
                 self.frameModel()
                 self.onStats?(Self.collectStats(from: entity, boundsSize: bounds.extents))
+                // Edits may have landed while the file was loading; bring the
+                // freshly loaded entities in line with the live stage.
+                self.pruneModelEntities()
             } catch {
                 guard !Task.isCancelled else { return }
                 self?.onError?("Viewport could not load model: \(error.localizedDescription)")
@@ -227,6 +249,58 @@ final class ViewportCoordinator {
     /// Phase 1 typical asset sizes, revisit with off-main streaming later.
     private static func loadEntity(_ url: URL) throws -> Entity {
         try Entity.load(contentsOf: url)
+    }
+
+    // MARK: Live-stage sync (structural edits)
+
+    /// Prim paths present on the live stage right now.
+    private var livePrimPaths: Set<String>?
+    /// Prim paths present when this file's first live set arrived — the set the
+    /// file-loaded entity tree corresponds to. Entities whose baseline prim
+    /// disappears from the live set get disabled; undo re-enables them.
+    private var baselinePrimPaths: Set<String>?
+    private var appliedSceneRevision: Int?
+
+    /// Syncs the file-loaded entities against the live stage's prim set.
+    /// Cheap when nothing changed (revision-gated); otherwise one walk of the
+    /// entity tree.
+    func applyLivePrimPaths(_ paths: Set<String>, revision: Int) {
+        guard revision != appliedSceneRevision else { return }
+        appliedSceneRevision = revision
+        livePrimPaths = paths
+        if baselinePrimPaths == nil { baselinePrimPaths = paths }
+        pruneModelEntities()
+    }
+
+    private func pruneModelEntities() {
+        guard let live = livePrimPaths, let baseline = baselinePrimPaths else { return }
+        for child in modelAnchor.children {
+            prune(child, parentPath: "", live: live, baseline: baseline)
+        }
+    }
+
+    /// Walks the entity tree, mapping entities to prim paths by name. Loader
+    /// wrapper nodes (unnamed, or names that never were prims) are transparent:
+    /// their children are matched against the same parent path.
+    private func prune(_ entity: Entity, parentPath: String, live: Set<String>, baseline: Set<String>) {
+        // A mesh-edit session manages this entity's enablement itself.
+        guard entity !== hiddenOriginal else { return }
+        let name = entity.name
+        if !name.isEmpty {
+            let path = parentPath + "/" + name
+            if baseline.contains(path) {
+                let present = live.contains(path)
+                if entity.isEnabled != present { entity.isEnabled = present }
+                guard present else { return } // whole subtree is gone with it
+                for child in entity.children {
+                    prune(child, parentPath: path, live: live, baseline: baseline)
+                }
+                return
+            }
+        }
+        for child in entity.children {
+            prune(child, parentPath: parentPath, live: live, baseline: baseline)
+        }
     }
 
     // MARK: Component-edit rendering + picking (Phase 6)

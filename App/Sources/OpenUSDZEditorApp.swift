@@ -24,9 +24,16 @@ struct OpenUSDZEditorApp: App {
     @State private var document: EditorDocument?
     @State private var openError: String?
 
+    /// True while an opened/dropped file is importing through the USD bridge;
+    /// drives the viewport's circular progress overlay.
+    @State private var isImporting = false
+    @State private var importingFileName: String?
+
     var body: some Scene {
         WindowGroup("Open USDZ Editor") {
-            EditorShellView(document: document)
+            EditorShellView(document: document,
+                            isImporting: isImporting,
+                            importingFileName: importingFileName)
                 .frame(minWidth: 1000, minHeight: 620)
                 .alert("Could Not Open File", isPresented: .constant(openError != nil)) {
                     Button("OK") { openError = nil }
@@ -131,6 +138,12 @@ struct OpenUSDZEditorApp: App {
 
     private func open(_ url: URL) {
         Task { @MainActor in
+            isImporting = true
+            importingFileName = url.lastPathComponent
+            defer {
+                isImporting = false
+                importingFileName = nil
+            }
             do {
                 guard let executor = ProcessBridgeExecutor(scriptPath: Self.snapshotScriptPath) else {
                     throw BridgeError.pythonUnavailable(detail: "no Python interpreter found")
