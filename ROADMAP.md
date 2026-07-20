@@ -6,6 +6,60 @@ This is a full 3D **editor**. The roadmap is organized around two spines that ru
 
 ---
 
+## Development Plan — Ordered Milestones Ahead
+
+This section is the working plan for the next stretch of development. Milestones are **ordered by execution priority**, chosen by *(value to target users) × (verifiability today)*, not by phase number — several deliberately pull specific items forward out of their parent phases. Every milestone obeys the standing rules: each op is a pure-function command, its invariant/golden/round-trip harness lands in the **same PR** as the feature, and the module's CI coverage gate must be green before the item is "done." No item is complete until it degrades correctly under the RealityKit export profile where applicable.
+
+### Milestone 1 — Complete the transform-gizmo family (finishes Phase 3 gizmos)
+Translate shipped; close the set so direct-manipulation editing is whole.
+- Rotate gizmo: world/local axis rings, angle-snap, one coalesced undoable "Rotate", multi-select about a shared pivot.
+- Scale gizmo: per-axis + uniform handles, snap, coalesced "Scale", parent-space correctness matching the translate path's world→parent delta handling.
+- Shared gizmo infrastructure: a mode switch (W/E/R idiom), pivot/orientation options (median vs. individual, world vs. local), and a single hit-test/drag-routing seam reused across all three.
+- **Exit / harness:** parity tests against `TransformDragSession`; property-based compose/decompose round-trips; snapshot tests of gizmo layout per camera; ViewportKit ratchet floor raised.
+
+### Milestone 2 — Land the "best free viewer" surface (finishes Phase 1, unblocks public launch)
+The Phase 1 exit ("best free USDZ viewer on macOS, ship publicly") is gated on four still-open viewer features. Close them together so the public release is credible.
+- Environment & lighting: IBL presets + custom HDR/EXR, exposure control, background modes.
+- Debug view modes: wireframe, normals, UV checker, matcap.
+- Animation playback transport: play/pause/scrub/loop over authored time-samples, driving the RealityKit viewport (the data model already carries `playbackRate`).
+- QuickLook thumbnail + preview extension for `.usda` (Finder-level `.appex`, distinct from the existing CLI `usdrecord` thumbnail path).
+- **Exit / harness:** golden-image renders per debug mode and IBL preset with a ΔE gate (this is the T1 golden-image harness — build it here); deterministic sampled-pose frames for playback; ship unsigned release builds + build-from-source docs.
+
+### Milestone 3 — Part-level editing flagship (finishes Phase 3 differentiators)
+The headline editing capability, currently absent.
+- Drill-down / walk-up viewport selection with a breadcrumb; move any child prim at any depth.
+- Clear Hide (visibility) vs. Disable (active) vs. Delete semantics with distinct, discoverable UI.
+- Isolate mode via a non-dirtying session layer.
+- **Exit / harness:** selection-path unit tests; round-trip invariants proving isolate never dirties the root layer; XCUITest smoke flow for drill-down → edit → export.
+
+### Milestone 4 — Durability & reliability (enterprise hardening)
+Make the editor safe to trust with real work.
+- App-wide crash-safe command journal / write-ahead log over `CommandStack` with autosave-recovery on relaunch (generalizes the existing mesh-edit session journal).
+- Round-trip invariants promoted to a blocking CI job (open→save→`usddiff` clean; open→edit→undo-all→save→diff clean) over the committed mini-corpus — the T1 round-trip layer.
+- Bridge mini-corpus (hand-built usda/usdz fixtures incl. variants/skels/animations/malformed) with golden assertions; USDBridge ratchet raised toward its 95% spec floor via real usd-core save-path tests.
+- **Exit / harness:** kill-the-process recovery test restores the exact command stack; round-trip + corpus gates red-on-failure in CI.
+
+### Milestone 5 — Validation & scripting power tools (finishes Phase 4)
+- Python console REPL with injected `stage`/`selection`/`app` and single-undo script runs (the script-library panel already runs bundled/user scripts; add the interactive console).
+- Complete the live diagnostics quick-fix set and wire the export path through `ComplianceChecker` gating in the app UI.
+- FBX support via checksum-verified FBX2glTF download flow.
+- **Exit / harness:** CLI subcommand × {valid, invalid, warning} × {default, --json, --strict} matrix (T1 CLI layer); REPL single-undo contract test.
+
+### Milestone 6 — Perceptual texture recoloring (Phase 4.5, the category-defining differentiator)
+Nothing else in the USDZ ecosystem does this; it is the strongest reason to choose this tool.
+- `RecolorEngine`: OKLab hue/chroma remap, Metal kernel + parity-tested CPU reference, explicit sRGB/linear/P3 color management.
+- Auto-segmentation masks (OKLab clustering + viewport-click seeding), live double-buffered textured preview, undoable `RecolorPartCommand` (uniquify material + texture), calibrated accuracy mode with ΔE readout.
+- Console API `app.recolor(...)`, `recolor_batch.py`, CLI `recolor` subcommand.
+- **Exit / harness:** golden-image ΔE < 2.0 gate on calibration scenes; CPU/GPU parity tests; recolor round-trip.
+
+### Milestone 7 — Raise the ratchets to spec (finishes Phase T, continuous)
+With the golden-image, round-trip, corpus, and XCUITest harnesses now built by earlier milestones, lift ViewportKit and EditorUI from their regression ratchets toward the `specs/testing.md` floors, add the coverage-delta PR comment, and stand up the nightly perf/leaks/mutation jobs.
+- **Exit:** every module in `specs/testing.md` has a live, red-on-failure gate at its spec floor; "green" means "actually tested."
+
+> After Milestone 7 the product is at a defensible 1.0 (Phase 5 polish — command palette/⌘K + ActionRegistry, accessibility, localization, performance targets, docs site — is the packaging pass). The post-1.0 authoring spine (Phases 7–12: material/texture authoring, full mesh modeling, UV, skeleton/animation, scene/lights/physics, advanced composition) continues from there, each phase carrying its export-profile matrix and same-PR harness.
+
+---
+
 ## Phase T — Test Coverage Hardening (cross-cutting, continuous, blocking)
 
 **Reality check (updated):** the gate is now data-driven and enforced in CI over every module (`scripts/coverage-gate.sh` + `scripts/_coverage_measure.py`). The six logic modules plus DesignSystem and CLI meet their `specs/testing.md` floors and are enforced there. USDBridge, ViewportKit, and EditorUI sit on **ratchet floors** pinned at today's measured coverage — a regression barrier, not the spec target — because the 90%/95% spec floors assume the golden-image/snapshot/XCUITest harnesses in T1 that don't exist yet. Raise each ratchet toward its spec floor as those harnesses land; never lower it. **No feature phase below is "done" until its module's gate is live and green.**
@@ -85,7 +139,7 @@ This is a full 3D **editor**. The roadmap is organized around two spines that ru
 ## Phase 3 — Editing (v0.3)
 
 - [x] EditingKit command layer + undo/redo bridged to NSUndoManager — `CommandStack` + `InMemoryStage` + full command set (visibility/active/rename/remove/set-attr/composite) + `UndoManagerBridge`
-- [ ] Transform gizmos (translate/rotate/scale, snapping, coalesced undo) — edit backbone done (`TRS`↔matrix compose/decompose, `SnapSettings`, `TransformDragSession` → one coalesced `SetTransformCommand`); viewport gizmo overlay TODO
+- [ ] Transform gizmos (translate/rotate/scale, snapping, coalesced undo) — edit backbone done (`TRS`↔matrix compose/decompose, `SnapSettings`, `TransformDragSession` → one coalesced `SetTransformCommand`). **Translate gizmo shipped**: `TranslateGizmo` (pure X/Y/Z hit-test math, `TranslateGizmoDescriptor`/`TranslateGizmoDragPhase`), RealityKit arrow overlay wired in `ViewportPane`, `EditorDocument.handleTranslateGizmoDrag` routes live world→parent-space previews into one coalesced undoable "Move" (multi-select composes), with `viewportLiveTransforms` so gizmo/inspector/undo re-render without a file reload. Rotate and scale gizmos are the remaining work in this item
 - [x] Editable inspector: transforms, prim metadata, stage metadata — `EditorDocument` (observable, `InMemoryStage` + `CommandStack`) drives editable T/R/S fields (snapped), prim rename/active/visibility, and stage up-axis/meters-per-unit/default-prim through undoable commands; `SetStageMetadataCommand` added; App menu Undo/Redo wired (material editing stays in its own slice)
 - [ ] Part-level editing (flagship): drill-down/walk-up viewport selection, breadcrumb, move any child prim at any depth
 - [ ] Hide (visibility) vs. Disable (active) vs. Delete part semantics with clear UI
@@ -93,12 +147,13 @@ This is a full 3D **editor**. The roadmap is organized around two spines that ru
 - [x] Rename / reparent (world-transform preserving) / duplicate / delete / group prims — command layer done: `RenamePrimCommand`, `RemovePrimCommand`, `DuplicatePrimCommand`, `ReparentPrimCommand` (4×4 inverse + `worldMatrix` compensation), `GroupPrimsCommand`; all undoable and surfaced on `EditorDocument`. Outliner UI done: ⇧-click multi-select, right-click context menu (rename/duplicate/group/move-to-root/hide-show/enable-disable/delete), inline rename, and drag-and-drop reparenting (onto a prim or empty space → root)
 - [ ] Material editing (full PreviewSurface params, texture replace/resize) — params done: `PreviewSurfaceInput` catalog (all 14 UsdPreviewSurface inputs, each with declared type/range/fallback; values clamped then type-checked so an illegal edit never reaches the stage), `MaterialBinding` → `ResolvedMaterial` resolver, `SetMaterialInputCommand` (+ `RemoveAttributeCommand` for revert-to-default), both surfaced on `EditorDocument` and driven by an editable inspector Material tab (colour wells with correct sRGB→linear conversion, range sliders that commit once per drag, authored-vs-`default` badges). Resolution handles the two shapes that reach us: bindings by relationship *or* importer metadata, inherited down namespace (a deep child part resolves the material it actually renders with), and — the one that bites — inputs living on a `UsdPreviewSurface` **Shader child** in real files vs. flattened onto the Material prim by our own `USDAuthorStage`. Commands target the resolved surface prim, since authoring `inputs:*` onto the Material prim when a shader owns them is silently inert in RealityKit. Texture replace/resize still TODO — it depends on `UsdUVTexture` networks that `USDAuthorStage` doesn't author yet, so there is no texture input in the model to swap; that lands with the texture-network authoring work
 - [x] `removeAttribute` mutation — closes the `SetAttributeCommand` undo gap (a newly-authored attribute could not be un-authored, so undo left a fallback-valued opinion where there had been none)
-- [ ] Material binding edits + create material
-- [ ] Recolor Tier A: solid-color part recolor with live preview, auto material uniquing, GeomSubset-level selection (specs/recoloring.md)
+- [x] Material binding edits + create material — `CreateMaterialCommand` authors a `/Looks` scope + Material + `UsdPreviewSurface` shader + `material:binding` as one undoable op; surfaced via `EditorDocument.createAndBindMaterial(...)` and the Material inspector. Rebind/unbind through the resolver + `SetMaterialInputCommand`
+- [ ] Recolor Tier A: solid-color part recolor with live preview, auto material uniquing, GeomSubset-level selection (specs/recoloring.md) — model-wide solid recolor shipped (`EditorDocument.recolorMaterials(...)`, single-undo, no-op guarded, tested); live per-part preview + GeomSubset-level selection remain
 - [x] Variant set switching (undoable) — `setVariantSelection` mutation + `SetVariantSelectionCommand` (captures prior selection for undo); InMemoryStage applies it, unknown-set throws. Surfaced on `EditorDocument` (`variantSets(at:)` + `setVariantSelection(_:set:to:)`, no-op on unchanged/missing set); inspector Variant Sets picker (per-set `VariantPicker` with a clear-to-None sentinel) drives it undoably
 - [x] Scale/units fixer — `ScaleFixer.command(for:targetMetersPerUnit:)` normalizes metersPerUnit and bakes a compensating `old/target` uniform scale into each root prim, preserving real-world size, as one undoable `CompositeCommand`. Surfaced on `EditorDocument.fixScale(targetMetersPerUnit:)` (no-op when already normalized); inspector Stage tab shows a "Normalize to meters" button next to Meters/unit whenever it isn't 1
 - [x] Save/Save As (.usdz/.usda/.usdc) — `StageSaver` (usda pure Swift via USDASerializer, usdc/usdz converted by USD core via `stage_save.py`; failed saves never clobber the target), app File menu ⌘S/⌘⇧S, dirty tracking (`hasUnsavedChanges`), harness round-trip scenario `mesh-save-roundtrip.json` (extrude → save usdz → reopen through the bridge → re-edit). Serializer now preserves schema role types (`point3f[]`/`normal3f[]`). Flattened export still open
-- [ ] Crash-safe command journal
+- [x] Built-in content library — `ShapeLibrary` (MeshKit) exposes parametric primitive shapes and low-poly prefab objects (19 entries across `primitives`/`prefabs` groups, lazily built via `MeshCompositing`/`Prefabs`); `LibraryPanel` browses by group·category and inserts the selection into the open document as an undoable `InsertPrimCommand` (Xform + Mesh) via `LibraryInsertion`. Tested (`ShapeLibraryTests`, `LibraryInsertionTests`, primitive tests)
+- [ ] Crash-safe command journal — mesh-edit session journal shipped (`MeshEditSession`); app-wide persisted journal / autosave-recovery over `CommandStack` still TODO (see Milestone 4 below)
 
 **Exit:** real editor. Open → fix scale → swap texture → rename → export, all undoable.
 
@@ -251,3 +306,5 @@ Typed, transactional, verification-gated MCP editing API over the kits
 - [ ] USD stage **diff view** (compare two files / before-after an edit batch).
 - [ ] Plugin API v2: native Swift plugin bundles for importers/panels/tools.
 - [ ] visionOS companion viewer (edit on Mac, view synced over network).
+- [x] First-launch Welcome Tour, re-triggerable from the Help menu (onboarding).
+- [x] Live MCP agent-activity panel + menu-bar setup tray (observe/administer the Agent MCP server from the app).

@@ -58,7 +58,15 @@ struct OpenUSDZEditorApp: App {
                                 ProcessScriptExecutor(
                                     bridge: ProcessBridgeExecutor(scriptPath: Self.snapshotScriptPath))
                             },
-                            onReimportFile: { url in await reimport(url) })
+                            onReimportFile: { url in await reimport(url) },
+                            onCreateDocument: {
+                                // Start a fresh, empty scratch scene (no backing
+                                // file) so the library can add primitives without
+                                // opening a file first.
+                                let doc = EditorDocument()
+                                document = doc
+                                return doc
+                            })
                 .frame(minWidth: 1000, minHeight: 620)
                 .alert("Could Not Open File", isPresented: .constant(openError != nil)) {
                     Button("OK") { openError = nil }

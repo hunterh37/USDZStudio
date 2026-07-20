@@ -33,6 +33,11 @@ public struct EditorShellView: View {
     /// which holds the document).
     let onReimportFile: (URL) async -> Void
 
+    /// Creates a fresh, empty scratch document and makes it the live document,
+    /// returning it. Lets features like the library start a new scene when none
+    /// is open (nil if the host can't create one, e.g. previews).
+    let onCreateDocument: () -> EditorDocument?
+
     @State private var searchText = ""
     @State private var collapsed: Set<PrimPath> = []
 
@@ -81,7 +86,8 @@ public struct EditorShellView: View {
                 tutorial: TutorialEngine? = nil,
                 mcpActivity: MCPActivityModel? = nil,
                 makeScriptExecutor: @escaping () -> (any ScriptExecuting)? = { nil },
-                onReimportFile: @escaping (URL) async -> Void = { _ in }) {
+                onReimportFile: @escaping (URL) async -> Void = { _ in },
+                onCreateDocument: @escaping () -> EditorDocument? = { nil }) {
         self.document = document
         self.isImporting = isImporting
         self.importingFileName = importingFileName
@@ -89,6 +95,7 @@ public struct EditorShellView: View {
         self.mcpActivity = mcpActivity
         self.makeScriptExecutor = makeScriptExecutor
         self.onReimportFile = onReimportFile
+        self.onCreateDocument = onCreateDocument
     }
 
     public var body: some View {
@@ -115,7 +122,8 @@ public struct EditorShellView: View {
                              makeExecutor: makeScriptExecutor,
                              onReimport: onReimportFile)
             case .library:
-                LibraryPanel(onClose: dismissSheet, document: document)
+                LibraryPanel(onClose: dismissSheet, document: document,
+                             onCreateDocument: onCreateDocument)
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: MenuCommand.notification)) { note in
@@ -410,8 +418,15 @@ public struct EditorShellView: View {
                 onGizmoDrag: { [weak document] phase in
                     document?.handleExtrudeGizmoDrag(phase)
                 },
+                translateGizmo: document?.translateGizmo,
+                onTranslateGizmoDrag: { [weak document] phase in
+                    document?.handleTranslateGizmoDrag(phase)
+                },
                 cameraPose: tutorial?.cameraPose,
-                liveTransforms: tutorial?.liveTransforms,
+                // The tour's scripted tweens own the channel while running;
+                // otherwise the document's authored transforms render live
+                // (gizmo drags, inspector edits, undo).
+                liveTransforms: tutorial?.liveTransforms ?? document?.viewportLiveTransforms,
                 materialOverrides: document?.viewportMaterialOverrides)
                 .overlay {
                     // Mesh edit mode: tool strip + active-tool indicator over
