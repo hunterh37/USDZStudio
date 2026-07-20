@@ -37,7 +37,8 @@ struct OpenUSDZEditorApp: App {
     @State private var importingFileName: String?
 
     /// The guided first-run tour. Auto-launches once (per `hasSeenTutorial`)
-    /// when the app opens with no document; replayable via Help ▸ Welcome Tour.
+    /// when the app opens with no document; replayable any time via
+    /// Help ▸ Welcome Tour (⌘?).
     @State private var tutorial: TutorialEngine?
     @State private var documentBeforeTutorial: EditorDocument?
     @AppStorage("editor.hasSeenTutorial") private var hasSeenTutorial = false
@@ -115,6 +116,9 @@ struct OpenUSDZEditorApp: App {
                     .disabled(document == nil)
             }
             CommandMenu("Convert") {
+                Button("Library…") { postMenu(.library) }
+                    .keyboardShortcut("l", modifiers: [.command, .shift])
+                Divider()
                 Button("Convert File…") { postMenu(.convert) }
                     .keyboardShortcut("k")
                 Button("Batch Convert…") { postMenu(.batch) }
@@ -125,8 +129,14 @@ struct OpenUSDZEditorApp: App {
                     .disabled(document == nil)
                 Button("Scripts…") { postMenu(.scripts) }
             }
-            CommandGroup(before: .help) {
+            // Replace (not just prepend to) the default Help group. macOS
+            // otherwise leaves its stock "OpenUSDZEditor Help" item in place,
+            // which — with no bundled help book — pops the useless "Help isn't
+            // available" alert. Here the Help menu re-runs the first-launch
+            // guided tour instead.
+            CommandGroup(replacing: .help) {
                 Button("Welcome Tour") { startTutorial() }
+                    .keyboardShortcut("/", modifiers: [.command, .shift]) // ⌘?
                     .disabled(tutorial != nil)
             }
             CommandGroup(after: .toolbar) {
