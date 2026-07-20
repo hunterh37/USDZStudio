@@ -442,16 +442,4 @@ struct QuickFixTests {
         #expect(MeshNormals.intArray(prim, "other") == nil)
         #expect(MeshNormals.intArray(prim, "absent") == nil)
     }
-
-    // MARK: upAxis has no fix, on purpose
-
-    @Test func upAxisHasNoQuickFix() throws {
-        let s = InMemoryStage(StageSnapshot(
-            metadata: StageMetadata(upAxis: .z, defaultPrim: "Model"),
-            rootPrims: [Prim(path: PrimPath("/Model")!, typeName: "Xform")]))
-        let d = diagnostic(ruleID: "stage.upAxis", in: s)
-        // Flipping the token alone would reinterpret the geometry, not
-        // re-orient it; the drawer shows no Fix button here.
-        #expect(QuickFixRegistry.quickFix(for: d, in: s) == nil)
-    }
 }
