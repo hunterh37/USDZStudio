@@ -18,6 +18,7 @@
 | ScriptingKit | **100%** (logic) | Unit + scripted-session integration tests |
 | AgentMCP | **100%** (logic) | Unit: JSON-RPC dispatch, every tool × valid/invalid params, session diff/undo semantics; process seams (stdio loop, usdrecord, Python) injected + excluded |
 | USDBridge | **95%** | Golden-file integration (real usd-core, real assets); the uncovered remainder is interpreter-crash handlers, each annotated |
+| QuickLookKit | **100%** (logic) | Unit: render-plan resolution, usdrecord location, temp-path derivation; process spawn lives in the thin .appex (App/QuickLookShared), excluded from the logic gate |
 | DicyaninDesignSystem | **95%** + snapshots | Unit for logic (numeric parsing, scrub math) + snapshot tests for every component state in the preview catalog |
 | ViewportKit | **90%** + golden images | Unit for camera math/selection/diffing; golden-image rendering tests for view modes; GPU submission glue excluded with annotation |
 | EditorUI | **90%** + snapshots + XCUITest | Snapshot per panel state; XCUITest flows for document lifecycle, editing, export |

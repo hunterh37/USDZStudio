@@ -36,6 +36,8 @@ packages:
     path: Packages/USDBridge
   USDCore:
     path: Packages/USDCore
+  QuickLookKit:
+    path: Packages/QuickLookKit
 
 targets:
   OpenUSDZEditor:
@@ -58,6 +60,11 @@ targets:
         product: USDBridge
       - package: USDCore
         product: USDCore
+      # Finder-level QuickLook extensions, embedded in Contents/PlugIns.
+      - target: USDAThumbnailExtension
+        embed: true
+      - target: USDAPreviewExtension
+        embed: true
     settings:
       base:
         PRODUCT_NAME: OpenUSDZEditor
@@ -69,6 +76,48 @@ targets:
         LD_RUNPATH_SEARCH_PATHS:
           - "$(inherited)"
           - "@executable_path/../Frameworks"
+
+  # ── QuickLook thumbnail extension (.appex) for .usd/.usda/.usdc/.usdz.
+  # Thin: reuses the shared usdrecord render pipeline via QuickLookKit +
+  # App/QuickLookShared. Embedded in the host app's Contents/PlugIns.
+  USDAThumbnailExtension:
+    type: app-extension
+    platform: macOS
+    sources:
+      - path: App/QuickLookThumbnail
+      - path: App/QuickLookShared
+    dependencies:
+      - package: QuickLookKit
+        product: QuickLookKit
+    settings:
+      base:
+        PRODUCT_NAME: USDAThumbnailExtension
+        PRODUCT_BUNDLE_IDENTIFIER: com.dicyanin.usdzedit.quicklook-thumbnail
+        INFOPLIST_FILE: App/QuickLookThumbnail/Info.plist
+        GENERATE_INFOPLIST_FILE: NO
+        LD_RUNPATH_SEARCH_PATHS:
+          - "$(inherited)"
+          - "@executable_path/../../../../Frameworks"
+
+  # ── QuickLook preview extension (.appex): Space-bar / Finder preview pane.
+  USDAPreviewExtension:
+    type: app-extension
+    platform: macOS
+    sources:
+      - path: App/QuickLookPreview
+      - path: App/QuickLookShared
+    dependencies:
+      - package: QuickLookKit
+        product: QuickLookKit
+    settings:
+      base:
+        PRODUCT_NAME: USDAPreviewExtension
+        PRODUCT_BUNDLE_IDENTIFIER: com.dicyanin.usdzedit.quicklook-preview
+        INFOPLIST_FILE: App/QuickLookPreview/Info.plist
+        GENERATE_INFOPLIST_FILE: NO
+        LD_RUNPATH_SEARCH_PATHS:
+          - "$(inherited)"
+          - "@executable_path/../../../../Frameworks"
 
 schemes:
   OpenUSDZEditor:

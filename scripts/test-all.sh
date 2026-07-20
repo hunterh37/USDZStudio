@@ -12,6 +12,7 @@ fi
 PACKAGES=(
   Packages/USDCore
   Packages/DicyaninDesignSystem
+  Packages/QuickLookKit
   Packages/USDBridge
   Packages/MeshKit
   Packages/EditingKit

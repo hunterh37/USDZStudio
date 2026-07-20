@@ -20,6 +20,7 @@ OpenUSDZEditor/
 │   ├── ScriptingKit/             # Python console, script library, CLI core
 │   ├── AgentMCP/                 # MCP server: typed, transactional agent editing API over the kits
 │   ├── EditorUI/                 # Panels: outliner, inspector, console, toolbar
+│   ├── QuickLookKit/             # Pure render-plan logic for the Finder QuickLook .appex (zero deps)
 │   └── DicyaninDesignSystem/     # Tokens, colors, typography, reusable controls
 ├── CLI/                          # openusdz command-line target (links kits, no UI)
 ├── Resources/Python/             # Bundled Python runtime + usd-core wheel + scripts
@@ -34,6 +35,7 @@ App ─▶ EditorUI ─▶ {ViewportKit, EditingKit, ConversionKit, ValidationKi
 USDBridge ─▶ USDCore          (bridge implements USDCore protocols)
 {EditingKit, ViewportKit} ─▶ MeshKit   (MeshKit itself imports nothing internal)
 DicyaninDesignSystem ◀─ EditorUI only
+QuickLookKit — leaf, zero internal deps (pure render-plan logic; App QuickLook .appex targets consume it)
 CLI ─▶ kits (never EditorUI)
 AgentMCP ─▶ {USDBridge, EditingKit, ValidationKit, ConversionKit, ScriptingKit, MeshKit} ─▶ USDCore   (thin MCP adapter, docs/AGENT_MCP_PLAN.md; never EditorUI)
 ```

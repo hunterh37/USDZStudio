@@ -31,6 +31,7 @@ policy_for() {
     USDCore)              echo "" ;;
     MeshKit)              echo "" ;;                    # pure Swift, zero deps (specs/mesh-editing.md)
     DicyaninDesignSystem) echo "" ;;
+    QuickLookKit)         echo "" ;;                    # pure Swift render-plan logic for the QuickLook .appex (specs/quicklook.md)
     USDBridge)            echo "USDCore" ;;
     ConversionKit)        echo "USDCore" ;;
     ValidationKit)        echo "USDCore" ;;
