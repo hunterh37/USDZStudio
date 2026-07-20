@@ -17,12 +17,15 @@ Translate shipped; close the set so direct-manipulation editing is whole. Rotate
 - Shared gizmo infrastructure: a mode switch (W/E/R idiom), pivot/orientation options (median vs. individual, world vs. local), and a single hit-test/drag-routing seam reused across all three.
 - **Exit / harness:** parity tests against `TransformDragSession`; property-based compose/decompose round-trips; snapshot tests of gizmo layout per camera; ViewportKit ratchet floor raised.
 
-### Milestone 2 — Land the "best free viewer" surface (finishes Phase 1, unblocks public launch)
-The Phase 1 exit ("best free USDZ viewer on macOS, ship publicly") is gated on four still-open viewer features. Close them together so the public release is credible.
-- Environment & lighting: IBL presets + custom HDR/EXR, exposure control, background modes.
-- Debug view modes: wireframe, normals, UV checker, matcap.
-- Animation playback transport: play/pause/scrub/loop over authored time-samples, driving the RealityKit viewport (the data model already carries `playbackRate`).
-- QuickLook thumbnail + preview extension for `.usda` (Finder-level `.appex`, distinct from the existing CLI `usdrecord` thumbnail path).
+### Milestone 2 — Land the "best free viewer" surface (finishes Phase 1, unblocks public launch) — 🚧 **Not done**
+All four viewer features are built (see the Phase 1 `[x]` entries below), but the milestone is **not** complete: its exit is still gated on the distribution items and the golden-image harness. Do not mark this Done until both blockers below clear.
+- ✅ Environment & lighting: IBL presets + custom HDR/EXR, exposure control, background modes.
+- ✅ Debug view modes: wireframe, normals, UV checker, matcap.
+- ✅ Animation playback transport: play/pause/scrub/loop over authored time-samples, driving the RealityKit viewport (the data model already carries `playbackRate`).
+- ✅ QuickLook thumbnail + preview extension for `.usda` (Finder-level `.appex`, distinct from the existing CLI `usdrecord` thumbnail path).
+- **Remaining blockers (why this is not Done):**
+  - Build-from-source docs + unsigned release builds on GitHub Releases (Phase 1, line 124 — still `[ ]`).
+  - The T1 golden-image ΔE harness itself (per-debug-mode + per-IBL-preset renders vs. reference PNGs; deterministic sampled-pose playback frames) — unbuilt (Phase T1).
 - **Exit / harness:** golden-image renders per debug mode and IBL preset with a ΔE gate (this is the T1 golden-image harness — build it here); deterministic sampled-pose frames for playback; ship unsigned release builds + build-from-source docs.
 
 ### Milestone 3 — Part-level editing flagship (finishes Phase 3 differentiators)
