@@ -1,5 +1,6 @@
 import SwiftUI
 import MeshKit
+import ViewportKit
 import DicyaninDesignSystem
 
 /// Built-in content library panel. Browses the parametric primitive shapes and
@@ -16,9 +17,20 @@ struct LibraryPanel: View {
 
     @State private var selectedID: String?
     @State private var status: String?
+    /// Preview geometry built lazily per entry and cached, so re-selecting a
+    /// shape never rebuilds its mesh (the heavy step is the half-edge build).
+    @State private var previewCache: [String: ViewportMeshData] = [:]
 
     private var selectedEntry: ShapeEntry? {
         selectedID.flatMap(ShapeLibrary.entry(id:))
+    }
+
+    /// Preview mesh for the current selection, built on demand and memoised.
+    private func previewMesh(for entry: ShapeEntry) -> ViewportMeshData? {
+        if let cached = previewCache[entry.id] { return cached }
+        guard let mesh = LibraryPreviewGeometry.viewportMesh(for: entry) else { return nil }
+        previewCache[entry.id] = mesh
+        return mesh
     }
 
     var body: some View {
@@ -83,44 +95,36 @@ struct LibraryPanel: View {
     }
 
     private var detail: some View {
-        VStack(alignment: .leading, spacing: Spacing.sm) {
+        ZStack {
+            Palette.viewportBackground.color
             if let entry = selectedEntry {
-                HStack(spacing: Spacing.xs) {
-                    Image(systemName: entry.systemImage)
-                        .font(.system(size: 28))
-                        .foregroundStyle(Palette.accent.color)
-                    VStack(alignment: .leading) {
-                        Text(entry.name)
-                            .font(.system(size: TypeScale.title, weight: .semibold))
-                            .foregroundStyle(Palette.textPrimary.color)
-                        Text("\(entry.group.title) · \(entry.category)")
+                // The 3D preview owns the pane; a single compact caption replaces
+                // the old paragraphs of description.
+                ShapePreviewView(mesh: previewMesh(for: entry), identity: entry.id)
+                    .accessibilityIdentifier("library.preview")
+                VStack(alignment: .leading, spacing: 2) {
+                    Spacer()
+                    Text(entry.name)
+                        .font(.system(size: TypeScale.title, weight: .semibold))
+                        .foregroundStyle(Palette.textPrimary.color)
+                    Text("\(entry.group.title) · \(entry.category)")
+                        .font(.system(size: TypeScale.caption))
+                        .foregroundStyle(Palette.textSecondary.color)
+                    if let status {
+                        Text(status)
                             .font(.system(size: TypeScale.caption))
                             .foregroundStyle(Palette.textSecondary.color)
                     }
                 }
-                Text(entry.group == .primitives
-                     ? "A parametric primitive shape, inserted at the world origin."
-                     : "A low-poly object composed from primitives, resting on the ground plane.")
-                    .font(.system(size: TypeScale.body))
-                    .foregroundStyle(Palette.textSecondary.color)
-                if let status {
-                    Text(status)
-                        .font(.system(size: TypeScale.caption))
-                        .foregroundStyle(Palette.textSecondary.color)
-                }
-                Spacer()
+                .padding(Spacing.sm)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
             } else {
-                Spacer()
-                Text("Select an item to insert into your scene.")
+                Text("Select an item to preview it in 3D.")
                     .font(.system(size: TypeScale.body))
                     .foregroundStyle(Palette.textSecondary.color)
-                    .frame(maxWidth: .infinity, alignment: .center)
-                Spacer()
             }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(Spacing.sm)
-        .background(Palette.viewportBackground.color)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private func insertSelected() {
