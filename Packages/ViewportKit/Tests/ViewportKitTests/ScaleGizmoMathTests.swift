@@ -47,6 +47,21 @@ struct ScaleGizmoHitTests {
         let ray = Ray(origin: shifted + SIMD3(0.9, 0, 5), direction: SIMD3(0, 0, -1))
         #expect(ScaleGizmoMath.hitHandle(ray: ray, origin: shifted, length: length) == .axis(.x))
     }
+
+    @Test func nearestAxisWinsWhenTwoAreInReach() {
+        // A ray near the shared origin but leaning toward +Y grabs the closest
+        // axis handle, exercising the nearest-wins tie-break.
+        let ray = Ray(origin: SIMD3(0.05, 0.35, 5), direction: SIMD3(0, 0, -1))
+        #expect(ScaleGizmoMath.hitHandle(ray: ray, origin: origin, length: length) == .axis(.y))
+    }
+
+    @Test func degenerateBasisAxisIsSkipped() {
+        // A zero-length basis axis normalizes to itself and can't be grabbed;
+        // the ray at the +X handle position still finds nothing on that axis.
+        let basis = GizmoBasis(x: .zero, y: SIMD3(0, 1, 0), z: SIMD3(0, 0, 1))
+        let ray = Ray(origin: SIMD3(0.9, 0, 5), direction: SIMD3(0, 0, -1))
+        #expect(ScaleGizmoMath.hitHandle(ray: ray, origin: origin, basis: basis, length: length) != .axis(.x))
+    }
 }
 
 @Suite("Scale gizmo — drag factor")

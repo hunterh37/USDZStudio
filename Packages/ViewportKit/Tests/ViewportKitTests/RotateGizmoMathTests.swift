@@ -93,4 +93,28 @@ struct RotateGizmoAngleTests {
         #expect(RotateGizmoMath.signedAngleDegrees(from: start, to: end,
                                                    origin: origin, axis: SIMD3(0, 0, 1)) == nil)
     }
+
+    @Test func crossingAtThePivotReturnsNil() {
+        // A ray that crosses the ring plane exactly at the pivot has an
+        // undefined direction (zero-length vector) → nil.
+        let start = Ray(origin: SIMD3(0, 0, 5), direction: SIMD3(0, 0, -1))
+        let end = Ray(origin: SIMD3(0, 1, 5), direction: SIMD3(0, 0, -1))
+        #expect(RotateGizmoMath.signedAngleDegrees(from: start, to: end,
+                                                   origin: origin, axis: SIMD3(0, 0, 1)) == nil)
+    }
+
+    @Test func rayPointingAwayFromThePlaneMisses() {
+        // Origin in front of the ring plane, pointing further away: the plane
+        // crossing is behind the ray, so no ring is grabbed.
+        let ray = Ray(origin: SIMD3(1, 0, 5), direction: SIMD3(0, 0, 1))
+        #expect(RotateGizmoMath.hitAxis(ray: ray, origin: origin, radius: 1.0) == nil)
+    }
+
+    @Test func degenerateBasisAxisIsRejected() {
+        // A zero-length basis axis normalizes to itself; the plane normal is
+        // then degenerate and the ring can't be grabbed.
+        let basis = GizmoBasis(x: .zero, y: SIMD3(0, 1, 0), z: SIMD3(0, 0, 1))
+        let ray = Ray(origin: SIMD3(5, 0, 1), direction: SIMD3(-1, 0, 0))
+        #expect(RotateGizmoMath.hitAxis(ray: ray, origin: origin, basis: basis, radius: 1.0) != .x)
+    }
 }

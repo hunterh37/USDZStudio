@@ -174,4 +174,35 @@ struct TransformCommandTests {
         let drag = TransformDragSession(stage: stage, path: path)
         #expect(drag.makeCommand() == nil)
     }
+
+    @Test func rotateAndScaleDragsAreRelativeToStart() throws {
+        let stage = stageWithXform()
+        // Seed a non-identity start so "relative to start" is observable.
+        try stage.apply(.setAttribute(path: path, attribute: Attribute(
+            name: transformAttributeName,
+            value: .matrix4(TRS(rotationEulerDegrees: [0, 0, 10], scale: [2, 2, 2]).toMatrix()))))
+
+        let drag = TransformDragSession(stage: stage, path: path)
+        let rotated = try drag.rotate(byDegrees: [0, 0, 20])
+        #expect(approxEqual(rotated.rotationEulerDegrees, [0, 0, 30], tol: 1e-6))
+
+        let uniform = try drag.scale(by: 3)
+        #expect(approxEqual(uniform.scale, [6, 6, 6], tol: 1e-6))
+
+        let perAxis = try drag.scale(byPerAxis: [1, 2, 0.5])
+        #expect(approxEqual(perAxis.scale, [2, 4, 1], tol: 1e-6))
+    }
+
+    @Test func perAxisScaleSnapsAndCommits() throws {
+        let stage = stageWithXform()
+        let stack = CommandStack(stage: stage)
+        let drag = TransformDragSession(stage: stage, path: path, snap: SnapSettings(scale: 0.5))
+        _ = try drag.scale(byPerAxis: [1.1, 3.2, 1])   // snaps to [1, 3, 1]
+        #expect(approxEqual(stage.transform(at: path).scale, [1, 3, 1], tol: 1e-9))
+        let command = try #require(drag.makeCommand(verb: "Scale"))
+        try stack.run(command)
+        #expect(stack.undoLabel == "Scale Node")
+        try stack.undo()
+        #expect(stage.transform(at: path) == .identity)
+    }
 }
