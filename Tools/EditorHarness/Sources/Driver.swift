@@ -208,6 +208,22 @@ final class Driver {
             document.exitMeshEditMode(commit: step.commit ?? true)
             log("mesh.exit commit=\(step.commit ?? true) → \(document.undoLabel ?? "no command")")
 
+        case "gizmo.drag":
+            // The full drag lifecycle the viewport reports for an arrow grab:
+            // began → changed(distance) → ended, against the live selection.
+            guard let raw = step.axis else {
+                throw HarnessError.stepFailed(step: index, verb: step.do, detail: "no axis (x|y|z)")
+            }
+            guard let distance = step.number else {
+                throw HarnessError.stepFailed(step: index, verb: step.do, detail: "no drag distance (number)")
+            }
+            guard document.performTranslateGizmoDrag(axis: raw, distance: distance) else {
+                throw HarnessError.stepFailed(
+                    step: index, verb: step.do,
+                    detail: "drag refused (gizmo hidden or axis not x|y|z: '\(raw)')")
+            }
+            log("gizmo.drag \(raw) by \(distance) → \(document.undoLabel ?? "no command")")
+
         case "expect":
             try expect(step, index: index, document: document)
 
@@ -304,6 +320,42 @@ final class Driver {
                     detail: "surfacePath expected \(wanted), got \(material.surfacePath)")
             }
             log("expect surfacePath == \(wanted) ✓")
+            return
+        }
+        if let wanted = step.translation {
+            let path: PrimPath
+            if let raw = step.path, let parsed = PrimPath(raw) { path = parsed }
+            else if let primary = document.selection.primary { path = primary }
+            else { throw HarnessError.stepFailed(step: index, verb: step.do, detail: "no path and no selection") }
+            let actual = document.transform(at: path).translation
+            guard wanted.count == 3,
+                  zip(actual, wanted).allSatisfy({ abs($0 - $1) <= 1e-6 }) else {
+                throw HarnessError.expectationFailed(
+                    step: index,
+                    detail: "translation expected \(wanted), got \(actual) at \(path)")
+            }
+            log("expect translation == \(wanted) at \(path) ✓")
+            return
+        }
+        if let wanted = step.gizmoVisible {
+            let actual = document.translateGizmoOrigin != nil
+            guard actual == wanted else {
+                throw HarnessError.expectationFailed(
+                    step: index, detail: "gizmoVisible expected \(wanted), got \(actual)")
+            }
+            log("expect gizmoVisible == \(wanted) ✓")
+            return
+        }
+        if let wanted = step.gizmoOrigin {
+            guard let actual = document.translateGizmoOrigin else {
+                throw HarnessError.expectationFailed(step: index, detail: "gizmo not visible")
+            }
+            guard wanted.count == 3,
+                  zip(actual, wanted).allSatisfy({ abs($0 - $1) <= 1e-6 }) else {
+                throw HarnessError.expectationFailed(
+                    step: index, detail: "gizmoOrigin expected \(wanted), got \(actual)")
+            }
+            log("expect gizmoOrigin == \(wanted) ✓")
             return
         }
         throw HarnessError.stepFailed(step: index, verb: "expect", detail: "no expectation named")
@@ -406,6 +458,19 @@ final class Driver {
                     MeshEditOverlay(document: document)
                 },
                 size: CGSize(width: 960, height: 560),
+                to: url)
+            return url
+        }
+        // The advanced export panel (sheet chrome). Renders over the window
+        // backdrop; closures are inert since we're capturing pixels, not driving.
+        if tab == "export" {
+            try Render.png(
+                ZStack {
+                    Color(red: 0.078, green: 0.086, blue: 0.11) // Palette.windowBackground
+                    ExportPanel(sourceURL: document.modelURL,
+                                onExport: { _ in }, onClose: {})
+                },
+                size: CGSize(width: 460, height: 420),
                 to: url)
             return url
         }

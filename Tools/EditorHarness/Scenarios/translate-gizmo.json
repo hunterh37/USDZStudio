@@ -1,0 +1,31 @@
+{ "name": "translate-gizmo",
+  "open": "Tests/Fixtures/nested-transform.usda",
+  "steps": [
+    { "do": "expect", "gizmoVisible": false },
+
+    { "do": "select", "path": "/Rig/Panel" },
+    { "do": "expect", "gizmoVisible": true },
+    { "do": "expect", "gizmoOrigin": [0, 0, 0] },
+
+    { "do": "gizmo.drag", "axis": "x", "number": 2 },
+    { "do": "expect", "translation": [0, 0, 2] },
+    { "do": "expect", "gizmoOrigin": [2, 0, 0] },
+
+    { "do": "undo" },
+    { "do": "expect", "translation": [0, 0, 0] },
+    { "do": "expect", "gizmoOrigin": [0, 0, 0] },
+
+    { "do": "gizmo.drag", "axis": "y", "number": 1.5 },
+    { "do": "expect", "translation": [0, 1.5, 0] },
+    { "do": "expect", "gizmoOrigin": [0, 1.5, 0] },
+    { "do": "undo" },
+
+    { "do": "select", "path": "/Rig" },
+    { "do": "gizmo.drag", "axis": "z", "number": -0.75 },
+    { "do": "expect", "translation": [0, 0, -0.75] },
+    { "do": "expect", "gizmoOrigin": [0, 0, -0.75] },
+    { "do": "undo" },
+    { "do": "expect", "gizmoOrigin": [0, 0, 0] },
+
+    { "do": "shot", "name": "1-selected-transform-tab", "tab": "transform" }
+  ] }
