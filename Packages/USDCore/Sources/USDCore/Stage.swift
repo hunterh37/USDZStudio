@@ -48,18 +48,29 @@ public protocol USDStageProtocol: Sendable {
     var sourceURL: URL? { get }
     var metadata: StageMetadata { get }
     var rootPrims: [Prim] { get }
+
+    /// Depth-first list of every prim on the stage.
+    ///
+    /// A protocol *requirement* rather than a plain extension method so that a
+    /// conformer holding a precomputed traversal — see `IndexedStage` — actually
+    /// gets called through dynamic dispatch instead of being bypassed by the
+    /// statically-dispatched default below.
+    func allPrims() -> [Prim]
+
+    /// Looks up a prim by absolute path. A requirement for the same reason.
+    func prim(at path: PrimPath) -> Prim?
 }
 
 extension USDStageProtocol {
-    /// Depth-first list of every prim on the stage.
     public func allPrims() -> [Prim] {
-        rootPrims.flatMap { $0.flattened() }
+        var result: [Prim] = []
+        for root in rootPrims { result.append(contentsOf: root.flattened()) }
+        return result
     }
 
     /// Total prim count.
     public var primCount: Int { allPrims().count }
 
-    /// Looks up a prim by absolute path.
     public func prim(at path: PrimPath) -> Prim? {
         for root in rootPrims {
             if let found = root.prim(at: path) { return found }

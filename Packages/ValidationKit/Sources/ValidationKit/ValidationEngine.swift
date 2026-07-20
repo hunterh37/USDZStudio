@@ -49,8 +49,12 @@ public struct ValidationEngine: Sendable {
     }
 
     public func validate(_ stage: any USDStageProtocol) -> ValidationReport {
+        // Index once for the whole catalog. Rules are pure functions of the stage
+        // and most of them need a full traversal; without this, an 8-rule profile
+        // walked the hierarchy six separate times per pass.
+        let indexed = stage.indexed()
         let diagnostics = rules
-            .flatMap { $0.evaluate(stage: stage) }
+            .flatMap { $0.evaluate(stage: indexed) }
             .sorted(by: Self.moreSevereFirst)
         return ValidationReport(diagnostics: diagnostics)
     }
