@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import simd
 import USDCore
 import USDBridge
 import EditingKit
@@ -198,6 +199,115 @@ public final class EditorDocument {
         guard let command = session.makeCommand(verb: verb) else { return }
         run(command)
     }
+
+    // MARK: Translate gizmo (object-mode move arrows in the viewport)
+
+    /// The viewport move gizmo: shown at the primary selection's world-space
+    /// pivot in object mode; hidden in mesh edit mode or with nothing selected.
+    /// The revision bump keeps it following the object during its own drag.
+    public var translateGizmo: TranslateGizmoDescriptor? {
+        guard meshEdit == nil, let path = selection.primary,
+              snapshot.prim(at: path) != nil else { return nil }
+        let m = snapshot.worldMatrix(at: path)
+        return TranslateGizmoDescriptor(origin: SIMD3(m[12], m[13], m[14]),
+                                        revision: revision)
+    }
+
+    /// One live drag session per selected prim (multi-select moves together).
+    @ObservationIgnored private var gizmoDragSessions: [TransformDragSession] = []
+
+    /// Routes gizmo drag phases from the viewport: live-preview translations
+    /// during the drag, then one coalesced undoable "Move" on release.
+    public func handleTranslateGizmoDrag(_ phase: TranslateGizmoDragPhase) {
+        switch phase {
+        case .began:
+            gizmoDragSessions = selection.paths
+                .filter { snapshot.prim(at: $0) != nil }
+                .map { makeDragSession(for: $0) }
+        case let .changed(axis, distance):
+            let worldDelta = axis.direction * distance
+            for session in gizmoDragSessions {
+                let delta = Self.worldDeltaToParentSpace(worldDelta, path: session.path,
+                                                         in: snapshot)
+                try? session.translate(by: [delta.x, delta.y, delta.z])
+            }
+            refresh() // republish the snapshot so the viewport previews live
+        case .ended:
+            let commands = gizmoDragSessions.compactMap { $0.makeCommand(verb: "Move") }
+            gizmoDragSessions = []
+            switch commands.count {
+            case 0: break
+            case 1: run(commands[0])
+            default:
+                run(CompositeCommand(label: "Move \(commands.count) prims",
+                                     commands: commands))
+            }
+        }
+    }
+
+    /// The move gizmo's world-space pivot, or `nil` when hidden — a
+    /// string/array surface for tooling (harness, scripting) that can't
+    /// import ViewportKit's descriptor types directly.
+    public var translateGizmoOrigin: [Double]? {
+        translateGizmo.map { [$0.origin.x, $0.origin.y, $0.origin.z] }
+    }
+
+    /// A complete began→changed→ended gizmo drag along a named world axis
+    /// ("x" | "y" | "z") — the tooling counterpart of an arrow drag. Returns
+    /// `false` (and does nothing) when the gizmo is hidden or the axis name
+    /// is unknown.
+    @discardableResult
+    public func performTranslateGizmoDrag(axis name: String, distance: Double) -> Bool {
+        guard translateGizmo != nil,
+              let axis = ["x": GizmoAxis.x, "y": .y, "z": .z][name.lowercased()] else { return false }
+        handleTranslateGizmoDrag(.began(axis))
+        handleTranslateGizmoDrag(.changed(axis, distance))
+        handleTranslateGizmoDrag(.ended)
+        return true
+    }
+
+    /// A world-space translation delta expressed in `path`'s parent space —
+    /// what a local-transform translation must change by to move the prim by
+    /// `delta` in world space. Row-vector convention (`v' = v·M⁻¹`, direction
+    /// only, using the parent's world matrix); identity parents short-circuit.
+    static func worldDeltaToParentSpace(_ delta: SIMD3<Double>, path: PrimPath,
+                                        in snapshot: StageSnapshot) -> SIMD3<Double> {
+        let parent = path.parent
+        guard !parent.isRoot else { return delta }
+        let m = snapshot.worldMatrix(at: parent)
+        guard let inv = Matrix4.inverse(m) else { return delta }
+        return SIMD3(
+            delta.x * inv[0] + delta.y * inv[4] + delta.z * inv[8],
+            delta.x * inv[1] + delta.y * inv[5] + delta.z * inv[9],
+            delta.x * inv[2] + delta.y * inv[6] + delta.z * inv[10])
+    }
+
+    /// Per-prim local transforms for the viewport (column-major, RealityKit
+    /// convention), so transform edits — gizmo drags, inspector fields, undo —
+    /// render live without a file reload. Only prims authoring an
+    /// `xformOp:transform` are included. Cached per revision.
+    public var viewportLiveTransforms: [String: float4x4] {
+        let rev = revision // read tracked property so observers refresh
+        if transformCacheRevision != rev {
+            var out: [String: float4x4] = [:]
+            for prim in snapshot.allPrims() {
+                guard let attr = prim.attribute(named: transformAttributeName),
+                      case let .matrix4(m) = attr.value, m.count == 16 else { continue }
+                // USD row-major/row-vector → simd column-major/column-vector:
+                // each USD row becomes a simd column (the transpose identity).
+                out[prim.path.description] = float4x4(
+                    SIMD4(Float(m[0]), Float(m[1]), Float(m[2]), Float(m[3])),
+                    SIMD4(Float(m[4]), Float(m[5]), Float(m[6]), Float(m[7])),
+                    SIMD4(Float(m[8]), Float(m[9]), Float(m[10]), Float(m[11])),
+                    SIMD4(Float(m[12]), Float(m[13]), Float(m[14]), Float(m[15])))
+            }
+            transformCache = out
+            transformCacheRevision = rev
+        }
+        return transformCache
+    }
+    @ObservationIgnored private var transformCacheRevision: Int = -1
+    @ObservationIgnored private var transformCache: [String: float4x4] = [:]
 
     // MARK: Stage metadata edits
 

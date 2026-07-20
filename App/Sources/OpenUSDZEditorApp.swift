@@ -58,7 +58,16 @@ struct OpenUSDZEditorApp: App {
                                 ProcessScriptExecutor(
                                     bridge: ProcessBridgeExecutor(scriptPath: Self.snapshotScriptPath))
                             },
-                            onReimportFile: { url in await reimport(url) })
+                            onReimportFile: { url in await reimport(url) },
+                            onCreateDocument: {
+                                // Start a fresh, empty scratch scene (no backing
+                                // file) so the library can add primitives without
+                                // opening a file first.
+                                let doc = EditorDocument()
+                                document = doc
+                                return doc
+                            },
+                            onExport: { url in try await export(to: url) })
                 .frame(minWidth: 1000, minHeight: 620)
                 .alert("Could Not Open File", isPresented: .constant(openError != nil)) {
                     Button("OK") { openError = nil }
@@ -101,6 +110,10 @@ struct OpenUSDZEditorApp: App {
                     .disabled(document == nil)
                 Button("Save As…") { save(to: nil) }
                     .keyboardShortcut("s", modifiers: [.command, .shift])
+                    .disabled(document == nil)
+                Divider()
+                Button("Export…") { postMenu(.export) }
+                    .keyboardShortcut("e", modifiers: [.command, .shift])
                     .disabled(document == nil)
             }
             // Drive undo/redo straight through the document's CommandStack. The
@@ -199,6 +212,17 @@ struct OpenUSDZEditorApp: App {
                 openError = "Could not save \(target.lastPathComponent):\n\(error)"
             }
         }
+    }
+
+    /// Writes the live scene to `url` for the export flow (one-click button /
+    /// export panel). Unlike Save, it never opens a dialog — the destination is
+    /// already resolved by the shell — and it throws so the shell can toast the
+    /// outcome. `.usdc`/`.usdz` targets go through the bundled bridge executor.
+    @MainActor
+    private func export(to url: URL) async throws {
+        guard let document else { return }
+        let executor = ProcessBridgeExecutor(scriptPath: Self.snapshotScriptPath)
+        try await document.save(to: url, executor: executor)
     }
 
     private func presentOpenPanel() {

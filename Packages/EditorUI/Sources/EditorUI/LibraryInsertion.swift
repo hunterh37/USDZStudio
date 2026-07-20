@@ -25,8 +25,14 @@ enum LibraryInsertion {
         guard let prim = makePrim(named: name, from: mesh) else {
             return "Couldn’t create a prim named \(name)."
         }
-        return document.run(InsertPrimCommand(
+        // `document.run` returns the applied command label on success and `nil`
+        // on failure — so a nil result is the error case, not the success case.
+        let label = document.run(InsertPrimCommand(
             prim: prim, parent: nil, index: document.snapshot.rootPrims.count))
+        guard label != nil else {
+            return document.lastError ?? "Couldn’t add \(entry.name) to the scene."
+        }
+        return nil
     }
 
     /// Xform (identity transform) wrapping a Mesh child built from `mesh`.
