@@ -14,14 +14,16 @@ import Testing
     // MARK: readEndpoint
 
     @Test func readsValidEndpoint() {
-        let url = tempFile(#"{"port":54321,"pid":4242,"token":"abc"}"#)
+        let url = tempFile(#"{"socketPath":"/tmp/agent.sock","pid":4242,"token":"abc"}"#)
         let info = SocketEventSink.readEndpoint(from: url)
-        #expect(info == MCPEndpointInfo(port: 54321, pid: 4242, token: "abc"))
+        #expect(info == MCPEndpointInfo(socketPath: "/tmp/agent.sock", pid: 4242, token: "abc"))
     }
 
     @Test func readsEndpointWithoutToken() {
-        let url = tempFile(#"{"port":9,"pid":1}"#)
-        #expect(SocketEventSink.readEndpoint(from: url)?.token == nil)
+        let url = tempFile(#"{"socketPath":"/tmp/a.sock","pid":1}"#)
+        let info = SocketEventSink.readEndpoint(from: url)
+        #expect(info?.token == nil)
+        #expect(info?.socketPath == "/tmp/a.sock")
     }
 
     @Test func missingEndpointReturnsNil() {
