@@ -18,6 +18,7 @@ OpenUSDZEditor/
 │   ├── EditingKit/               # Command layer, undo, stage mutations
 │   ├── ValidationKit/            # Rules engine, usdchecker adapter
 │   ├── ScriptingKit/             # Python console, script library, CLI core
+│   ├── AgentMCP/                 # MCP server: typed, transactional agent editing API over the kits
 │   ├── EditorUI/                 # Panels: outliner, inspector, console, toolbar
 │   └── DicyaninDesignSystem/     # Tokens, colors, typography, reusable controls
 ├── CLI/                          # openusdz command-line target (links kits, no UI)
@@ -34,6 +35,7 @@ USDBridge ─▶ USDCore          (bridge implements USDCore protocols)
 {EditingKit, ViewportKit} ─▶ MeshKit   (MeshKit itself imports nothing internal)
 DicyaninDesignSystem ◀─ EditorUI only
 CLI ─▶ kits (never EditorUI)
+AgentMCP ─▶ {USDBridge, EditingKit, ValidationKit, ConversionKit, ScriptingKit, MeshKit} ─▶ USDCore   (thin MCP adapter, docs/AGENT_MCP_PLAN.md; never EditorUI)
 ```
 
 The authoritative, machine-checked form of this graph is the policy table in
