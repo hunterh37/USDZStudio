@@ -81,6 +81,11 @@ public struct ViewportPane: View {
     /// hides it. Dragging the handle reports phases through `onGizmoDrag`.
     let extrudeGizmo: ExtrudeGizmoDescriptor?
     let onGizmoDrag: ((ExtrudeGizmoDragPhase) -> Void)?
+    /// Object-mode move gizmo (three XYZ arrows at the selection's world
+    /// pivot); `nil` hides it. Dragging an arrow reports phases through
+    /// `onTranslateGizmoDrag`.
+    let translateGizmo: TranslateGizmoDescriptor?
+    let onTranslateGizmoDrag: ((TranslateGizmoDragPhase) -> Void)?
     /// Scripted camera (guided tour): while non-nil the pose overrides the
     /// user-driven orbit camera. `nil` = normal mouse control.
     let cameraPose: ViewportCameraPose?
@@ -108,6 +113,8 @@ public struct ViewportPane: View {
                 onHoverFace: ((Int?) -> Void)? = nil,
                 extrudeGizmo: ExtrudeGizmoDescriptor? = nil,
                 onGizmoDrag: ((ExtrudeGizmoDragPhase) -> Void)? = nil,
+                translateGizmo: TranslateGizmoDescriptor? = nil,
+                onTranslateGizmoDrag: ((TranslateGizmoDragPhase) -> Void)? = nil,
                 cameraPose: ViewportCameraPose? = nil,
                 liveTransforms: [String: float4x4]? = nil,
                 materialOverrides: [String: MaterialOverride]? = nil) {
@@ -120,6 +127,8 @@ public struct ViewportPane: View {
         self.onHoverFace = onHoverFace
         self.extrudeGizmo = extrudeGizmo
         self.onGizmoDrag = onGizmoDrag
+        self.translateGizmo = translateGizmo
+        self.onTranslateGizmoDrag = onTranslateGizmoDrag
         self.cameraPose = cameraPose
         self.liveTransforms = liveTransforms
         self.materialOverrides = materialOverrides
@@ -132,6 +141,8 @@ public struct ViewportPane: View {
                                   editedMesh: editedMesh, onPickFace: onPickFace,
                                   hoverPreview: hoverPreview, onHoverFace: onHoverFace,
                                   extrudeGizmo: extrudeGizmo, onGizmoDrag: onGizmoDrag,
+                                  translateGizmo: translateGizmo,
+                                  onTranslateGizmoDrag: onTranslateGizmoDrag,
                                   cameraLink: cameraLink,
                                   cameraPose: cameraPose, liveTransforms: liveTransforms,
                                   materialOverrides: materialOverrides,
@@ -214,6 +225,8 @@ struct ViewportRepresentable: NSViewRepresentable {
     let onHoverFace: ((Int?) -> Void)?
     let extrudeGizmo: ExtrudeGizmoDescriptor?
     let onGizmoDrag: ((ExtrudeGizmoDragPhase) -> Void)?
+    let translateGizmo: TranslateGizmoDescriptor?
+    let onTranslateGizmoDrag: ((TranslateGizmoDragPhase) -> Void)?
     let cameraLink: ViewportCameraLink
     let cameraPose: ViewportCameraPose?
     let liveTransforms: [String: float4x4]?
@@ -244,6 +257,7 @@ struct ViewportRepresentable: NSViewRepresentable {
         context.coordinator.applyEditedMesh(editedMesh, onPickFace: onPickFace,
                                             hoverPreview: hoverPreview, onHoverFace: onHoverFace)
         context.coordinator.applyExtrudeGizmo(extrudeGizmo, onDrag: onGizmoDrag)
+        context.coordinator.applyTranslateGizmo(translateGizmo, onDrag: onTranslateGizmoDrag)
         context.coordinator.applyCameraPose(cameraPose)
         context.coordinator.applyLiveTransforms(liveTransforms)
         context.coordinator.applyMaterialOverrides(materialOverrides)
@@ -304,7 +318,49 @@ final class ViewportCoordinator {
             self?.applyCamera()
         }
         view.onFrame = { [weak self] in self?.frameModel() }
+        // One dispatcher owns the gizmo capture callbacks; whichever gizmo is
+        // active (extrude in mesh-edit, translate in object mode) claims the
+        // drag. A miss on both returns false and the camera takes the gesture.
+        view.onGizmoMouseDown = { [weak self] p in self?.anyGizmoMouseDown(at: p) ?? false }
+        view.onGizmoDragMove = { [weak self] p in self?.anyGizmoDragMoved(to: p) }
+        view.onGizmoDragEnd = { [weak self] in self?.anyGizmoDragEnded() }
     }
+
+    // MARK: Gizmo drag dispatch
+
+    // coverage:disable — mouse-capture routing between RealityKit gizmos; exercised by the editor-harness translate-gizmo scenario, unreachable from unit tests (no NSView/ARView)
+    private enum ActiveGizmoDrag { case extrude, translate }
+    private var activeGizmoDrag: ActiveGizmoDrag?
+
+    private func anyGizmoMouseDown(at point: CGPoint) -> Bool {
+        if gizmoDescriptor != nil, gizmoMouseDown(at: point) {
+            activeGizmoDrag = .extrude
+            return true
+        }
+        if translateDescriptor != nil, translateMouseDown(at: point) {
+            activeGizmoDrag = .translate
+            return true
+        }
+        return false
+    }
+
+    private func anyGizmoDragMoved(to point: CGPoint) {
+        switch activeGizmoDrag {
+        case .extrude: gizmoDragMoved(to: point)
+        case .translate: translateDragMoved(to: point)
+        case nil: break
+        }
+    }
+
+    private func anyGizmoDragEnded() {
+        switch activeGizmoDrag {
+        case .extrude: gizmoDragEnded()
+        case .translate: translateDragEnded()
+        case nil: break
+        }
+        activeGizmoDrag = nil
+    }
+    // coverage:enable
 
     func load(url: URL?) {
         guard url != loadedURL else { return }
@@ -824,9 +880,6 @@ final class ViewportCoordinator {
                            onDrag: ((ExtrudeGizmoDragPhase) -> Void)?) {
         onGizmoDrag = onDrag
         let active = descriptor != nil
-        view?.onGizmoMouseDown = active ? { [weak self] p in self?.gizmoMouseDown(at: p) ?? false } : nil
-        view?.onGizmoDragMove = active ? { [weak self] p in self?.gizmoDragMoved(to: p) } : nil
-        view?.onGizmoDragEnd = active ? { [weak self] in self?.gizmoDragEnded() } : nil
         // `applyEditedMesh` clears the edit anchor on every mesh revision, so
         // reattach even when the descriptor itself is unchanged.
         if let current = descriptor ?? gizmoDescriptor, gizmoRoot.parent == nil, active {
@@ -920,6 +973,148 @@ final class ViewportCoordinator {
         onGizmoDrag?(.ended)
     }
 
+    // MARK: Translate gizmo (object-mode XYZ move arrows)
+
+    // coverage:disable — RealityKit arrow rendering + drag glue; the math is unit-tested (TranslateGizmoMathTests) and the document flow by the editor-harness translate-gizmo scenario
+    /// World-space container for the three arrows; positioned at the
+    /// selection's world pivot and scaled to screen-constant size.
+    private let translateAnchor = AnchorEntity(world: .zero)
+    private let translateRoot = Entity()
+    private var translateDescriptor: TranslateGizmoDescriptor?
+    private var onTranslateGizmoDrag: ((TranslateGizmoDragPhase) -> Void)?
+    /// The shaft+tip models per axis (rawValue-keyed) for drag highlighting.
+    private var translateArrowModels: [Int: [ModelEntity]] = [:]
+    /// Drag reference frozen at mouse-down (same no-feedback-loop idiom as the
+    /// extrude handle): the grabbed axis, the pivot at grab time, and the
+    /// start ray's axis parameter.
+    private var translateDragStart: (axis: GizmoAxis, origin: SIMD3<Double>, param: Double)?
+    private var translateLastDistance = 0.0
+
+    /// DCC-standard axis tints (matching the grid/orientation gizmo):
+    /// X red, Y green, Z blue.
+    private static let axisColors: [NSColor] = [
+        NSColor(srgbRed: 0.91, green: 0.34, blue: 0.30, alpha: 1),
+        NSColor(srgbRed: 0.55, green: 0.83, blue: 0.35, alpha: 1),
+        NSColor(srgbRed: 0.34, green: 0.55, blue: 0.98, alpha: 1),
+    ]
+    private static let activeAxisColor = NSColor(srgbRed: 0.98, green: 0.86, blue: 0.25, alpha: 1)
+
+    /// Shows/hides/re-lays-out the move gizmo (descriptor-gated like the other
+    /// apply* methods; the revision bump on every edit keeps it following the
+    /// object it moves).
+    func applyTranslateGizmo(_ descriptor: TranslateGizmoDescriptor?,
+                             onDrag: ((TranslateGizmoDragPhase) -> Void)?) {
+        onTranslateGizmoDrag = onDrag
+        guard descriptor != translateDescriptor else { return }
+        translateDescriptor = descriptor
+        guard let descriptor else {
+            translateDragStart = nil
+            translateAnchor.removeFromParent()
+            return
+        }
+        if translateRoot.parent == nil { translateAnchor.addChild(translateRoot) }
+        if translateAnchor.parent == nil { view?.scene.addAnchor(translateAnchor) }
+        if translateRoot.children.isEmpty { rebuildTranslateGizmoGeometry() }
+        layoutTranslateGizmo(descriptor)
+    }
+
+    /// Three unit-length arrows (cylinder shaft + cone tip) built along +Y and
+    /// aimed down each axis; `layoutTranslateGizmo` scales the whole root to a
+    /// screen-constant size. Unlit so they read at any angle.
+    private func rebuildTranslateGizmoGeometry() {
+        translateRoot.children.removeAll()
+        translateArrowModels = [:]
+        let shaftRadius = Float(ExtrudeGizmoMath.shaftRadiusFraction)
+        // Cylinder/cone primitives are macOS 15+; box shaft + sphere tip is
+        // the same fallback the extrude handle uses.
+        let shaftMesh: MeshResource
+        let tipMesh: MeshResource
+        if #available(macOS 15.0, *) {
+            shaftMesh = .generateCylinder(height: 0.78, radius: shaftRadius)
+            tipMesh = .generateCone(height: 0.22, radius: 0.06)
+        } else {
+            shaftMesh = .generateBox(size: SIMD3<Float>(shaftRadius * 2, 0.78, shaftRadius * 2))
+            tipMesh = .generateSphere(radius: 0.07)
+        }
+        for axis in GizmoAxis.allCases {
+            let material = UnlitMaterial(color: Self.axisColors[axis.rawValue])
+            let shaft = ModelEntity(mesh: shaftMesh, materials: [material])
+            shaft.position = SIMD3<Float>(0, 0.39, 0)
+            let tip = ModelEntity(mesh: tipMesh, materials: [material])
+            tip.position = SIMD3<Float>(0, 0.89, 0)
+            let arrow = Entity()
+            arrow.addChild(shaft)
+            arrow.addChild(tip)
+            arrow.orientation = simd_quatf(from: SIMD3<Float>(0, 1, 0),
+                                           to: SIMD3<Float>(axis.direction))
+            translateRoot.addChild(arrow)
+            translateArrowModels[axis.rawValue] = [shaft, tip]
+        }
+    }
+
+    /// Anchors the arrows at the selection pivot and scales them to a constant
+    /// apparent size for the current camera distance (re-run on every camera
+    /// change, like the extrude handle).
+    private func layoutTranslateGizmo(_ descriptor: TranslateGizmoDescriptor) {
+        translateRoot.position = SIMD3<Float>(descriptor.origin)
+        let length = ExtrudeGizmoMath.handleLength(cameraDistance: camera.distance)
+        translateRoot.scale = SIMD3<Float>(repeating: Float(length))
+    }
+
+    /// Tints the dragged axis's arrow the active (yellow) colour; `nil`
+    /// restores all three to their axis tints.
+    private func setTranslateHighlight(_ axis: GizmoAxis?) {
+        for a in GizmoAxis.allCases {
+            let color = a == axis ? Self.activeAxisColor : Self.axisColors[a.rawValue]
+            for model in translateArrowModels[a.rawValue] ?? [] {
+                model.model?.materials = [UnlitMaterial(color: color)]
+            }
+        }
+    }
+
+    /// The click's pick ray in world space (the move gizmo lives in world
+    /// space, unlike the prim-local extrude handle).
+    private func worldRay(at point: CGPoint) -> CameraRay.Ray? {
+        guard let view else { return nil }
+        return CameraRay.make(camera: camera, viewSize: view.bounds.size, point: point)
+    }
+
+    /// Mouse-down over an arrow? Then capture the drag (camera stays put).
+    private func translateMouseDown(at point: CGPoint) -> Bool {
+        guard let descriptor = translateDescriptor, let ray = worldRay(at: point) else { return false }
+        let length = ExtrudeGizmoMath.handleLength(cameraDistance: camera.distance)
+        guard let axis = TranslateGizmoMath.hitAxis(ray: ray, origin: descriptor.origin,
+                                                    length: length),
+              let param = ExtrudeGizmoMath.axisParameter(ray: ray, origin: descriptor.origin,
+                                                         axis: axis.direction)
+        else { return false }
+        translateDragStart = (axis, descriptor.origin, param)
+        translateLastDistance = 0
+        setTranslateHighlight(axis)
+        onTranslateGizmoDrag?(.began(axis))
+        return true
+    }
+
+    private func translateDragMoved(to point: CGPoint) {
+        guard let start = translateDragStart else { return }
+        // A ray gone parallel to the axis keeps the last stable distance
+        // instead of jumping — the drag freezes, never glitches.
+        if let ray = worldRay(at: point),
+           let param = ExtrudeGizmoMath.axisParameter(ray: ray, origin: start.origin,
+                                                      axis: start.axis.direction) {
+            translateLastDistance = param - start.param
+        }
+        onTranslateGizmoDrag?(.changed(start.axis, translateLastDistance))
+    }
+
+    private func translateDragEnded() {
+        guard translateDragStart != nil else { return }
+        translateDragStart = nil
+        setTranslateHighlight(nil)
+        onTranslateGizmoDrag?(.ended)
+    }
+    // coverage:enable
+
     private func frameModel() {
         // A scripted pose owns the camera; auto-framing would fight it.
         guard appliedPose == nil, let modelBounds else { return }
@@ -933,8 +1128,9 @@ final class ViewportCoordinator {
         cameraEntity.transform = Transform(matrix: float4x4(lookAtFrom: SIMD3<Float>(camera.position),
                                                             target: SIMD3<Float>(camera.target)))
         cameraLink?.publish(camera)
-        // Keep the extrude handle a constant apparent size as the camera moves.
+        // Keep the gizmo handles a constant apparent size as the camera moves.
         if let descriptor = gizmoDescriptor { layoutGizmo(descriptor) }
+        if let descriptor = translateDescriptor { layoutTranslateGizmo(descriptor) }
     }
 
     private func rebuildGrid(halfExtent: Float) {

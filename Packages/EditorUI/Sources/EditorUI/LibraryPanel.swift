@@ -10,6 +10,9 @@ struct LibraryPanel: View {
     let onClose: () -> Void
     /// The open document items are inserted into (nil before a file is opened).
     let document: EditorDocument?
+    /// Creates a fresh, empty scratch document when none is open, so a primitive
+    /// can be added to a brand-new scene. Returns nil if one can't be created.
+    var onCreateDocument: () -> EditorDocument? = { nil }
 
     @State private var selectedID: String?
     @State private var status: String?
@@ -43,7 +46,7 @@ struct LibraryPanel: View {
                 Label("Add to Scene", systemImage: "plus")
             }
             .buttonStyle(.borderedProminent)
-            .disabled(selectedEntry == nil || document == nil)
+            .disabled(selectedEntry == nil)
             .accessibilityIdentifier("library.addSelected")
             Button("Close", action: onClose)
         }
@@ -121,7 +124,13 @@ struct LibraryPanel: View {
     }
 
     private func insertSelected() {
-        guard let entry = selectedEntry, let document else { return }
+        guard let entry = selectedEntry else { return }
+        // No file open yet? Start a fresh empty scene so the primitive has
+        // somewhere to land, instead of silently doing nothing.
+        guard let document = document ?? onCreateDocument() else {
+            status = "Couldn’t create a scene to add \(entry.name) to."
+            return
+        }
         if let error = LibraryInsertion.insert(entry, into: document) {
             status = error
         } else {
