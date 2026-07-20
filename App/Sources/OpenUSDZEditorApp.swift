@@ -59,6 +59,7 @@ struct OpenUSDZEditorApp: App {
                                     bridge: ProcessBridgeExecutor(scriptPath: Self.snapshotScriptPath))
                             },
                             onReimportFile: { url in await reimport(url) },
+                            makeConsoleController: { makeConsoleController() },
                             onCreateDocument: {
                                 // Start a fresh, empty scratch scene (no backing
                                 // file) so the library can add primitives without
@@ -141,6 +142,9 @@ struct OpenUSDZEditorApp: App {
                     .keyboardShortcut("u")
                     .disabled(document == nil)
                 Button("Scripts…") { postMenu(.scripts) }
+                Button("Python Console…") { postMenu(.console) }
+                    .keyboardShortcut("p", modifiers: [.command, .shift])
+                    .disabled(document == nil)
             }
             // Replace (not just prepend to) the default Help group. macOS
             // otherwise leaves its stock "OpenUSDZEditor Help" item in place,
@@ -223,6 +227,41 @@ struct OpenUSDZEditorApp: App {
         guard let document else { return }
         let executor = ProcessBridgeExecutor(scriptPath: Self.snapshotScriptPath)
         try await document.save(to: url, executor: executor)
+    }
+
+    /// Builds an interactive-console controller bound to the live document. The
+    /// console runs each submission against a temp `.usda` copy of the current
+    /// stage (written via the pure-Swift serializer), re-opens the result through
+    /// the bridge, and records any change as one undoable command. Returns nil
+    /// when there's no document or no Python interpreter.
+    @MainActor
+    private func makeConsoleController() -> ReplController? {
+        guard let document,
+              let bridge = ProcessBridgeExecutor(scriptPath: Self.snapshotScriptPath),
+              let executor = ProcessScriptExecutor(
+                bridge: ProcessBridgeExecutor(scriptPath: Self.snapshotScriptPath))
+        else { return nil }
+
+        let workingURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("openusdz-console-\(UUID().uuidString).usda")
+        let selection = document.selection.paths.map(\.description)
+        let session = ReplSession(
+            executor: executor,
+            context: ReplContext(inputPath: workingURL.path, selection: selection))
+
+        return ReplController(
+            session: session,
+            workingURL: workingURL,
+            liveSnapshot: { [weak document] in document?.snapshot ?? .init() },
+            writeSnapshot: { snapshot, url in
+                try await StageSaver.save(snapshot, to: url, executor: nil)
+            },
+            readSnapshot: { url in
+                try await BridgedStage.open(url: url, executor: bridge).snapshot
+            },
+            commit: { [weak document] after, label in
+                document?.applyConsoleEdit(after: after, label: label)
+            })
     }
 
     private func presentOpenPanel() {

@@ -160,9 +160,9 @@ struct CLIConvertTests {
     }
 
     @Test func unsupportedInputFormatRefused() async {
-        let result = await run(["convert", "/a.fbx", "/b.usda"])
+        let result = await run(["convert", "/a.blend", "/b.usda"])
         #expect(result.code == 2)
-        #expect(result.err.first?.contains("unsupported input format .fbx") == true)
+        #expect(result.err.first?.contains("unsupported input format .blend") == true)
     }
 
     @Test func missingInputIsRuntimeError() async {

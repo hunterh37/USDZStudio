@@ -96,7 +96,7 @@ struct StandardDefaultsTests {
 
     @Test func standardRegistryCoversAllBuiltInFormats() {
         let registry = ImporterRegistry.standard
-        #expect(registry.registeredExtensions == ["dae", "glb", "gltf", "obj", "ply", "stl"])
+        #expect(registry.registeredExtensions == ["dae", "fbx", "glb", "gltf", "obj", "ply", "stl"])
         #expect(registry.importer(for: URL(fileURLWithPath: "/x.glb")) is GLTFImporter)
         #expect(registry.importer(for: URL(fileURLWithPath: "/x.obj")) is ModelIOImporter)
     }

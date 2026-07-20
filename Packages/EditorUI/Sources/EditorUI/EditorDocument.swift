@@ -813,6 +813,36 @@ public final class EditorDocument {
         savedRevision = revision
     }
 
+    // MARK: Console (REPL) edits
+
+    /// Records the result of one interactive-console submission as a single
+    /// undoable command (ROADMAP Milestone 5 — "single-undo script runs").
+    ///
+    /// `after` is the stage re-opened from the file the console ran against. A
+    /// query-only submission (or one that never called `stage.Save()`) leaves the
+    /// file unchanged, so `after` matches the live stage and nothing is pushed —
+    /// the console stays undo-neutral until it actually authors an edit. Only the
+    /// document content is compared (`sourceURL` differs because `after` came from
+    /// a temp file, and is irrelevant to the applied command).
+    @discardableResult
+    public func applyConsoleEdit(after: StageSnapshot, label: String) -> Bool {
+        let before = snapshot
+        guard after.metadata != before.metadata || after.rootPrims != before.rootPrims else {
+            return false
+        }
+        return run(ReplaceStageCommand(before: before, after: after, opLabel: label)) != nil
+    }
+
+    // MARK: Export compliance gating
+
+    /// Runs `profile`'s compliance check over the live stage so the export UI can
+    /// gate on it (ROADMAP Milestone 5 — "wire the export path through
+    /// ComplianceChecker gating in the app UI"). Defaults to the ARKit profile,
+    /// which blocks on errors.
+    public func exportCompliance(profile: ValidationProfile = .arkit) -> ComplianceResult {
+        ComplianceChecker(profile: profile).check(snapshot)
+    }
+
     // MARK: Private
 
     private func refresh() {
