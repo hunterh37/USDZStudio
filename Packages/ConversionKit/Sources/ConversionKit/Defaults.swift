@@ -7,6 +7,7 @@ extension ImporterRegistry {
         var registry = ImporterRegistry()
         registry.register(GLTFImporter(), extensions: GLTFImporter.supportedExtensions)
         registry.register(ModelIOImporter(), extensions: ModelIOImporter.supportedExtensions)
+        registry.register(FBXImporter(), extensions: FBXImporter.supportedExtensions)
         return registry
     }
 }
