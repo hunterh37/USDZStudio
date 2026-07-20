@@ -97,6 +97,10 @@ public struct ViewportPane: View {
     /// the file-loaded entities so recolour/roughness/etc. edits are visible
     /// without a reload. `nil` = leave the file's baked materials as-is.
     let materialOverrides: [String: MaterialOverride]?
+    /// Image-based lighting + background state (specs/viewport.md "Environment
+    /// & Lighting"). The pure model lives in ``EnvironmentSettings``; this layer
+    /// only installs the resolved source, exposure, and background.
+    let environment: EnvironmentSettings
     /// Animation playhead in **seconds from the clip start** (specs/viewport.md
     /// §Animation Playback). Non-nil while the transport bar drives playback: the
     /// viewport seeks the loaded entity's `AnimationResource` to this time and
@@ -125,6 +129,7 @@ public struct ViewportPane: View {
                 cameraPose: ViewportCameraPose? = nil,
                 liveTransforms: [String: float4x4]? = nil,
                 materialOverrides: [String: MaterialOverride]? = nil,
+                environment: EnvironmentSettings = EnvironmentSettings(),
                 animationTime: Double? = nil) {
         self.modelURL = modelURL
         self.livePrimPaths = livePrimPaths
@@ -140,6 +145,7 @@ public struct ViewportPane: View {
         self.cameraPose = cameraPose
         self.liveTransforms = liveTransforms
         self.materialOverrides = materialOverrides
+        self.environment = environment
         self.animationTime = animationTime
     }
 
@@ -155,6 +161,7 @@ public struct ViewportPane: View {
                                   cameraLink: cameraLink,
                                   cameraPose: cameraPose, liveTransforms: liveTransforms,
                                   materialOverrides: materialOverrides,
+                                  environment: environment,
                                   animationTime: animationTime,
                                   debugMode: debugMode,
                                   stats: $stats, loadError: $loadError)
@@ -241,6 +248,7 @@ struct ViewportRepresentable: NSViewRepresentable {
     let cameraPose: ViewportCameraPose?
     let liveTransforms: [String: float4x4]?
     let materialOverrides: [String: MaterialOverride]?
+    let environment: EnvironmentSettings
     let animationTime: Double?
     let debugMode: DebugViewMode
     @Binding var stats: SceneStats?
@@ -272,6 +280,7 @@ struct ViewportRepresentable: NSViewRepresentable {
         context.coordinator.applyCameraPose(cameraPose)
         context.coordinator.applyLiveTransforms(liveTransforms)
         context.coordinator.applyMaterialOverrides(materialOverrides)
+        context.coordinator.applyEnvironment(environment)
         context.coordinator.applyAnimationTime(animationTime)
         context.coordinator.applyDebugMode(debugMode)
     }
@@ -579,6 +588,61 @@ final class ViewportCoordinator {
 
     private static func nsColor(_ c: SIMD3<Float>, alpha: Float = 1) -> NSColor {
         NSColor(srgbRed: CGFloat(c.x), green: CGFloat(c.y), blue: CGFloat(c.z), alpha: CGFloat(alpha))
+    }
+
+    // MARK: Environment & lighting (IBL presets, exposure, background)
+
+    private var appliedEnvironment: EnvironmentSettings?
+
+    /// Installs the resolved IBL source, exposure, and background onto the
+    /// ARView (specs/viewport.md "Environment & Lighting"). Cheap when nothing
+    /// changed (value-equality gated, same idiom as the other apply* methods).
+    func applyEnvironment(_ settings: EnvironmentSettings) {
+        guard settings != appliedEnvironment else { return }
+        appliedEnvironment = settings
+        guard let view else { return }
+
+        // Lighting source.
+        switch settings.resolvedSource {
+        case .presetImage(let name):
+            if let resource = try? EnvironmentResource.load(named: name) {
+                view.environment.lighting.resource = resource
+                if case .environment = settings.background {
+                    view.environment.background = .skybox(resource)
+                }
+            }
+        case .customFile(let url):
+            let wantsSkybox: Bool = { if case .environment = settings.background { return true }; return false }()
+            guard #available(macOS 15, *) else { break }
+            Task { @MainActor [weak self, weak view] in
+                guard let view, self?.appliedEnvironment?.resolvedSource == .customFile(url),
+                      let source = CGImageSourceCreateWithURL(url as CFURL, nil),
+                      let cgImage = CGImageSourceCreateImageAtIndex(source, 0, nil),
+                      let resource = try? await EnvironmentResource(equirectangular: cgImage)
+                else { return }
+                view.environment.lighting.resource = resource
+                if wantsSkybox { view.environment.background = .skybox(resource) }
+            }
+        case .constantColor(let color):
+            let ns = Self.nsColor(color)
+            if case .environment = settings.background {
+                view.environment.background = .color(ns)
+            }
+        }
+
+        // Exposure (EV) + intensity fold into RealityKit's intensity exponent.
+        view.environment.lighting.intensityExponent =
+            Float(settings.exposureEV) + log2(max(settings.intensity, 1e-4))
+
+        // Non-environment backgrounds.
+        switch settings.background {
+        case .environment:
+            break
+        case .solidColor(let color):
+            view.environment.background = .color(Self.nsColor(color))
+        case .transparent:
+            view.environment.background = .color(.clear)
+        }
     }
 
     // MARK: Debug view modes (wireframe / normals / UV checker / matcap)

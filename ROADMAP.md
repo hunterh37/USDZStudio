@@ -113,7 +113,7 @@ With the golden-image, round-trip, corpus, and XCUITest harnesses now built by e
 ## Phase 1 — Best-in-class Viewer (v0.1)
 
 - [x] RealityKit viewport: fast-path loading, orbit/pan/dolly, frame selection, grid/axes
-- [ ] IBL presets + custom HDR, exposure, background modes
+- [x] IBL presets + custom HDR, exposure, background modes (pure `EnvironmentSettings` model in ViewportKit; inspector popover control strip in EditorUI; RealityKit application of resolved source/exposure/background — golden-image coverage tracked with the harness in Phase T)
 - [x] Outliner (search, visibility, type icons) + read-only inspector (transform, prim, material, stage tabs)
 - [x] Stats HUD, bounds/AR-scale readout
 - [x] Animation playback transport (play/pause/scrub/loop/speed over authored time-samples; `PlaybackTransport` + transport bar)
