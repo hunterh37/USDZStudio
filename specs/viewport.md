@@ -38,8 +38,8 @@ The center viewport: rendering, camera, selection, gizmos, environments, debug m
 
 ## Animation Playback
 
-- Transport bar (bottom of viewport, auto-hides when stage has no animation): play/pause, scrub, loop, playback speed, frame counter honoring stage timeCodesPerSecond.
-- Skeletal + transform animations via RealityKit `AnimationResource`; per-animation selection when multiple clips exist.
+- Transport bar (bottom of viewport, auto-hides when stage has no animation): play/pause, scrub, loop, playback speed, frame counter honoring stage timeCodesPerSecond. Implemented: transport state is the pure, unit-tested `PlaybackTransport` value type (advance/loop/clamp/scrub math, ViewportKit); `PlaybackController` (EditorUI, `@Observable`) drives it from a display-link tick and exposes the seconds-from-start playhead. The viewport seeks the loaded entity's `AnimationResource` to that time and holds it paused, so every transport action reduces to "show the pose at time T" (deterministic sampled poses).
+- Skeletal + transform animations via RealityKit `AnimationResource` (currently the first authored clip); per-animation selection when multiple clips exist is a follow-up.
 
 ## Stats HUD (toggle, top-right)
 

@@ -97,6 +97,13 @@ public struct ViewportPane: View {
     /// the file-loaded entities so recolour/roughness/etc. edits are visible
     /// without a reload. `nil` = leave the file's baked materials as-is.
     let materialOverrides: [String: MaterialOverride]?
+    /// Animation playhead in **seconds from the clip start** (specs/viewport.md
+    /// §Animation Playback). Non-nil while the transport bar drives playback: the
+    /// viewport seeks the loaded entity's `AnimationResource` to this time and
+    /// pauses it there, so scrub/play/loop all reduce to "show the pose at time
+    /// T". `nil` leaves the model at its default (rest) pose. The transport does
+    /// the time-code→seconds conversion (honouring `timeCodesPerSecond`).
+    let animationTime: Double?
     @State private var stats: SceneStats?
     @State private var showStats = true
     @State private var loadError: String?
@@ -117,7 +124,8 @@ public struct ViewportPane: View {
                 onTranslateGizmoDrag: ((TranslateGizmoDragPhase) -> Void)? = nil,
                 cameraPose: ViewportCameraPose? = nil,
                 liveTransforms: [String: float4x4]? = nil,
-                materialOverrides: [String: MaterialOverride]? = nil) {
+                materialOverrides: [String: MaterialOverride]? = nil,
+                animationTime: Double? = nil) {
         self.modelURL = modelURL
         self.livePrimPaths = livePrimPaths
         self.sceneRevision = sceneRevision
@@ -132,6 +140,7 @@ public struct ViewportPane: View {
         self.cameraPose = cameraPose
         self.liveTransforms = liveTransforms
         self.materialOverrides = materialOverrides
+        self.animationTime = animationTime
     }
 
     public var body: some View {
@@ -146,6 +155,7 @@ public struct ViewportPane: View {
                                   cameraLink: cameraLink,
                                   cameraPose: cameraPose, liveTransforms: liveTransforms,
                                   materialOverrides: materialOverrides,
+                                  animationTime: animationTime,
                                   debugMode: debugMode,
                                   stats: $stats, loadError: $loadError)
             VStack(alignment: .leading, spacing: 6) {
@@ -231,6 +241,7 @@ struct ViewportRepresentable: NSViewRepresentable {
     let cameraPose: ViewportCameraPose?
     let liveTransforms: [String: float4x4]?
     let materialOverrides: [String: MaterialOverride]?
+    let animationTime: Double?
     let debugMode: DebugViewMode
     @Binding var stats: SceneStats?
     @Binding var loadError: String?
@@ -261,6 +272,7 @@ struct ViewportRepresentable: NSViewRepresentable {
         context.coordinator.applyCameraPose(cameraPose)
         context.coordinator.applyLiveTransforms(liveTransforms)
         context.coordinator.applyMaterialOverrides(materialOverrides)
+        context.coordinator.applyAnimationTime(animationTime)
         context.coordinator.applyDebugMode(debugMode)
     }
 }
@@ -368,6 +380,10 @@ final class ViewportCoordinator {
         loadTask?.cancel()
         baselinePrimPaths = nil
         appliedSceneRevision = nil
+        // coverage:disable — animation-controller reset on model swap (golden-image tested)
+        animationController = nil
+        appliedAnimationTime = nil
+        // coverage:enable
         modelAnchor.children.removeAll()
         onStats?(nil)
         onError?(nil)
@@ -440,6 +456,62 @@ final class ViewportCoordinator {
             entity.transform = Transform(matrix: matrix)
         }
     }
+
+    // MARK: Animation playback (transport-driven pose seeking)
+
+    // coverage:disable — RealityKit AnimationResource glue, verified by golden-image tests (specs/testing.md layer 6)
+    private var animationController: AnimationPlaybackController?
+    private var appliedAnimationTime: Double?
+
+    /// Seeks the loaded model's first available animation to `seconds` (from the
+    /// clip start) and holds it paused there. Every transport action — play,
+    /// scrub, loop, step — arrives as a new absolute time, so the viewport only
+    /// ever "shows the pose at T" and never runs RealityKit's own clock. A `nil`
+    /// time stops playback and returns the model to its rest pose.
+    func applyAnimationTime(_ seconds: Double?) {
+        guard seconds != appliedAnimationTime else { return }
+        appliedAnimationTime = seconds
+        guard let seconds else {
+            animationController?.stop()
+            animationController = nil
+            return
+        }
+        if animationController == nil {
+            animationController = startHeldAnimation()
+        }
+        guard let controller = animationController, controller.isValid else {
+            animationController = nil
+            return
+        }
+        // Clamp into the clip so scrubbing past the authored end holds the last
+        // pose rather than snapping back to the start.
+        let clamped = max(0, min(seconds, controller.duration))
+        controller.time = clamped
+        controller.pause()
+    }
+
+    /// Starts the first animation on any loaded entity, immediately paused, so
+    /// `applyAnimationTime` can seek it. Returns `nil` when the model carries no
+    /// animation.
+    private func startHeldAnimation() -> AnimationPlaybackController? {
+        for child in modelAnchor.children {
+            if let controller = startHeldAnimation(on: child) { return controller }
+        }
+        return nil
+    }
+
+    private func startHeldAnimation(on entity: Entity) -> AnimationPlaybackController? {
+        if let clip = entity.availableAnimations.first {
+            let controller = entity.playAnimation(clip.repeat(), transitionDuration: 0,
+                                                  startsPaused: true)
+            return controller
+        }
+        for child in entity.children {
+            if let controller = startHeldAnimation(on: child) { return controller }
+        }
+        return nil
+    }
+    // coverage:enable
 
     // MARK: Live material overrides (recolour / surface-input edits)
 
