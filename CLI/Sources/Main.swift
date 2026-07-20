@@ -61,13 +61,15 @@ enum CLIRunner {
                                diffs the flattened USD text against the original
                                (only lossless-modelled files pass). Exits 1 when
                                any invariant fails.
-      validate <file.usd[z|a|c]> [--profile NAME] [--strict]
+      validate <file.usd[z|a|c]> [--profile NAME] [--strict] [--json]
                                Run a compliance profile's rule catalog and print
                                diagnostics (most-severe first) with an export
                                gate verdict. --profile is one of: arkit
                                (default), arkit-strict. Exits 1 when export is
                                blocked; --strict is shorthand for the strict
-                               gate (warnings block too).
+                               gate (warnings block too). --json prints the same
+                               verdict as a machine-readable report; branch on
+                               its `exportAllowed` field.
 
       --preset NAME            Base texture settings before other flags apply.
                                NAME is one of: quicklook-strict (default),
@@ -465,6 +467,7 @@ enum CLIRunner {
     ) async -> Int32 {
         var positional: [String] = []
         var strict = false
+        var json = false
         var profileID: String?
         var index = 0
         while index < arguments.count {
@@ -472,6 +475,9 @@ enum CLIRunner {
             switch argument {
             case "--strict":
                 strict = true
+                index += 1
+            case "--json":
+                json = true
                 index += 1
             case "--profile":
                 guard index + 1 < arguments.count else {
@@ -525,10 +531,47 @@ enum CLIRunner {
         }
 
         let result = ComplianceChecker(profile: profile).check(stage)
-        renderResult(result, print: output)
+        if json {
+            output(encodeResultJSON(result, file: positional[0]))
+        } else {
+            renderResult(result, print: output)
+        }
 
-        // The profile's gate decides: export blocked → exit 1.
+        // The profile's gate decides: export blocked → exit 1. The verdict is
+        // identical in both renderings; --json changes the shape, never the
+        // outcome.
         return result.isExportAllowed ? 0 : 1
+    }
+
+    /// Machine-readable compliance report (`--json`).
+    ///
+    /// Mirrors `renderResult`'s content one-for-one — same diagnostics, same
+    /// order, same gate verdict — so a script and a human reading the same run
+    /// can never disagree. `exportAllowed` is the field to branch on; it is the
+    /// exit code in boolean form.
+    static func encodeResultJSON(_ result: ComplianceResult, file: String) -> String {
+        let diagnostics: [[String: Any]] = result.report.diagnostics.map { diagnostic in
+            var object: [String: Any] = [
+                "ruleID": diagnostic.ruleID,
+                "severity": diagnostic.severity.rawValue,
+                "message": diagnostic.message,
+                "blocking": diagnostic.severity >= result.blockingSeverity,
+            ]
+            if let path = diagnostic.primPath { object["primPath"] = path.description }
+            return object
+        }
+        let payload: [String: Any] = [
+            "file": file,
+            "profile": result.profileID,
+            "blockingSeverity": result.blockingSeverity.rawValue,
+            "exportAllowed": result.isExportAllowed,
+            "summary": result.summary,
+            "diagnostics": diagnostics,
+        ]
+        guard let data = try? JSONSerialization.data(
+                withJSONObject: payload, options: [.prettyPrinted, .sortedKeys]),
+              let text = String(data: data, encoding: .utf8) else { return "{}" }
+        return text
     }
 
     /// Renders a `ComplianceResult` as one line per diagnostic (already sorted
