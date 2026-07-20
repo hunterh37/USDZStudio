@@ -435,6 +435,150 @@ struct CLIValidateTests {
         #expect(result.err.first?.contains("Python runtime unavailable") == true)
         #expect(result.err.count == 2)
     }
+
+    // MARK: - The T1 CLI matrix: {valid, warning, invalid} × {default, --json, --strict}
+
+    /// The three stage classes the gate has to separate, named so failures point
+    /// straight at the row of the matrix that broke.
+    enum StageClass: String, CaseIterable {
+        case valid, warning, invalid
+    }
+
+    /// The three renderings/gates the matrix crosses those stages with.
+    enum Mode: String, CaseIterable {
+        case `default`, json, strict
+
+        var flags: [String] {
+            switch self {
+            case .default: return []
+            case .json: return ["--json"]
+            case .strict: return ["--strict"]
+            }
+        }
+    }
+
+    private func stage(_ kind: StageClass) -> StageSnapshot {
+        switch kind {
+        case .valid: return compliantStage()
+        case .warning: return fixtureStage()   // empty Wheel mesh → one warning
+        case .invalid: return erroringStage()  // dangling defaultPrim → one error
+        }
+    }
+
+    /// The expected exit code for each cell. A warning stage flips from allowed
+    /// to blocked only under `--strict`; `--json` never changes a verdict.
+    private func expectedCode(_ kind: StageClass, _ mode: Mode) -> Int32 {
+        switch kind {
+        case .valid: return 0
+        case .invalid: return 1
+        case .warning: return mode == .strict ? 1 : 0
+        }
+    }
+
+    private func parseJSON(_ out: [String]) throws -> [String: Any] {
+        let text = out.joined(separator: "\n")
+        let object = try JSONSerialization.jsonObject(with: Data(text.utf8))
+        return try #require(object as? [String: Any])
+    }
+
+    @Test(arguments: StageClass.allCases, Mode.allCases)
+    func validateMatrixExitCode(kind: StageClass, mode: Mode) async {
+        let snapshot = stage(kind)
+        let result = await run(["validate"] + mode.flags + ["/tmp/\(kind.rawValue).usdz"]) { _ in snapshot }
+        #expect(result.code == expectedCode(kind, mode),
+                "\(kind.rawValue) × \(mode.rawValue) should exit \(expectedCode(kind, mode))")
+        #expect(result.err.isEmpty)
+    }
+
+    @Test(arguments: StageClass.allCases)
+    func jsonReportAgreesWithTheHumanRendering(kind: StageClass) async throws {
+        let snapshot = stage(kind)
+        let plain = await run(["validate", "/tmp/x.usdz"]) { _ in snapshot }
+        let json = await run(["validate", "--json", "/tmp/x.usdz"]) { _ in snapshot }
+
+        // Same verdict, two renderings.
+        #expect(plain.code == json.code)
+
+        let payload = try parseJSON(json.out)
+        #expect(payload["file"] as? String == "/tmp/x.usdz")
+        #expect(payload["profile"] as? String == "arkit")
+        #expect(payload["blockingSeverity"] as? String == "error")
+        #expect(payload["exportAllowed"] as? Bool == (json.code == 0))
+        // The summary line is carried verbatim, so a script and a human agree.
+        #expect(payload["summary"] as? String == plain.out.last)
+
+        // One JSON diagnostic per printed diagnostic line, in the same order.
+        let diagnostics = try #require(payload["diagnostics"] as? [[String: Any]])
+        #expect(diagnostics.count == plain.out.count - 1)
+        for (object, line) in zip(diagnostics, plain.out.dropLast()) {
+            let ruleID = try #require(object["ruleID"] as? String)
+            let severity = try #require(object["severity"] as? String)
+            #expect(line.hasPrefix("\(severity): [\(ruleID)]"))
+        }
+    }
+
+    @Test func jsonMarksExactlyTheBlockingDiagnostics() async throws {
+        // A warning stage: nothing blocks by default…
+        let lax = try await parseJSON(run(["validate", "--json", "/tmp/w.usdz"]) { _ in fixtureStage() }.out)
+        let laxDiagnostics = try #require(lax["diagnostics"] as? [[String: Any]])
+        #expect(laxDiagnostics.contains { $0["severity"] as? String == "warning" })
+        #expect(laxDiagnostics.allSatisfy { $0["blocking"] as? Bool == false })
+        #expect(lax["exportAllowed"] as? Bool == true)
+
+        // …and the same warnings block once the strict gate is selected.
+        let strict = try await parseJSON(
+            run(["validate", "--json", "--strict", "/tmp/w.usdz"]) { _ in fixtureStage() }.out)
+        let strictDiagnostics = try #require(strict["diagnostics"] as? [[String: Any]])
+        #expect(strict["profile"] as? String == "arkit-strict")
+        #expect(strict["blockingSeverity"] as? String == "warning")
+        #expect(strict["exportAllowed"] as? Bool == false)
+        for object in strictDiagnostics {
+            let severity = try #require(object["severity"] as? String)
+            #expect(object["blocking"] as? Bool == (severity != "info"))
+        }
+    }
+
+    @Test func jsonCarriesPrimPathsAndOmitsThemWhenAbsent() async throws {
+        let payload = try await parseJSON(
+            run(["validate", "--json", "/tmp/w.usdz"]) { _ in fixtureStage() }.out)
+        let diagnostics = try #require(payload["diagnostics"] as? [[String: Any]])
+
+        // Prim-anchored diagnostics carry their path…
+        #expect(diagnostics.contains { $0["primPath"] as? String == "/Car/Wheel" })
+
+        // …and stage-level ones (no prim) omit the key rather than emitting
+        // null, so consumers can treat presence as "this points at a prim".
+        let stageLevel = try await parseJSON(
+            run(["validate", "--json", "/tmp/bad.usdz"]) { _ in erroringStage() }.out)
+        let stageDiagnostics = try #require(stageLevel["diagnostics"] as? [[String: Any]])
+        let defaultPrim = try #require(
+            stageDiagnostics.first { $0["ruleID"] as? String == "stage.defaultPrim" })
+        #expect(defaultPrim["primPath"] == nil)
+        #expect(defaultPrim["blocking"] as? Bool == true)
+    }
+
+    @Test func jsonIsValidForACleanStageWithNoDiagnostics() async throws {
+        let payload = try await parseJSON(
+            run(["validate", "--json", "/tmp/ok.usdz"]) { _ in compliantStage() }.out)
+        #expect((payload["diagnostics"] as? [[String: Any]])?.isEmpty == true)
+        #expect(payload["exportAllowed"] as? Bool == true)
+    }
+
+    @Test func jsonCombinesWithAnExplicitProfile() async throws {
+        let payload = try await parseJSON(
+            run(["validate", "--json", "--profile", "arkit-strict", "/tmp/w.usdz"]) { _ in fixtureStage() }.out)
+        #expect(payload["profile"] as? String == "arkit-strict")
+        #expect(payload["exportAllowed"] as? Bool == false)
+    }
+
+    @Test func jsonFlagDoesNotSuppressUsageErrors() async {
+        // Argument errors are diagnostics about the invocation, not the model,
+        // so they stay on stderr in plain text even under --json.
+        let result = await run(["validate", "--json", "--profile", "bogus", "/tmp/x.usdz"]) { _ in fixtureStage() }
+        #expect(result.code == 2)
+        #expect(result.out.isEmpty)
+        #expect(result.err.contains { $0.contains("unknown profile 'bogus'") })
+    }
 }
 
 // MARK: - shared texture-policy options

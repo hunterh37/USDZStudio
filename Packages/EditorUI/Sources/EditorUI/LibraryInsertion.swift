@@ -32,6 +32,11 @@ public enum LibraryInsertion {
         guard label != nil else {
             return document.lastError ?? "Couldn’t add \(entry.name) to the scene."
         }
+        // Select the freshly inserted prim so it behaves like any other newly
+        // created prim (duplicate/group also move the selection). Without this
+        // the library insert leaves `selection` untouched, so pressing ⇥ to
+        // enter mesh edit mode hits the "Nothing selected" guard and no-ops.
+        document.selection = Selection([prim.path])
         return nil
     }
 

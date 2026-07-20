@@ -88,6 +88,16 @@ cd CLI && swift run openusdz thumbnail model.usda --frames 8 -o turn.##.png
 
 Requires Xcode 16+ / Swift 6 on macOS 14+ (Apple Silicon primary, Intel best-effort). Without a Python runtime that can `import pxr`, the app degrades gracefully to a viewer-only state per [`specs/usd-bridge.md`](specs/usd-bridge.md).
 
+### Install a build
+
+Prebuilt **unsigned** macOS builds are attached to every tagged [Release](https://github.com/hunterh37/OpenUSDZEditor/releases) (produced by [`.github/workflows/release.yml`](.github/workflows/release.yml) via `scripts/build-release.sh`). They aren't code-signed, so clear the quarantine flag once after unzipping:
+
+```sh
+xattr -dr com.apple.quarantine OpenUSDZEditor.app
+```
+
+Prefer to build it yourself? See the full build-from-source guide in [`docs/BUILD.md`](docs/BUILD.md).
+
 ### The Xcode project
 
 The SPM packages under `Packages/` are the source of truth for all library code, tests, and the CLI — build them with `swift build` / `swift test`. The editor *shell* additionally needs a real `.app` bundle (Info.plist, bundle id, USD document-type registration, embedded Python scripts), which a bare `swift run` executable can't produce. That bundle is generated from [`project.yml`](project.yml) with [XcodeGen](https://github.com/yonaskolb/XcodeGen) (`brew install xcodegen`):

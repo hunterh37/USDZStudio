@@ -2,6 +2,8 @@ import SwiftUI
 import AppKit
 import UniformTypeIdentifiers
 import DicyaninDesignSystem
+import USDCore
+import ValidationKit
 
 /// The prominent top-right export control: a split button whose large primary
 /// segment fires a one-click smart export, and whose trailing chevron opens the
@@ -103,32 +105,59 @@ struct ExportButton: View {
 public struct ExportPanel: View {
     /// The currently-open document's URL, used to seed the default file name.
     let sourceURL: URL?
+    /// Evaluates the live stage against a named profile. Injected rather than
+    /// computed here so the panel stays free of stage access and the gate policy
+    /// is tested on its own; `nil` when no document is open.
+    let evaluate: ((String) -> ExportGate.Decision)?
     /// Hands a chosen destination back to the host, which performs the write
     /// through the document + bridge executor.
     let onExport: (URL) -> Void
     let onClose: () -> Void
 
-    public init(sourceURL: URL?, onExport: @escaping (URL) -> Void, onClose: @escaping () -> Void) {
+    public init(sourceURL: URL?,
+                evaluate: ((String) -> ExportGate.Decision)? = nil,
+                onExport: @escaping (URL) -> Void,
+                onClose: @escaping () -> Void) {
         self.sourceURL = sourceURL
+        self.evaluate = evaluate
         self.onExport = onExport
         self.onClose = onClose
     }
 
     @AppStorage("editor.export.format") private var formatRaw = ExportFormat.usdz.rawValue
+    @AppStorage("editor.export.profile") private var profileRaw = ValidationProfile.arkit.id
+
+    /// Set when the user takes the "Export anyway" escape hatch. Deliberately
+    /// not persisted: an override is a decision about *this* export, and must be
+    /// re-made rather than silently inherited by the next one.
+    @State private var overridden = false
 
     private var format: ExportFormat { ExportFormat(rawValue: formatRaw) ?? .usdz }
+
+    private var decision: ExportGate.Decision? { evaluate?(profileRaw) }
+
+    /// The primary button is live when there is no gate at all (no document
+    /// context) or the gate permits this export.
+    private var canExport: Bool {
+        guard let decision else { return true }
+        return decision.permitsExport(overridden: overridden)
+    }
 
     public var body: some View {
         VStack(alignment: .leading, spacing: Spacing.md) {
             header
             formatCards
+            complianceSection
             destinationHint
             Spacer(minLength: 0)
             footer
         }
         .padding(Spacing.lg)
-        .frame(width: 460, height: 420)
+        .frame(width: 460, height: 560)
         .background(Palette.windowBackground.color)
+        // Switching profile re-opens the question, so a prior override must not
+        // carry over into a gate the user has not seen yet.
+        .onChange(of: profileRaw) { _, _ in overridden = false }
     }
 
     private var header: some View {
@@ -200,8 +229,92 @@ public struct ExportPanel: View {
         }
     }
 
+    /// The compliance gate: profile picker, verdict, and the offending
+    /// diagnostics. Hidden entirely when no document is open, so the panel does
+    /// not claim a verdict it has not computed.
+    @ViewBuilder
+    private var complianceSection: some View {
+        if let decision {
+            VStack(alignment: .leading, spacing: Spacing.xs) {
+                HStack {
+                    Text("COMPLIANCE")
+                        .font(.system(size: TypeScale.label, weight: .semibold))
+                        .foregroundStyle(Palette.textTertiary.color)
+                    Spacer(minLength: 0)
+                    Picker("", selection: $profileRaw) {
+                        ForEach(ValidationProfile.all, id: \.id) { profile in
+                            Text(profile.id).tag(profile.id)
+                        }
+                    }
+                    .labelsHidden()
+                    .pickerStyle(.menu)
+                    .frame(width: 130)
+                }
+
+                HStack(spacing: Spacing.xs) {
+                    Image(systemName: decision.systemImage)
+                        .foregroundStyle(verdictTint(decision))
+                    Text(decision.headline)
+                        .font(.system(size: TypeScale.body))
+                        .foregroundStyle(Palette.textPrimary.color)
+                }
+
+                if !decision.blockingDiagnostics.isEmpty {
+                    diagnosticList(decision.blockingDiagnostics, blocking: true)
+                } else if !decision.advisoryDiagnostics.isEmpty {
+                    diagnosticList(decision.advisoryDiagnostics, blocking: false)
+                }
+
+                if overridden {
+                    Text("Exporting anyway — the issues above are unresolved.")
+                        .font(.system(size: TypeScale.caption))
+                        .foregroundStyle(Palette.textSecondary.color)
+                }
+            }
+            .padding(Spacing.sm)
+            .background(
+                RoundedRectangle(cornerRadius: Radius.md)
+                    .fill(Palette.surfaceElevated.color))
+        }
+    }
+
+    /// The first few diagnostics, most-severe first, with an overflow count so a
+    /// long list cannot push the footer off the sheet.
+    private func diagnosticList(_ diagnostics: [Diagnostic], blocking: Bool) -> some View {
+        let shown = diagnostics.prefix(3)
+        let overflow = diagnostics.count - shown.count
+        return VStack(alignment: .leading, spacing: 2) {
+            ForEach(Array(shown.enumerated()), id: \.offset) { _, diagnostic in
+                Text("• \(diagnostic.message)")
+                    .font(.system(size: TypeScale.caption))
+                    .foregroundStyle(blocking ? Palette.textPrimary.color : Palette.textSecondary.color)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if overflow > 0 {
+                Text("+ \(overflow) more — see the Validation drawer")
+                    .font(.system(size: TypeScale.caption))
+                    .foregroundStyle(Palette.textTertiary.color)
+            }
+        }
+    }
+
+    private func verdictTint(_ decision: ExportGate.Decision) -> Color {
+        switch decision.verdict {
+        case .clean: return Palette.success.color
+        case .advisory: return Palette.accent.color
+        case .blocked: return Palette.error.color
+        }
+    }
+
     private var footer: some View {
         HStack {
+            // The escape hatch sits apart from the primary action, labelled for
+            // exactly what it does, so overriding is a deliberate second choice.
+            if let decision, decision.allowsOverride, !overridden {
+                Button("Export Anyway") { overridden = true }
+                    .help("Export despite \(decision.blockingDiagnostics.count) blocking issue(s).")
+            }
             Spacer()
             Button("Cancel", action: onClose)
             Button(action: chooseAndExport) {
@@ -209,12 +322,16 @@ public struct ExportPanel: View {
             }
             .buttonStyle(.borderedProminent)
             .keyboardShortcut(.defaultAction)
+            .disabled(!canExport)
         }
     }
 
     /// Opens a save panel seeded with the smart file name, then hands the chosen
     /// URL to the host and dismisses.
     private func chooseAndExport() {
+        // Defence in depth: the button is disabled, but the keyboard shortcut
+        // and any future caller route through here too.
+        guard canExport else { return }
         let fallback = FileManager.default
             .urls(for: .desktopDirectory, in: .userDomainMask).first
             ?? FileManager.default.homeDirectoryForCurrentUser
