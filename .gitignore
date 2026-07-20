@@ -10,3 +10,7 @@ Resources/Python/runtime/
 # Generated Xcode project (source of truth is project.yml)
 OpenUSDZEditor.xcodeproj/
 .build/xcode/
+
+# Local MCP dev artifacts (absolute paths / scratch scenes)
+.scratch/
+.mcp.json

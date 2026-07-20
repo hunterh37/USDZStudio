@@ -74,14 +74,22 @@ public final class MCPServer: @unchecked Sendable {
     private var prompts: [MCPPrompt] = []
     private let enabledGroups: Set<ToolGroup>
 
+    /// Optional live-activity observer (docs/AGENT_MCP_PLAN.md). Fired on every
+    /// tool call; nil in headless/test contexts with no observer attached.
+    private var eventSink: (any MCPEventSink)?
+    /// Monotonic per-session tool-call counter handed to the sink as `seq`.
+    private var toolSeq = 0
+
     public init(
         serverName: String = "openusdz-agent",
         serverVersion: String = "0.1.0",
-        enabledGroups: Set<ToolGroup> = Set(ToolGroup.allCases)
+        enabledGroups: Set<ToolGroup> = Set(ToolGroup.allCases),
+        eventSink: (any MCPEventSink)? = nil
     ) {
         self.serverName = serverName
         self.serverVersion = serverVersion
         self.enabledGroups = enabledGroups
+        self.eventSink = eventSink
     }
 
     /// Register a tool; silently skipped when its group isn't enabled.
@@ -229,8 +237,15 @@ public final class MCPServer: @unchecked Sendable {
         guard let tool = tools.first(where: { $0.name == name }) else {
             return Self.toolFailure("unknown tool '\(name)' (enabled groups: \(enabledGroups.map(\.rawValue).sorted().joined(separator: ",")))")
         }
+        toolSeq += 1
+        let seq = toolSeq
+        let started = DispatchTime.now()
+        eventSink?.toolStart(seq: seq, tool: name, argsSummary: Self.summarize(params["arguments"]))
         do {
             let result = try await tool.handler(params["arguments"])
+            eventSink?.toolFinish(
+                seq: seq, tool: name, durationMs: Self.elapsedMs(since: started),
+                isError: false, summary: Self.summarize(result))
             return .object([
                 "content": .array([
                     .object(["type": "text", "text": .string(result.serializedString)])
@@ -239,9 +254,17 @@ public final class MCPServer: @unchecked Sendable {
                 "isError": .bool(false),
             ])
         } catch let error as ToolError {
-            return Self.toolFailure("\(error)")
+            let message = "\(error)"
+            eventSink?.toolFinish(
+                seq: seq, tool: name, durationMs: Self.elapsedMs(since: started),
+                isError: true, summary: Self.truncate(message))
+            return Self.toolFailure(message)
         } catch {
-            return Self.toolFailure("internal error: \(error)")
+            let message = "internal error: \(error)"
+            eventSink?.toolFinish(
+                seq: seq, tool: name, durationMs: Self.elapsedMs(since: started),
+                isError: true, summary: Self.truncate(message))
+            return Self.toolFailure(message)
         }
     }
 
@@ -250,5 +273,30 @@ public final class MCPServer: @unchecked Sendable {
             "content": .array([.object(["type": "text", "text": .string(message)])]),
             "isError": .bool(true),
         ])
+    }
+
+    /// Fire `sessionStart` on the attached sink (called once the server is
+    /// assembled, so `toolCount`/`groups` are final).
+    func announceSession(servedFile: String, groups: [String]) {
+        eventSink?.sessionStart(servedFile: servedFile, toolCount: tools.count, groups: groups)
+    }
+
+    // MARK: - Activity-summary helpers (pure)
+
+    /// Compact, length-bounded rendering of a tool's arguments or result for
+    /// the activity feed — never the full payload.
+    static func summarize(_ value: JSONValue, maxLength: Int = 200) -> String {
+        truncate(value.serializedString, maxLength: maxLength)
+    }
+
+    /// Truncate `text` to `maxLength` characters, appending an ellipsis when cut.
+    static func truncate(_ text: String, maxLength: Int = 200) -> String {
+        guard text.count > maxLength else { return text }
+        return String(text.prefix(maxLength)) + "…"
+    }
+
+    /// Wall-clock milliseconds elapsed since `start`.
+    static func elapsedMs(since start: DispatchTime) -> Int {
+        Int((DispatchTime.now().uptimeNanoseconds &- start.uptimeNanoseconds) / 1_000_000)
     }
 }

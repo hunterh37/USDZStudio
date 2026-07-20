@@ -240,3 +240,36 @@ The engine resolves it from the two prims' world-space bounding boxes and snappi
 
 Each phase is independently shippable and leans entirely on already-shipped `*Kit` APIs;
 the MCP server adds adaptation and serialization only.
+
+## 8. Live activity bridge (app ⇄ server)
+
+The editor app surfaces a live view of an agent's session: an **activity panel**
+(each tool call with running/✓/✕ status, duration, and a one-line summary) and a
+**menu-bar tray** (connection status, served file, tool count, and copy-paste setup
+commands). Because `openusdz mcp` runs as a separate process from the app, and
+`dependency-lint` forbids the app/`EditorUI` from importing `AgentMCP`, the two sides
+communicate over a **localhost socket** whose **JSON wire format is the only contract** —
+each side keeps its own Codable mirror.
+
+**Discovery.** The app hosts an `NWListener` on `127.0.0.1` (ephemeral port) and writes
+`~/Library/Application Support/OpenUSDZEditor/mcp/endpoint.json` `{port, pid, token}` on
+launch (removed on quit). The server's sink reads this lazily, verifies the app pid is
+alive (`kill(pid,0)`), connects, and re-reads on failure. App not running ⇒ the sink is a
+graceful no-op and never blocks the tool path.
+
+**Protocol (NDJSON, one object per line).** Every event carries `v` (schema version) and
+`pid` (so calls key by `(pid, seq)` across concurrent servers):
+
+- `session_start` `{v,type,pid,protocolVersion,servedFile,toolCount,groups[],ts}` — re-sent on each reconnect
+- `tool_started`  `{v,type,pid,seq,tool,argsSummary,ts}`
+- `tool_finished` `{v,type,pid,seq,tool,durationMs,isError,summary,ts}`
+- `heartbeat`     `{v,type,pid,ts}`
+- `session_end`   `{v,type,pid,ts}` (also inferred from socket close)
+
+`argsSummary`/`summary` are truncated (~200 chars) in the producer.
+
+**Placement.** `AgentMCP` only defines `MCPEventSink` and fires it from the single
+`callTool` choke point (pure, 100%-covered). The concrete NDJSON socket sink lives in
+`CLI` (`SocketEventSink`); the localhost listener + reducer live in the `App` target
+(`MCPActivityListener`), which is not coverage-gated. The panel and its `MCPActivityModel`
+live in `EditorUI`.

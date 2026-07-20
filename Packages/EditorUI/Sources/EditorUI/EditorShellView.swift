@@ -55,7 +55,12 @@ public struct EditorShellView: View {
     }
 
     @State private var showValidation = false
+    @State private var showMCPActivity = false
     @State private var activeSheet: Sheet?
+
+    /// Live MCP agent activity (nil when the feature isn't wired, e.g. previews).
+    /// Owned/updated by the app; observed inside the activity panel subviews.
+    let mcpActivity: MCPActivityModel?
 
 
     private enum Sheet: String, Identifiable {
@@ -66,7 +71,7 @@ public struct EditorShellView: View {
     /// Menu-bar commands post these; the shell mirrors its toolbar actions so
     /// menu shortcuts and toolbar buttons drive the same state.
     public enum MenuCommand: String {
-        case convert, batch, scripts, validate
+        case convert, batch, scripts, validate, mcpActivity
         public static let notification = Notification.Name("EditorUI.MenuCommand")
     }
 
@@ -74,12 +79,14 @@ public struct EditorShellView: View {
                 isImporting: Bool = false,
                 importingFileName: String? = nil,
                 tutorial: TutorialEngine? = nil,
+                mcpActivity: MCPActivityModel? = nil,
                 makeScriptExecutor: @escaping () -> (any ScriptExecuting)? = { nil },
                 onReimportFile: @escaping (URL) async -> Void = { _ in }) {
         self.document = document
         self.isImporting = isImporting
         self.importingFileName = importingFileName
         self.tutorial = tutorial
+        self.mcpActivity = mcpActivity
         self.makeScriptExecutor = makeScriptExecutor
         self.onReimportFile = onReimportFile
     }
@@ -117,6 +124,7 @@ public struct EditorShellView: View {
             case .batch: activeSheet = .batch
             case .scripts: activeSheet = .scripts
             case .validate: if stage != nil { showValidation.toggle() }
+            case .mcpActivity: if mcpActivity != nil { showMCPActivity.toggle() }
             }
         }
     }
@@ -137,6 +145,9 @@ public struct EditorShellView: View {
                 showValidation.toggle()
             }
             Spacer()
+            if let mcpActivity {
+                MCPStatusAccessory(model: mcpActivity, showActivity: $showMCPActivity)
+            }
             if let stage {
                 StatusPill(text: "\(stage.primCount) prims", tint: Palette.success)
             }
@@ -177,6 +188,10 @@ public struct EditorShellView: View {
                     onApplyFix: { document?.applyQuickFix(for: $0) },
                     onClose: { showValidation = false })
                     .frame(minHeight: 140, idealHeight: 200, maxHeight: 320)
+            }
+            if showMCPActivity, let mcpActivity {
+                MCPActivityPanel(model: mcpActivity, onClose: { showMCPActivity = false })
+                    .frame(minHeight: 140, idealHeight: 220, maxHeight: 360)
             }
         }
     }

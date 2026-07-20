@@ -110,16 +110,21 @@ enum McpCommand {
             let scriptExecutor: (any ScriptExecuting)? = locator.locate()
                 .map { PythonProcessExecutor(pythonPath: $0) }
 
+            // Push live tool-call activity to the editor app (if it's running)
+            // over its localhost socket; a graceful no-op when it isn't.
+            let activitySink = SocketEventSink()
             let server = AgentMCPServer.make(
                 session: session,
                 configuration: AgentMCPServer.Configuration(
                     enabledGroups: resolution.groups,
                     renderer: renderer,
                     scriptExecutor: scriptExecutor,
-                    libraryDirectories: resolution.libraryDirectories))
+                    libraryDirectories: resolution.libraryDirectories,
+                    eventSink: activitySink))
             FileHandle.standardError.write(Data(
                 "openusdz mcp: serving \(resolution.fileURL.lastPathComponent) (\(server.toolNames.count) tools) over stdio\n".utf8))
             await StdioTransport.run(server: server)
+            activitySink.sessionEnd()
             return 0
         } catch {
             printError("error: \(error)")

@@ -16,6 +16,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApplication.shared.setActivationPolicy(.regular)
         NSApplication.shared.activate(ignoringOtherApps: true)
     }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        // Remove the activity-endpoint discovery file so a later-spawned server
+        // doesn't try to reach a dead port.
+        try? FileManager.default.removeItem(at: MCPActivityListener.endpointURL())
+    }
 }
 
 @main
@@ -36,12 +42,17 @@ struct OpenUSDZEditorApp: App {
     @State private var documentBeforeTutorial: EditorDocument?
     @AppStorage("editor.hasSeenTutorial") private var hasSeenTutorial = false
 
+    /// Hosts the localhost activity listener and the model the MCP panel + tray
+    /// observe. Started once at launch.
+    @StateObject private var mcp = MCPActivityListener()
+
     var body: some Scene {
         WindowGroup("Open USDZ Editor") {
             EditorShellView(document: document,
                             isImporting: isImporting,
                             importingFileName: importingFileName,
                             tutorial: tutorial,
+                            mcpActivity: mcp.model,
                             makeScriptExecutor: {
                                 ProcessScriptExecutor(
                                     bridge: ProcessBridgeExecutor(scriptPath: Self.snapshotScriptPath))
@@ -55,6 +66,9 @@ struct OpenUSDZEditorApp: App {
                 }
                 .onOpenURL(perform: open)
                 .task {
+                    // Start the localhost activity listener + write the
+                    // endpoint-discovery file so `openusdz mcp` can connect.
+                    mcp.start()
                     // Dev convenience: `swift run OpenUSDZEditorApp file.usda`
                     // opens straight into the file.
                     if document == nil,
@@ -115,7 +129,20 @@ struct OpenUSDZEditorApp: App {
                 Button("Welcome Tour") { startTutorial() }
                     .disabled(tutorial != nil)
             }
+            CommandGroup(after: .toolbar) {
+                Button("Show Agent Activity") {
+                    postMenu(.mcpActivity)
+                }
+                .keyboardShortcut("m", modifiers: [.command, .shift])
+            }
         }
+
+        MenuBarExtra {
+            MCPMenuBarContent(model: mcp.model, documentPath: document?.modelURL?.path)
+        } label: {
+            MCPMenuBarLabel(model: mcp.model)
+        }
+        .menuBarExtraStyle(.window)
     }
 
     /// Swaps in the tour's sandbox document; the user's document (if any)
