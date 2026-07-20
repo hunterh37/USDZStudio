@@ -26,11 +26,11 @@ All four viewer features shipped (environment & lighting #15, debug view modes #
 - **Exit / harness:** golden-image renders per debug mode and IBL preset with a ΔE gate (this is the T1 golden-image harness — build it here); deterministic sampled-pose frames for playback; ship unsigned release builds + build-from-source docs.
 
 ### Milestone 3 — Part-level editing flagship (finishes Phase 3 differentiators) — ✅ **Done**
-The headline editing capability shipped in #16: drill-down/walk-up selection, Hide/Disable/Delete semantics, and non-dirtying isolate.
-- Drill-down / walk-up viewport selection with a breadcrumb; move any child prim at any depth.
-- Clear Hide (visibility) vs. Disable (active) vs. Delete semantics with distinct, discoverable UI.
-- Isolate mode via a non-dirtying session layer.
-- **Exit / harness:** selection-path unit tests; round-trip invariants proving isolate never dirties the root layer; XCUITest smoke flow for drill-down → edit → export.
+The headline editing capability, shipped in #16 (see the Phase 3 part-level entries for detail).
+- Drill-down / walk-up viewport selection with a breadcrumb; move any child prim at any depth — `PartSelection` + `BreadcrumbBar` shipped.
+- Clear Hide (visibility) vs. Disable (active) vs. Delete semantics with distinct, discoverable UI — `PartEditKind` + outliner context menu shipped.
+- Isolate mode via a non-dirtying session layer — `IsolationState` view-only overlay shipped (⌘I / Esc).
+- **Exit / harness:** `PartSelectionTests` selection-path units and the `part-editing.json` round-trip invariant (isolate → exit leaves the stage byte-identical, `dirty == false`) landed in the same PR. The drill-down → edit → export XCUITest smoke flow remains parked under the Phase T1 XCUITest layer, alongside the other cross-cutting UI harnesses.
 
 ### Milestone 4 — Durability & reliability (enterprise hardening) — ✅ **Done**
 Make the editor safe to trust with real work. All four items shipped; see specs/editing-model.md §Dirty State & Saving and specs/testing.md §Test Layers 2/4/5 for the contracts.
