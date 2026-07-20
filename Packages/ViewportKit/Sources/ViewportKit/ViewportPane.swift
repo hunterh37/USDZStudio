@@ -66,6 +66,9 @@ public struct ViewportPane: View {
     /// stage; render the file as-is.
     let livePrimPaths: Set<String>?
     let sceneRevision: Int
+    /// The document's live scene description; prims absent from the loaded file
+    /// are synthesized from it (specs/viewport.md "Rendering").
+    let scene: ViewportScene?
     /// Live component-edit geometry replacing the file-loaded model for one
     /// prim (Phase 6). `nil` = plain file rendering.
     let editedMesh: EditedMeshData?
@@ -128,6 +131,7 @@ public struct ViewportPane: View {
     public init(modelURL: URL?,
                 livePrimPaths: Set<String>? = nil,
                 sceneRevision: Int = 0,
+                scene: ViewportScene? = nil,
                 editedMesh: EditedMeshData? = nil,
                 onPickFace: ((Int, Bool) -> Void)? = nil,
                 hoverPreview: Bool = false,
@@ -148,6 +152,7 @@ public struct ViewportPane: View {
         self.modelURL = modelURL
         self.livePrimPaths = livePrimPaths
         self.sceneRevision = sceneRevision
+        self.scene = scene
         self.editedMesh = editedMesh
         self.onPickFace = onPickFace
         self.hoverPreview = hoverPreview
@@ -171,6 +176,7 @@ public struct ViewportPane: View {
         ZStack(alignment: .topTrailing) {
             ViewportRepresentable(modelURL: modelURL, mode: cameraMode,
                                   livePrimPaths: livePrimPaths, sceneRevision: sceneRevision,
+                                  scene: scene,
                                   editedMesh: editedMesh, onPickFace: onPickFace,
                                   hoverPreview: hoverPreview, onHoverFace: onHoverFace,
                                   extrudeGizmo: extrudeGizmo, onGizmoDrag: onGizmoDrag,
@@ -258,6 +264,7 @@ struct ViewportRepresentable: NSViewRepresentable {
     let mode: CameraInteractionMode
     let livePrimPaths: Set<String>?
     let sceneRevision: Int
+    let scene: ViewportScene?
     let editedMesh: EditedMeshData?
     let onPickFace: ((Int, Bool) -> Void)?
     let hoverPreview: Bool
@@ -296,6 +303,7 @@ struct ViewportRepresentable: NSViewRepresentable {
         context.coordinator.onError = { loadError = $0 }
         view.interactionMode = mode
         context.coordinator.load(url: modelURL)
+        context.coordinator.applyScene(scene)
         if let livePrimPaths {
             context.coordinator.applyLivePrimPaths(livePrimPaths, revision: sceneRevision)
         }
@@ -327,6 +335,21 @@ final class ViewportCoordinator {
 
     private var camera = OrbitCamera()
     private var loadedURL: URL?
+    /// Root of the *loader-produced* entity tree, kept distinct from
+    /// `modelAnchor` so provenance stays unambiguous: anything reachable from
+    /// here came from the file, anything else the applier synthesized. Feeding
+    /// the applier a lookup rooted at `modelAnchor` instead would let it find
+    /// its own entities and skip every insert.
+    private var loadedRoot: Entity?
+    /// Applies snapshot-driven scene diffs (prims the file never contained).
+    private lazy var sceneApplier = SceneGraphApplier(
+        root: modelAnchor,
+        findLoaded: { [weak self] path in self?.loadedRoot?.findEntity(primPath: path) })
+    /// Most recent scene from the document, replayed after an async load lands.
+    private var latestScene: ViewportScene?
+    /// Whether a file load is in flight — scene diffs wait for it so the seed
+    /// baseline is computed against the finished entity tree.
+    private var isLoading = false
     private var loadTask: Task<Void, Never>?
     private var modelBounds: (center: SIMD3<Float>, radius: Float)?
 
@@ -429,6 +452,9 @@ final class ViewportCoordinator {
         loadTask?.cancel()
         baselinePrimPaths = nil
         appliedSceneRevision = nil
+        loadedRoot = nil
+        sceneApplier.reset()
+        isLoading = url != nil
         // coverage:disable — animation-controller reset on model swap (golden-image tested)
         animationController = nil
         appliedAnimationTime = nil
@@ -436,6 +462,9 @@ final class ViewportCoordinator {
         modelAnchor.children.removeAll()
         onStats?(nil)
         onError?(nil)
+        // No file: the stage is the only source of geometry, so every prim gets
+        // synthesized by the `applyScene` that follows this call (a scratch
+        // document built entirely from the library takes that path).
         guard let url else { return }
 
         loadTask = Task { @MainActor [weak self] in
@@ -451,6 +480,12 @@ final class ViewportCoordinator {
                 self.onStats?(Self.collectStats(from: entity, boundsSize: bounds.extents))
                 // Edits may have landed while the file was loading; bring the
                 // freshly loaded entities in line with the live stage.
+                self.loadedRoot = entity
+                self.isLoading = false
+                // The loader has already materialized every prim the file
+                // contained, so adopt that as the diff baseline rather than
+                // re-creating them; only prims the file lacked get synthesized.
+                self.sceneApplier.seed(with: self.latestScene ?? ViewportScene())
                 self.pruneModelEntities()
                 self.reapplyLiveTransforms()
                 // Re-establishes overrides and the active debug mode together
@@ -458,6 +493,7 @@ final class ViewportCoordinator {
                 self.reapplyDebugMode()
             } catch {
                 guard !Task.isCancelled else { return }
+                self?.isLoading = false
                 self?.onError?("Viewport could not load model: \(error.localizedDescription)")
             }
         }
@@ -487,6 +523,36 @@ final class ViewportCoordinator {
         camera.azimuth = OrbitCamera.wrapAzimuth(pose.azimuth)
         camera.elevation = OrbitCamera.clampElevation(pose.elevation)
         applyCamera()
+    }
+
+    // MARK: Snapshot-driven scene graph
+
+    /// Renders the document's live scene: prims the loaded file never contained
+    /// (library inserts, scripted or agent-authored prims) are materialized
+    /// here, so the file seeds the viewport rather than defining it.
+    ///
+    /// While a load is in flight the scene is only recorded — applying it now
+    /// would synthesize prims the loader is about to produce itself, and the
+    /// completion handler seeds against the finished tree instead.
+    func applyScene(_ scene: ViewportScene?) {
+        guard let scene else { return }
+        latestScene = scene
+        guard !isLoading else { return }
+        sceneApplier.apply(scene)
+        frameSynthesizedContentIfNeeded()
+    }
+
+    /// Frames the camera the first time synthesized geometry appears with no
+    /// file loaded — otherwise a shape added to an empty scene sits outside the
+    /// default view. Only fires on the empty → non-empty transition, so later
+    /// edits never yank the camera out from under the user.
+    private func frameSynthesizedContentIfNeeded() {
+        guard loadedRoot == nil, modelBounds == nil, !modelAnchor.children.isEmpty else { return }
+        let bounds = modelAnchor.visualBounds(relativeTo: nil)
+        guard bounds.boundingRadius > 1e-4 else { return }
+        modelBounds = (bounds.center, bounds.boundingRadius)
+        rebuildGrid(halfExtent: GridModel.fittingHalfExtent(forModelRadius: bounds.boundingRadius))
+        frameModel()
     }
 
     /// Applies per-prim local transforms onto the matching file-loaded

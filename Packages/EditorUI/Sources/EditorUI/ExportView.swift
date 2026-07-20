@@ -28,6 +28,7 @@ struct ExportButton: View {
                 .frame(width: 1)
             chevronSegment
         }
+        .frame(height: 28)
         .clipShape(RoundedRectangle(cornerRadius: Radius.md, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: Radius.md, style: .continuous)

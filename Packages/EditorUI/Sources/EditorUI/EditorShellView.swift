@@ -208,8 +208,15 @@ public struct EditorShellView: View {
         }
         .padding(.horizontal, Spacing.sm)
         .padding(.vertical, Spacing.xs)
+        // The bar is a fixed-height chrome strip: controls inside it may not
+        // dictate its height (a tall control like ExportButton would otherwise
+        // stretch the whole row). Anything taller is clipped, not accommodated.
+        .frame(height: Self.actionBarHeight)
         .background(Palette.surfaceElevated.color)
     }
+
+    /// Fixed height of the top action bar, in points.
+    static let actionBarHeight: CGFloat = 44
 
     // MARK: Export
 
@@ -534,6 +541,7 @@ public struct EditorShellView: View {
                 modelURL: modelURL,
                 livePrimPaths: document?.viewportLivePrimPaths,
                 sceneRevision: document?.viewportSceneRevision ?? 0,
+                scene: document?.viewportScene,
                 editedMesh: document?.viewportEditedMesh,
                 onPickFace: { [weak document] index, additive in
                     document?.pickMeshFace(index: index, additive: additive)

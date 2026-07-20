@@ -51,6 +51,14 @@ struct Scenario: Decodable {
         /// Part-edit kind for the `part` verb: "hide" | "disable" | "delete".
         var kind: String?
 
+        // Object-library operands.
+        /// Shape id for `library.add` (e.g. "prim.cube"). See `ShapeLibrary`.
+        var shape: String?
+        /// Assert whether the step's `path` is present in the viewport's scene
+        /// description *carrying geometry* — i.e. it will actually render, not
+        /// merely appear in the outliner.
+        var rendered: Bool?
+
         // Part-level expectations.
         /// Assert the primary selection's path (empty string = no selection).
         var selection: String?

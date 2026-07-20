@@ -6,8 +6,10 @@ The center viewport: rendering, camera, selection, gizmos, environments, debug m
 
 ## Rendering
 
-- **Fast path:** unmodified USDZ loads via `Entity(contentsOf:)` — Apple's loader gives best material/skinning fidelity.
-- **Edit path:** prims touched by edits are re-projected from the stage (bridge mesh extraction → `MeshDescriptor`, `PhysicallyBasedMaterial`). Per-prim entity map (`PrimPath → Entity`) enables minimal diffs.
+- **Fast path:** unmodified USDZ loads via `Entity(contentsOf:)` — Apple's loader gives best material/skinning fidelity. The file is a *seed*, not the source of truth: the loaded tree establishes a baseline and every subsequent change arrives as a diff against it.
+- **Edit path:** the document projects the live stage into a `ViewportScene` (`EditorDocument.viewportScene`); `SceneGraphDiff` reduces successive scenes to minimal entity operations (insert / remove / update mesh / transform / enablement), which `SceneGraphApplier` carries onto the entity tree via a per-prim entity map (`PrimPath → Entity`).
+- **Two provenances, one tree.** Loader-backed entities keep their file materials, textures and skinning — the applier never re-meshes them, and the existing prune / live-transform / material-override channels own them. Prims the file never contained (library inserts, scripted or agent-authored prims) are *synthesized* from `ViewportMeshData` and owned end to end by the applier. Synthesized prims currently carry a neutral `PhysicallyBasedMaterial` until the document authors a material opinion for them; projecting full material bindings for synthesized geometry is a follow-up.
+- Visibility is resolved with USD inheritance (`UsdGeomImageable`): an invisible prim disables its whole subtree.
 - Features USD expresses but RealityKit can't render (e.g. some MaterialX nets, purposes, custom schemas) are **badged in the outliner**, not silently dropped — the stage remains the truth. This is a diagnostic aid, not a feature area: since the viewport IS RealityKit, **what you see is exactly what a user's RealityKit app will render** — making the viewport itself the ultimate compatibility test. Badges exist so incoming files from other tools can be identified and *converted toward* RealityKit compatibility (via validation quick-fixes), never as support for authoring exotic USD.
 
 ## Camera

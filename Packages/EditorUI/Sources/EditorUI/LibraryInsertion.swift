@@ -7,14 +7,14 @@ import MeshKit
 /// document as an undoable command. Mirrors `TutorialScene.makeCubePrim`: an
 /// `Xform` carrying the transform, wrapping a `Mesh` child so transforms and
 /// geometry live on separate prims (matching real imported assets).
-enum LibraryInsertion {
+public enum LibraryInsertion {
 
     /// Builds `entry`'s mesh, wraps it in an Xform+Mesh prim with a unique root
     /// name, and inserts it at the end of the root prims. Returns an error
     /// message on failure, `nil` on success.
     @discardableResult
     @MainActor
-    static func insert(_ entry: ShapeEntry, into document: EditorDocument) -> String? {
+    public static func insert(_ entry: ShapeEntry, into document: EditorDocument) -> String? {
         let mesh: HalfEdgeMesh
         do {
             mesh = try entry.build()

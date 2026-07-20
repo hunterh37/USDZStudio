@@ -83,6 +83,11 @@ public final class EditorDocument {
     @ObservationIgnored private var pathsCacheRevision: Int = -1
     @ObservationIgnored private var pathsCache: Set<String> = []
 
+    /// Cache backing `viewportScene` (see EditorDocument+ViewportScene),
+    /// keyed by the viewport scene revision it was computed at.
+    @ObservationIgnored var sceneCacheRevision: Int = -1
+    @ObservationIgnored var sceneCache: ViewportScene = ViewportScene()
+
     /// Cache backing `viewportMaterialOverrides` (see EditorDocument+ViewportMaterial),
     /// keyed by the revision it was computed at.
     @ObservationIgnored var materialOverrideCacheRevision: Int = -1
