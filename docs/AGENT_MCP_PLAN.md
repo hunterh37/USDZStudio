@@ -120,12 +120,16 @@ closed-loop gate for autonomous multi-step building.
 
 | Tool | Backing API |
 |---|---|
-| `render_views(paths?, views)` | `MeshFlattener.Buffers` → offscreen render, default `[front, side, top, persp]` |
+| `render_views(paths?, views?, angles?)` | `MeshFlattener.Buffers` → offscreen render, default `[front, side, top, persp]`; `angles` adds arbitrary auto-framed orbit shots `{azimuth, elevation, distance}` |
+| `find_best_view(paths?, count?)` | samples the orbit sphere, ranks angles by projected silhouette footprint — no render; feed results into `render_views(angles:)` |
 | `raycast(origin, dir)` | `CameraRay.Ray` — pick/hit-test for spatial checks |
 
 Multi-view by default: a single viewport grab is insufficient for fidelity judgment.
 `render_views(paths:)` can isolate a subtree (isolated-object render, à la IvanMurzak's
-Godot MCP) so the agent judges one asset without scene clutter. Renders are **opt-in, never
+Godot MCP) so the agent judges one asset without scene clutter. Beyond the four canonical
+views, `angles` lets the agent orbit to any `{azimuth, elevation}` (auto-framed so the
+subject stays in shot), and `find_best_view` picks the most revealing angles up front —
+a cheap geometry pass so the agent spends render budget only on informative captures. Renders are **opt-in, never
 automatic**: geometric readback (§3.3) is the cheap default truth signal, and a
 `stats_only` mode returns bbox/tri-count/material summary in place of pixels when the
 agent only needs confirmation, not judgment (freecad-mcp's token-saving toggle).
