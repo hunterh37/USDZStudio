@@ -32,12 +32,14 @@ The headline editing capability, currently absent.
 - Isolate mode via a non-dirtying session layer.
 - **Exit / harness:** selection-path unit tests; round-trip invariants proving isolate never dirties the root layer; XCUITest smoke flow for drill-down → edit → export.
 
-### Milestone 4 — Durability & reliability (enterprise hardening)
-Make the editor safe to trust with real work.
-- App-wide crash-safe command journal / write-ahead log over `CommandStack` with autosave-recovery on relaunch (generalizes the existing mesh-edit session journal).
-- Round-trip invariants promoted to a blocking CI job (open→save→`usddiff` clean; open→edit→undo-all→save→diff clean) over the committed mini-corpus — the T1 round-trip layer.
-- Bridge mini-corpus (hand-built usda/usdz fixtures incl. variants/skels/animations/malformed) with golden assertions; USDBridge ratchet raised toward its 95% spec floor via real usd-core save-path tests.
-- **Exit / harness:** kill-the-process recovery test restores the exact command stack; round-trip + corpus gates red-on-failure in CI.
+### Milestone 4 — Durability & reliability (enterprise hardening) — ✅ **Done**
+Make the editor safe to trust with real work. All four items shipped; see specs/editing-model.md §Dirty State & Saving and specs/testing.md §Test Layers 2/4/5 for the contracts.
+- App-wide crash-safe command journal / write-ahead log over `CommandStack` with autosave-recovery on relaunch. `JournalingStage` captures each command's forward mutations *and* their computed inverses, `FileCommandJournal` is an `fsync`ed JSON-Lines WAL, and `SessionStore` handles session layout + crash detection via a live sentinel. Generalizes the mesh-edit session journal: every command is captured uniformly, with no per-command journaling code.
+- Round-trip invariants promoted to a blocking CI job (`roundtrip` in `ci.yml`, `scripts/roundtrip-gate.sh`, driven by the new `openusdz roundtrip` subcommand) over the committed mini-corpus. Enforces model idempotence and edit/undo neutrality everywhere, plus an opt-in strict flattened-text diff, against an expectations table that fails on regression **and** on undeclared improvement.
+- Bridge mini-corpus (`Packages/USDBridge/Tests/USDBridgeTests/Fixtures/Corpus`: cube/variants/skel/animated as usda, cube+skel packaged as usdz, plus malformed) with golden assertions. **USDBridge graduated from its 90% ratchet to its 95% spec floor** via real usd-core save-path tests — it measures 100% today.
+- **Exit / harness:** `EditingKitTests/CrashRecoveryTests` writes the WAL through the real command stack, `SIGKILL`s a real child process so no cleanup runs, and restores the exact command stack (content, both stack depths, and labels) from disk alone; round-trip + corpus gates are red-on-failure in CI.
+
+> **Known round-trip gaps recorded by the new gate** (both pre-existing and outside this milestone's scope, now enforced rather than silent): `USDASerializer` emits no `variantSet` blocks, so variant sets are dropped on save (Phase 12); and attributes the bridge surfaces as `.unsupported` — a purely time-sampled channel has no default-time value — are written as an "omitted" comment, so their values are dropped on save (Phase 10). Closing either one requires tightening `EXPECTATIONS` in `scripts/roundtrip-gate.sh`, which the gate enforces.
 
 ### Milestone 5 — Validation & scripting power tools (finishes Phase 4)
 - Python console REPL with injected `stage`/`selection`/`app` and single-undo script runs (the script-library panel already runs bundled/user scripts; add the interactive console).
@@ -76,13 +78,13 @@ With the golden-image, round-trip, corpus, and XCUITest harnesses now built by e
   - [x] ScriptingKit **100%** logic
   - [x] DicyaninDesignSystem **95%** (currently 100%)
   - [x] CLI **95%** (subcommand × exit-code matrix; real-subprocess launch excluded via annotation)
-  - [ ] USDBridge **95%** — ratchet at 90% today; StageSaver save path needs real-usd-core round-trip tests (T1)
+  - [x] USDBridge **95%** — met in Milestone 4 (measures 100%); StageSaver save path covered by real-usd-core round-trip + mini-corpus tests
   - [ ] ViewportKit **90%** — ratchet at 37% today; needs golden-image harness (T1)
   - [ ] EditorUI **90%** — ratchet at 25% today; needs snapshot + XCUITest harnesses (T1)
 - [ ] Coverage-delta PR comment; no override label (per spec, on purpose).
 
 ### T1 — Fill the test layers the spec names but CI doesn't yet run
-- [ ] **Round-trip invariants** as a CI job: open → save → `usddiff` clean, and open → edit → undo-all → save → diff clean, over the committed mini-corpus (spec §4).
+- [x] **Round-trip invariants** as a blocking CI job (`roundtrip`): model idempotence (open → save → open is a fixed point) and edit/undo neutrality (open → edit → undo-all → save → diff clean) enforced over the committed mini-corpus, plus an opt-in strict flattened-text diff. Driven by `openusdz roundtrip` via `scripts/roundtrip-gate.sh`, with an expectations table that fails on regression and on undeclared improvement (spec §4).
 - [ ] **Bridge mini-corpus**: 20 hand-built usda/usdz fixtures (variants, skels, animations, exotic schemas, malformed) with golden assertions (spec §2).
 - [ ] **Conversion corpus gate**: Khronos glTF-Sample-Models in CI; success-rate gate *and* re-open-and-validate every output through ComplianceChecker (spec §3, Phase 2 exit).
 - [ ] **Property-based suite** beyond MeshKit: prim-path ops, TRS compose/decompose, name sanitization (spec §5).
@@ -153,7 +155,7 @@ With the golden-image, round-trip, corpus, and XCUITest harnesses now built by e
 - [x] Scale/units fixer — `ScaleFixer.command(for:targetMetersPerUnit:)` normalizes metersPerUnit and bakes a compensating `old/target` uniform scale into each root prim, preserving real-world size, as one undoable `CompositeCommand`. Surfaced on `EditorDocument.fixScale(targetMetersPerUnit:)` (no-op when already normalized); inspector Stage tab shows a "Normalize to meters" button next to Meters/unit whenever it isn't 1
 - [x] Save/Save As (.usdz/.usda/.usdc) — `StageSaver` (usda pure Swift via USDASerializer, usdc/usdz converted by USD core via `stage_save.py`; failed saves never clobber the target), app File menu ⌘S/⌘⇧S, dirty tracking (`hasUnsavedChanges`), harness round-trip scenario `mesh-save-roundtrip.json` (extrude → save usdz → reopen through the bridge → re-edit). Serializer now preserves schema role types (`point3f[]`/`normal3f[]`). Flattened export still open
 - [x] Built-in content library — `ShapeLibrary` (MeshKit) exposes parametric primitive shapes and low-poly prefab objects (19 entries across `primitives`/`prefabs` groups, lazily built via `MeshCompositing`/`Prefabs`); `LibraryPanel` browses by group·category and inserts the selection into the open document as an undoable `InsertPrimCommand` (Xform + Mesh) via `LibraryInsertion`. Tested (`ShapeLibraryTests`, `LibraryInsertionTests`, primitive tests)
-- [ ] Crash-safe command journal — mesh-edit session journal shipped (`MeshEditSession`); app-wide persisted journal / autosave-recovery over `CommandStack` still TODO (see Milestone 4 below)
+- [x] Crash-safe command journal — app-wide write-ahead log over `CommandStack` (`JournalingStage` captures each command's forward mutations + computed inverses; `FileCommandJournal` is an `fsync`ed JSON-Lines WAL; `SessionStore` handles session layout and crash detection via a live sentinel) with autosave-recovery on relaunch restoring the exact undo *and* redo stacks. Generalizes the earlier `MeshEditSession` op list. Exercised by a real `SIGKILL` recovery test (Milestone 4)
 
 **Exit:** real editor. Open → fix scale → swap texture → rename → export, all undoable.
 

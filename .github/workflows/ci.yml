@@ -34,6 +34,13 @@ jobs:
       - name: Fetch Python runtime (usd-core)
         run: bash scripts/fetch-python-runtime.sh
       - name: Test all packages (with coverage)
+        env:
+          # The real-usd-core corpus + StageSaver save-path tests resolve the
+          # interpreter fetched into Resources/Python/runtime. Requiring it here
+          # turns "no interpreter" from a silent skip into a hard failure — those
+          # tests are what hold USDBridge at its 95% floor, so a skip would drop
+          # coverage rather than report a problem.
+          USDBRIDGE_REQUIRE_USD: "1"
         run: bash scripts/test-all.sh --coverage
       - name: Per-module coverage gate + deep fuzz corpus
         env:
@@ -41,7 +48,33 @@ jobs:
           # beyond the 40-iteration local default (applies to the MeshKit run).
           MESHKIT_FUZZ_ITERATIONS: "400"
         # Data-driven gate over the whole MODULES table in coverage-gate.sh:
-        # spec floors (100%/95%) for the logic modules + DesignSystem + CLI,
-        # ratchet floors for USDBridge/ViewportKit/EditorUI (raised as their
+        # spec floors (100%/95%) for the logic modules + DesignSystem + CLI +
+        # USDBridge, ratchet floors for ViewportKit/EditorUI (raised as their
         # harnesses land — see ROADMAP Phase T). No override label, by design.
         run: bash scripts/coverage-gate.sh
+
+  roundtrip:
+    # T1 round-trip invariant layer (ROADMAP Milestone 4). Blocking and
+    # red-on-failure: open→save→open must be a fixed point, open→edit→undo-all
+    # →save must land back on the opened model, and malformed input must be
+    # rejected — asserted over the committed bridge mini-corpus against an
+    # expectations table that fails on regression *and* on undeclared progress.
+    runs-on: macos-15
+    needs: lint
+    steps:
+      - uses: actions/checkout@v4
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode_16.4.app || true
+      - name: Fetch Python runtime (usd-core)
+        run: bash scripts/fetch-python-runtime.sh
+      - name: Round-trip invariants over the bridge mini-corpus
+        # fetch-python-runtime.sh installs usd-core into a venv; put it on PATH
+        # so the gate's `python3 -c 'import pxr'` probe resolves to it rather
+        # than skipping.
+        env:
+          # A missing usd-core is a local skip but a hard CI failure: a gate
+          # that passes when its dependency is absent isn't a gate.
+          ROUNDTRIP_REQUIRE_USD: "1"
+        run: |
+          export PATH="$PWD/Resources/Python/runtime/bin:$PATH"
+          bash scripts/roundtrip-gate.sh

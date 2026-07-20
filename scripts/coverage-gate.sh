@@ -37,8 +37,9 @@ ROOT="$(pwd)"
 #
 # ViewportKit/EditorUI are far below their 90% spec floor because that floor
 # assumes the golden-image + snapshot + XCUITest harnesses (specs/testing.md
-# §Test Layers 6–8), which don't exist yet. USDBridge's StageSaver save path
-# needs real-usd-core round-trip integration tests to reach 95%.
+# §Test Layers 6–8), which don't exist yet. USDBridge graduated from ratchet to
+# its 95% spec floor in Milestone 4, once the bridge mini-corpus and real
+# usd-core save-path round-trip tests covered the StageSaver path.
 MODULES=(
   # Spec floors — met and enforced.
   "USDCore|Packages/USDCore|Sources/USDCore|100"
@@ -51,8 +52,8 @@ MODULES=(
   "DicyaninDesignSystem|Packages/DicyaninDesignSystem|Sources/DicyaninDesignSystem|95"
   "QuickLookKit|Packages/QuickLookKit|Sources/QuickLookKit|100"
   "CLI|CLI|Sources|95"
+  "USDBridge|Packages/USDBridge|Sources/USDBridge|95"          # spec floor; measures 100 today
   # Ratchet floors — pinned below spec target (noted), gap tracked in ROADMAP Phase T.
-  "USDBridge|Packages/USDBridge|Sources/USDBridge|90"          # spec target 95
   "ViewportKit|Packages/ViewportKit|Sources/ViewportKit|46"    # ratchet raised 40→46 by the gizmo-family math; spec target 90
   "EditorUI|Packages/EditorUI|Sources/EditorUI|27"             # spec target 90
 )
