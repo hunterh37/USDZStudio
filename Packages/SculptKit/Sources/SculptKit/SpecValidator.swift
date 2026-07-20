@@ -1,0 +1,181 @@
+import Foundation
+import MeshKit
+
+/// Severity of a spec-validation issue.
+public enum SpecIssueSeverity: String, Sendable, Equatable {
+    case error
+    case warning
+}
+
+/// One problem found in a spec.
+public struct SpecIssue: Sendable, Equatable {
+    public var severity: SpecIssueSeverity
+    public var message: String
+
+    public init(_ severity: SpecIssueSeverity, _ message: String) {
+        self.severity = severity
+        self.message = message
+    }
+}
+
+/// The outcome of validating a spec. Schema errors always block; the
+/// strict-quality gate additionally blocks specs too shallow for the assessed
+/// complexity (img2threejs's `--strict-quality`).
+public struct SpecValidationResult: Sendable, Equatable {
+    public var issues: [SpecIssue]
+
+    public init(issues: [SpecIssue]) {
+        self.issues = issues
+    }
+
+    public var errors: [SpecIssue] { issues.filter { $0.severity == .error } }
+    public var warnings: [SpecIssue] { issues.filter { $0.severity == .warning } }
+    /// Schema-valid: no error-severity issues.
+    public var isValid: Bool { errors.isEmpty }
+}
+
+/// Validates an `ObjectSculptSpec` for schema correctness and, optionally,
+/// against the strict-quality bar implied by a `PreSpecAssessment`.
+public enum SpecValidator {
+
+    public static func validate(
+        _ spec: ObjectSculptSpec,
+        assessment: PreSpecAssessment? = nil,
+        strictQuality: Bool = false
+    ) -> SpecValidationResult {
+        var issues: [SpecIssue] = []
+
+        // ── Schema checks (always) ────────────────────────────────────────
+        if spec.name.isEmpty {
+            issues.append(.init(.error, "spec name must not be empty"))
+        }
+
+        let materialIDs = spec.materialIDs
+        if materialIDs.count != spec.materials.count {
+            issues.append(.init(.error, "duplicate material ids in spec"))
+        }
+        for material in spec.materials {
+            issues.append(contentsOf: colorIssues(material.baseColor, label: "material '\(material.id)' baseColor"))
+            if let emissive = material.emissive {
+                issues.append(contentsOf: colorIssues(emissive, label: "material '\(material.id)' emissive"))
+            }
+            if material.roughness < 0 || material.roughness > 1 {
+                issues.append(.init(.error, "material '\(material.id)' roughness must be in 0...1"))
+            }
+            if material.metallic < 0 || material.metallic > 1 {
+                issues.append(.init(.error, "material '\(material.id)' metallic must be in 0...1"))
+            }
+        }
+
+        var seenNames = Set<String>()
+        for node in spec.allNodes {
+            issues.append(contentsOf: nodeIssues(node, materialIDs: materialIDs))
+            if !seenNames.insert(node.name).inserted {
+                issues.append(.init(.error, "duplicate component name '\(node.name)'"))
+            }
+        }
+
+        // ── Strict-quality gate (opt-in) ──────────────────────────────────
+        if strictQuality {
+            issues.append(contentsOf: strictQualityIssues(spec, assessment: assessment))
+        }
+
+        return SpecValidationResult(issues: issues)
+    }
+
+    // MARK: - Schema helpers
+
+    static func colorIssues(_ color: [Double], label: String) -> [SpecIssue] {
+        guard color.count == 3 else {
+            return [.init(.error, "\(label) must be [r, g, b]")]
+        }
+        if color.contains(where: { $0 < 0 || $0 > 1 }) {
+            return [.init(.error, "\(label) components must be in 0...1")]
+        }
+        return []
+    }
+
+    static func nodeIssues(_ node: ComponentNode, materialIDs: Set<String>) -> [SpecIssue] {
+        var issues: [SpecIssue] = []
+        if !PrimName.isValid(node.name) {
+            issues.append(.init(.error, "component name '\(node.name)' is not a valid USD identifier"))
+        }
+        for (vec, label) in [(node.translation, "translation"), (node.rotationEulerDegrees, "rotation"), (node.scale, "scale")] {
+            if vec.count != 3 {
+                issues.append(.init(.error, "component '\(node.name)' \(label) must be [x, y, z]"))
+            }
+        }
+        if node.scale.count == 3, node.scale.contains(0) {
+            issues.append(.init(.error, "component '\(node.name)' scale has a zero component"))
+        }
+        if let materialID = node.materialID, !materialIDs.contains(materialID) {
+            issues.append(.init(.error, "component '\(node.name)' references unknown material '\(materialID)'"))
+        }
+        if case .library(let entryID) = node.shape, ShapeLibrary.entry(id: entryID) == nil {
+            issues.append(.init(.error, "component '\(node.name)' references unknown library entry '\(entryID)'"))
+        }
+        if node.shape.authorsGeometry {
+            if node.width <= 0 || node.height <= 0 || node.depth <= 0 || node.radius <= 0 {
+                issues.append(.init(.error, "component '\(node.name)' dimensions must be positive"))
+            }
+            if node.segments < 3 {
+                issues.append(.init(.error, "component '\(node.name)' segments must be >= 3"))
+            }
+        }
+        if let repetition = node.repetition {
+            if repetition.count < 1 {
+                issues.append(.init(.error, "component '\(node.name)' repetition count must be >= 1"))
+            }
+            if repetition.step.count != 3 {
+                issues.append(.init(.error, "component '\(node.name)' repetition step must be [x, y, z]"))
+            }
+        }
+        return issues
+    }
+
+    // MARK: - Strict-quality helpers
+
+    static func strictQualityIssues(_ spec: ObjectSculptSpec, assessment: PreSpecAssessment?) -> [SpecIssue] {
+        var issues: [SpecIssue] = []
+        let inventory = spec.detailInventory
+
+        if !inventory.isFullyMapped {
+            let names = inventory.unmapped.map(\.id).joined(separator: ", ")
+            issues.append(.init(.error, "strict-quality: \(inventory.unmapped.count) detail item(s) unmapped: \(names)"))
+        }
+
+        guard let policy = assessment?.policy else {
+            // Without an assessment we can only enforce mapping; note it.
+            issues.append(.init(.warning, "strict-quality: no assessment supplied — only detail-mapping enforced"))
+            return issues
+        }
+
+        if inventory.items.count < policy.minDetailItems {
+            issues.append(.init(.error, "strict-quality: \(inventory.items.count) detail items < required \(policy.minDetailItems) for complexity \(assessment!.complexity)"))
+        }
+        if spec.componentCount < policy.minComponents {
+            issues.append(.init(.error, "strict-quality: \(spec.componentCount) components < required \(policy.minComponents)"))
+        }
+        if policy.requireMaterials {
+            if spec.materials.isEmpty {
+                issues.append(.init(.error, "strict-quality: spec has no materials but the assessment requires them"))
+            }
+            let unpainted = spec.geometryLeaves.filter { $0.materialID == nil }
+            if !unpainted.isEmpty {
+                let names = unpainted.map(\.name).joined(separator: ", ")
+                issues.append(.init(.error, "strict-quality: geometry leaves without a material: \(names)"))
+            }
+        }
+        return issues
+    }
+}
+
+/// Minimal USD-identifier check, local to SculptKit so the module stays a pure
+/// leaf (USDCore's `PrimPath.isValidName` is not surfaced for bare names here).
+enum PrimName {
+    static func isValid(_ name: String) -> Bool {
+        guard let first = name.first else { return false }
+        guard first == "_" || first.isLetter else { return false }
+        return name.allSatisfy { $0 == "_" || $0.isLetter || $0.isNumber }
+    }
+}

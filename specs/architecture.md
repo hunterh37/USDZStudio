@@ -18,6 +18,7 @@ OpenUSDZEditor/
 │   ├── EditingKit/               # Command layer, undo, stage mutations
 │   ├── ValidationKit/            # Rules engine, usdchecker adapter
 │   ├── ScriptingKit/             # Python console, script library, CLI core
+│   ├── SculptKit/                # Pure staged-sculpt pipeline logic (image→USD spec, passes, gates)
 │   ├── AgentMCP/                 # MCP server: typed, transactional agent editing API over the kits
 │   ├── EditorUI/                 # Panels: outliner, inspector, console, toolbar
 │   ├── QuickLookKit/             # Pure render-plan logic for the Finder QuickLook .appex (zero deps)
@@ -37,7 +38,10 @@ USDBridge ─▶ USDCore          (bridge implements USDCore protocols)
 DicyaninDesignSystem ◀─ EditorUI only
 QuickLookKit — leaf, zero internal deps (pure render-plan logic; App QuickLook .appex targets consume it)
 CLI ─▶ kits (never EditorUI)
-AgentMCP ─▶ {USDBridge, EditingKit, ValidationKit, ConversionKit, ScriptingKit, MeshKit} ─▶ USDCore   (thin MCP adapter, docs/AGENT_MCP_PLAN.md; never EditorUI)
+SculptKit ─▶ {USDCore, MeshKit}   (pure pipeline logic — spec model, validation, pass state machine; no UI/GPU/Python, authors no stage itself)
+EditorUI ─▶ SculptKit             (in-app staged-sculpt runner: applies BuildSteps as live document commands)
+App ─▶ AgentMCP                    (composition root hosts the in-app MCP editing session on the open document; specs/agent-live-editing.md. EditorUI still must NOT import AgentMCP)
+AgentMCP ─▶ {USDBridge, EditingKit, ValidationKit, ConversionKit, ScriptingKit, MeshKit, SculptKit} ─▶ USDCore   (thin MCP adapter, docs/AGENT_MCP_PLAN.md; never EditorUI)
 ```
 
 The authoritative, machine-checked form of this graph is the policy table in

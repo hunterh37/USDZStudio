@@ -8,11 +8,12 @@ let package = Package(
         .package(path: "../Packages/EditorUI"),
         .package(path: "../Packages/USDBridge"),
         .package(path: "../Packages/USDCore"),
+        .package(path: "../Packages/AgentMCP"),
     ],
     targets: [
         .executableTarget(
             name: "OpenUSDZEditorApp",
-            dependencies: ["EditorUI", "USDBridge", "USDCore"],
+            dependencies: ["EditorUI", "USDBridge", "USDCore", "AgentMCP"],
             path: "Sources")
     ]
 )

@@ -92,6 +92,12 @@ struct OpenUSDZEditorApp: App {
                     if document == nil && !hasSeenTutorial {
                         startTutorial()
                     }
+                    // Host the agent editing session on the current document so
+                    // agent MCP edits render live in this window (specs/agent-live-editing.md).
+                    mcp.bindDocument(document)
+                }
+                .onChange(of: document.map(ObjectIdentifier.init)) {
+                    mcp.bindDocument(document)
                 }
                 .onDrop(of: [.fileURL], isTargeted: nil) { providers in
                     _ = providers.first?.loadObject(ofClass: URL.self) { url, _ in
@@ -140,6 +146,10 @@ struct OpenUSDZEditorApp: App {
                 Divider()
                 Button("Validate Stage") { postMenu(.validate) }
                     .keyboardShortcut("u")
+                    .disabled(document == nil)
+                Divider()
+                Button("Sculpt Demo House") { postMenu(.sculptDemo) }
+                    .keyboardShortcut("h", modifiers: [.command, .shift])
                     .disabled(document == nil)
                 Button("Scripts…") { postMenu(.scripts) }
                 Button("Python Console…") { postMenu(.console) }

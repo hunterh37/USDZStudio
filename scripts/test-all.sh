@@ -19,6 +19,7 @@ PACKAGES=(
   Packages/ValidationKit
   Packages/ConversionKit
   Packages/ScriptingKit
+  Packages/SculptKit
   Packages/AgentMCP
   Packages/ViewportKit
   Packages/EditorUI
