@@ -158,6 +158,56 @@ struct ViewportSceneProjectionTests {
         #expect(doc.viewportScene["/M"]?.isEnabled == true)
     }
 
+    // MARK: Visibility (inherited, per UsdGeomImageable)
+
+    @Test("Hiding a prim drops it from the render set")
+    func hiddenPrimIsDisabled() {
+        let doc = EditorDocument(snapshot: StageSnapshot(rootPrims: [meshPrim("/M")]))
+        doc.performPartEdit(.hide, on: PrimPath("/M")!)
+        #expect(doc.viewportScene["/M"]?.isEnabled == false)
+    }
+
+    @Test("Un-hiding restores it")
+    func unhideReenables() {
+        let doc = EditorDocument(snapshot: StageSnapshot(rootPrims: [meshPrim("/M")]))
+        doc.performPartEdit(.hide, on: PrimPath("/M")!)
+        doc.undo()
+        #expect(doc.viewportScene["/M"]?.isEnabled == true)
+    }
+
+    @Test("An invisible parent hides its whole subtree")
+    func hiddenParentHidesChildren() {
+        let doc = EditorDocument(snapshot: StageSnapshot(rootPrims: []))
+        LibraryInsertion.insert(cube(), into: doc)
+        doc.performPartEdit(.hide, on: PrimPath("/Cube")!)
+
+        #expect(doc.viewportScene["/Cube"]?.isEnabled == false)
+        // The child authors no opinion of its own — it inherits the parent's.
+        #expect(doc.viewportScene["/Cube/Geo"]?.isEnabled == false)
+    }
+
+    @Test("A visible parent leaves an explicitly hidden child hidden")
+    func hiddenChildStaysHiddenUnderVisibleParent() {
+        let doc = EditorDocument(snapshot: StageSnapshot(rootPrims: []))
+        LibraryInsertion.insert(cube(), into: doc)
+        doc.performPartEdit(.hide, on: PrimPath("/Cube/Geo")!)
+
+        #expect(doc.viewportScene["/Cube"]?.isEnabled == true)
+        #expect(doc.viewportScene["/Cube/Geo"]?.isEnabled == false)
+    }
+
+    @Test("Isolate hides the prims outside the isolated lineage")
+    func isolateDisablesOthers() {
+        let doc = EditorDocument(snapshot: StageSnapshot(rootPrims: []))
+        LibraryInsertion.insert(cube(), into: doc)
+        LibraryInsertion.insert(cube(), into: doc)
+        doc.selection = Selection([PrimPath("/Cube/Geo")!])
+        doc.isolateSelection()
+
+        #expect(doc.viewportScene["/Cube/Geo"]?.isEnabled == true)
+        #expect(doc.viewportScene["/Cube_1/Geo"]?.isEnabled == false)
+    }
+
     // MARK: Cache behaviour
 
     @Test("Repeated reads at one revision return the same value")
@@ -201,3 +251,4 @@ struct ViewportSceneProjectionTests {
         #expect(geo.mesh?.faceLoops.isEmpty == false)
     }
 }
+

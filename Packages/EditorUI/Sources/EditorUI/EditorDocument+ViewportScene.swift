@@ -30,13 +30,27 @@ extension EditorDocument {
         let live = viewportLivePrimPaths
         let transforms = viewportLiveTransforms
         var nodes: [String: ViewportPrimNode] = [:]
+        // Own-opinion visibility, before inheritance is resolved below.
+        var selfVisible: [String: Bool] = [:]
         for prim in snapshot.allPrims() {
             let path = prim.path.description
+            selfVisible[path] = prim.visibility != .invisible
             nodes[path] = ViewportPrimNode(
                 path: path,
                 transform: transforms[path] ?? matrix_identity_float4x4,
                 mesh: Self.mesh(from: prim),
                 isEnabled: live.contains(path))
+        }
+
+        // USD `visibility` is inherited: an invisible prim hides its whole
+        // subtree, whatever the descendants themselves say. Resolving
+        // shallowest-first lets each node read its parent's already-resolved
+        // answer instead of re-walking the ancestor chain.
+        for path in nodes.values.sorted(by: { ($0.depth, $0.path) < ($1.depth, $1.path) }).map(\.path) {
+            guard var node = nodes[path] else { continue }
+            let inherited = node.parentPath.flatMap { nodes[$0]?.isEnabled } ?? true
+            node.isEnabled = node.isEnabled && (selfVisible[path] ?? true) && inherited
+            nodes[path] = node
         }
         return ViewportScene(nodes: nodes)
     }

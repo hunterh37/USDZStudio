@@ -42,12 +42,19 @@ public enum MeshFlattener {
 
     /// Flatten `faces` (defaults to all) into triangle buffers.
     public static func flatten(_ data: EditedMeshData, faces: [Int]? = nil) -> Buffers {
+        flatten(positions: data.positions, faceLoops: data.faceLoops, faces: faces)
+    }
+
+    /// Flatten raw geometry — shared by the component-edit path and the
+    /// scene-graph path, which describe meshes the same way.
+    public static func flatten(positions: [SIMD3<Float>], faceLoops: [[Int]],
+                               faces: [Int]? = nil) -> Buffers {
         var out = Buffers(positions: [], normals: [], triangleIndices: [])
-        for f in faces ?? Array(data.faceLoops.indices) {
-            guard data.faceLoops.indices.contains(f) else { continue }
-            let loop = data.faceLoops[f]
-            guard loop.count >= 3, loop.allSatisfy({ data.positions.indices.contains($0) }) else { continue }
-            let pts = loop.map { data.positions[$0] }
+        for f in faces ?? Array(faceLoops.indices) {
+            guard faceLoops.indices.contains(f) else { continue }
+            let loop = faceLoops[f]
+            guard loop.count >= 3, loop.allSatisfy({ positions.indices.contains($0) }) else { continue }
+            let pts = loop.map { positions[$0] }
             let normal = newellNormal(pts)
             let base = UInt32(out.positions.count)
             out.positions.append(contentsOf: pts)

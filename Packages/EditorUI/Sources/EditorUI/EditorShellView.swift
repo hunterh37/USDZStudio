@@ -541,6 +541,7 @@ public struct EditorShellView: View {
                 modelURL: modelURL,
                 livePrimPaths: document?.viewportLivePrimPaths,
                 sceneRevision: document?.viewportSceneRevision ?? 0,
+                scene: document?.viewportScene,
                 editedMesh: document?.viewportEditedMesh,
                 onPickFace: { [weak document] index, additive in
                     document?.pickMeshFace(index: index, additive: additive)

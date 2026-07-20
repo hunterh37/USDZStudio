@@ -1,0 +1,51 @@
+{ "name": "library-insert",
+  "open": "Tests/Fixtures/part-hierarchy.usda",
+  "steps": [
+    { "do": "expect", "rendered": false, "path": "/Cube" },
+
+    { "do": "library.add", "shape": "prim.cube" },
+    { "do": "expect", "selection": "" },
+
+    { "comment": "The regression: the prim used to reach the outliner but carry no viewport geometry, so it rendered as an invisible layer.",
+      "do": "expect", "rendered": true, "path": "/Cube/Geo" },
+
+    { "comment": "The wrapping Xform is a grouping prim — present, but nothing of its own to draw.",
+      "do": "expect", "rendered": false, "path": "/Cube" },
+    { "do": "expect", "visible": true, "path": "/Cube" },
+    { "do": "expect", "dirty": true },
+
+    { "comment": "A second insert must not collide with the first.",
+      "do": "library.add", "shape": "prim.sphere" },
+    { "do": "expect", "rendered": true, "path": "/Sphere/Geo" },
+    { "do": "expect", "rendered": true, "path": "/Cube/Geo" },
+
+    { "comment": "File-loaded prims keep rendering alongside synthesized ones.",
+      "do": "expect", "visible": true, "path": "/Scene/Car/Body" },
+
+    { "do": "undo" },
+    { "do": "expect", "rendered": false, "path": "/Sphere/Geo" },
+    { "do": "expect", "rendered": true, "path": "/Cube/Geo" },
+
+    { "do": "redo" },
+    { "do": "expect", "rendered": true, "path": "/Sphere/Geo" },
+
+    { "comment": "Hiding a synthesized prim drops it from the render set without deleting it.",
+      "do": "part", "kind": "hide", "path": "/Cube/Geo" },
+    { "do": "expect", "rendered": false, "path": "/Cube/Geo" },
+    { "do": "undo" },
+    { "do": "expect", "rendered": true, "path": "/Cube/Geo" },
+
+    { "comment": "Isolate is view-only: an isolated synthesized prim renders, its sibling does not.",
+      "do": "isolate", "path": "/Cube/Geo" },
+    { "do": "expect", "rendered": true, "path": "/Cube/Geo" },
+    { "do": "expect", "rendered": false, "path": "/Sphere/Geo" },
+    { "do": "expect", "dirty": true },
+    { "do": "exit-isolate" },
+    { "do": "expect", "rendered": true, "path": "/Sphere/Geo" },
+
+    { "comment": "And it must survive a real round-trip through the bridge.",
+      "do": "save", "path": ".harness-out/library-insert-out.usdz" },
+    { "do": "reopen", "path": ".harness-out/library-insert-out.usdz" },
+    { "do": "expect", "rendered": true, "path": "/Cube/Geo" },
+    { "do": "expect", "rendered": true, "path": "/Sphere/Geo" }
+  ] }

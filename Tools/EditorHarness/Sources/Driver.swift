@@ -244,6 +244,16 @@ final class Driver {
             document.performPartEdit(kind, on: path)
             log("part \(kind.rawValue) \(path) → \(document.undoLabel ?? "no command")")
 
+        case "library.add":
+            guard let id = step.shape, let entry = ShapeLibrary.entry(id: id) else {
+                throw HarnessError.stepFailed(
+                    step: index, verb: step.do, detail: "unknown shape '\(step.shape ?? "")'")
+            }
+            if let error = LibraryInsertion.insert(entry, into: document) {
+                throw HarnessError.stepFailed(step: index, verb: step.do, detail: error)
+            }
+            log("library.add \(id)")
+
         case "isolate":
             if let raw = step.path {
                 let path = try primPath(raw, step: index, verb: step.do)
@@ -407,6 +417,22 @@ final class Driver {
                     step: index, detail: "visible(\(raw)) expected \(wanted), got \(actual)")
             }
             log("expect visible(\(raw)) == \(wanted) ✓")
+            return
+        }
+        if let wanted = step.rendered {
+            let raw = try primPath(step.path, step: index, verb: "expect")
+            // "Renders" means the viewport's scene description carries drawable
+            // geometry for this prim — the exact thing that was missing when a
+            // library insert showed in the outliner but not the viewport.
+            let node = document.viewportScene[raw.description]
+            let actual = node.map { $0.isEnabled && $0.mesh?.faceLoops.isEmpty == false } ?? false
+            guard actual == wanted else {
+                throw HarnessError.expectationFailed(
+                    step: index,
+                    detail: "rendered(\(raw)) expected \(wanted), got \(actual) "
+                          + "(node: \(node == nil ? "absent" : "present"))")
+            }
+            log("expect rendered(\(raw)) == \(wanted) ✓")
             return
         }
         if let wanted = step.isolated {
