@@ -42,7 +42,7 @@ struct RpcResponseFrame: Encodable {
 
 /// The editor's discovery record, written while the app runs so an
 /// independently-spawned `openusdz mcp` can find the localhost activity port.
-struct EndpointRecord: Encodable {
+struct EndpointRecord: Codable {
     var port: Int
     var pid: Int
     var token: String
@@ -76,13 +76,28 @@ final class MCPActivityListener: ObservableObject {
 
     // MARK: Lifecycle
 
+    private var listenerRetries = 0
+    private let maxListenerRetries = 6
+
     func start() {
         guard listener == nil else { return }
         do {
             let listener = try NWListener(using: .tcp)
             listener.stateUpdateHandler = { [weak self] state in
-                guard case .ready = state, let self else { return }
-                Task { @MainActor in self.writeEndpoint() }
+                Task { @MainActor in
+                    guard let self else { return }
+                    switch state {
+                    case .ready:
+                        self.listenerRetries = 0
+                        self.writeEndpoint()
+                    case .failed, .cancelled:
+                        // A transient bind/ready failure must not leave the
+                        // feature permanently inert — restart with backoff.
+                        self.restartListener()
+                    default:
+                        break
+                    }
+                }
             }
             listener.newConnectionHandler = { [weak self] conn in
                 Task { @MainActor in self?.accept(conn) }
@@ -90,16 +105,38 @@ final class MCPActivityListener: ObservableObject {
             listener.start(queue: .global(qos: .utility))
             self.listener = listener
         } catch {
-            // Listener unavailable (e.g. sandbox without entitlement) — the app
-            // still runs; the activity feature is simply inert.
             NSLog("MCPActivityListener: failed to start: \(error)")
+            restartListener()
+        }
+    }
+
+    /// Bounded-backoff restart so a slow/failed `NWListener` recovers instead of
+    /// silently disabling agent connectivity.
+    private func restartListener() {
+        listener?.cancel()
+        listener = nil
+        guard listenerRetries < maxListenerRetries else {
+            NSLog("MCPActivityListener: giving up after \(maxListenerRetries) retries")
+            return
+        }
+        listenerRetries += 1
+        let delay = Double(listenerRetries) * 0.5   // 0.5s, 1.0s, … 3.0s
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+            self?.start()
         }
     }
 
     func stop() {
         listener?.cancel()
         listener = nil
-        try? FileManager.default.removeItem(at: Self.endpointURL())
+        // Only remove the discovery file if it's still ours — otherwise a
+        // second instance that has since taken over would be orphaned.
+        let url = Self.endpointURL()
+        if let data = try? Data(contentsOf: url),
+           let record = try? JSONDecoder().decode(EndpointRecord.self, from: data),
+           record.pid == Int(ProcessInfo.processInfo.processIdentifier) {
+            try? FileManager.default.removeItem(at: url)
+        }
     }
 
     private func writeEndpoint() {
