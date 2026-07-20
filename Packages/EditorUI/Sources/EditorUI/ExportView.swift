@@ -2,6 +2,7 @@ import SwiftUI
 import AppKit
 import UniformTypeIdentifiers
 import DicyaninDesignSystem
+import ValidationKit
 
 /// The prominent top-right export control: a split button whose large primary
 /// segment fires a one-click smart export, and whose trailing chevron opens the
@@ -103,16 +104,27 @@ struct ExportButton: View {
 public struct ExportPanel: View {
     /// The currently-open document's URL, used to seed the default file name.
     let sourceURL: URL?
+    /// ARKit-profile compliance of the live stage, so the panel can warn about
+    /// (and block) an export that wouldn't be AR-ready. `nil` when no document.
+    let compliance: ComplianceResult?
     /// Hands a chosen destination back to the host, which performs the write
     /// through the document + bridge executor.
     let onExport: (URL) -> Void
     let onClose: () -> Void
 
-    public init(sourceURL: URL?, onExport: @escaping (URL) -> Void, onClose: @escaping () -> Void) {
+    public init(sourceURL: URL?,
+                compliance: ComplianceResult? = nil,
+                onExport: @escaping (URL) -> Void,
+                onClose: @escaping () -> Void) {
         self.sourceURL = sourceURL
+        self.compliance = compliance
         self.onExport = onExport
         self.onClose = onClose
     }
+
+    /// `true` when compliance is known and blocks export (default-allow when the
+    /// profile passed or no result is available).
+    private var isBlocked: Bool { compliance?.isExportAllowed == false }
 
     @AppStorage("editor.export.format") private var formatRaw = ExportFormat.usdz.rawValue
 
@@ -122,6 +134,7 @@ public struct ExportPanel: View {
         VStack(alignment: .leading, spacing: Spacing.md) {
             header
             formatCards
+            complianceBanner
             destinationHint
             Spacer(minLength: 0)
             footer
@@ -189,6 +202,30 @@ public struct ExportPanel: View {
         .buttonStyle(.plain)
     }
 
+    @ViewBuilder
+    private var complianceBanner: some View {
+        if let compliance {
+            let ok = compliance.isExportAllowed
+            HStack(alignment: .top, spacing: Spacing.xs) {
+                Image(systemName: ok ? "checkmark.seal.fill" : "xmark.octagon.fill")
+                    .foregroundStyle(ok ? Palette.success.color : Palette.error.color)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(ok ? "Passes ARKit compliance" : "Blocked by ARKit compliance")
+                        .font(.system(size: TypeScale.body, weight: .semibold))
+                        .foregroundStyle(Palette.textPrimary.color)
+                    Text(compliance.summary)
+                        .font(.system(size: TypeScale.caption))
+                        .foregroundStyle(Palette.textSecondary.color)
+                        .lineLimit(2)
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(Spacing.sm)
+            .background(RoundedRectangle(cornerRadius: Radius.md)
+                .fill((ok ? Palette.success.color : Palette.error.color).opacity(0.10)))
+        }
+    }
+
     private var destinationHint: some View {
         Label {
             Text("You'll choose the folder and name next.")
@@ -209,6 +246,8 @@ public struct ExportPanel: View {
             }
             .buttonStyle(.borderedProminent)
             .keyboardShortcut(.defaultAction)
+            .disabled(isBlocked)
+            .help(isBlocked ? "Resolve the blocking compliance issues before exporting." : "")
         }
     }
 
