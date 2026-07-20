@@ -548,6 +548,14 @@ public struct EditorShellView: View {
                 onTranslateGizmoDrag: { [weak document] phase in
                     document?.handleTranslateGizmoDrag(phase)
                 },
+                rotateGizmo: document?.rotateGizmo,
+                onRotateGizmoDrag: { [weak document] phase in
+                    document?.handleRotateGizmoDrag(phase)
+                },
+                scaleGizmo: document?.scaleGizmo,
+                onScaleGizmoDrag: { [weak document] phase in
+                    document?.handleScaleGizmoDrag(phase)
+                },
                 cameraPose: tutorial?.cameraPose,
                 // The tour's scripted tweens own the channel while running;
                 // otherwise the document's authored transforms render live

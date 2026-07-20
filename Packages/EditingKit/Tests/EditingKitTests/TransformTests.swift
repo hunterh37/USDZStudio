@@ -43,6 +43,46 @@ struct TRSTests {
     }
 }
 
+@Suite("TRS ↔ matrix — property-based round-trips")
+struct TRSPropertyTests {
+
+    /// A deterministic pseudo-random stream (seeded LCG) so the property sweep
+    /// is reproducible in CI — the gizmo family's compose/decompose backbone
+    /// must round-trip for arbitrary poses.
+    private struct LCG {
+        var state: UInt64
+        mutating func next() -> Double {
+            state = state &* 6364136223846793005 &+ 1442695040888963407
+            return Double(state >> 11) / Double(1 << 53)
+        }
+        mutating func range(_ lo: Double, _ hi: Double) -> Double { lo + (hi - lo) * next() }
+    }
+
+    @Test func decomposeThenRecomposeReconstructsTheMatrix() {
+        var rng = LCG(state: 0xC0FFEE)
+        for _ in 0..<500 {
+            // Keep pitch away from ±90° (gimbal lock) and scale positive, the
+            // regime the decompose assumes (no shear, proper rotation).
+            let trs = TRS(
+                translation: [rng.range(-50, 50), rng.range(-50, 50), rng.range(-50, 50)],
+                rotationEulerDegrees: [rng.range(-179, 179), rng.range(-85, 85), rng.range(-179, 179)],
+                scale: [rng.range(0.1, 8), rng.range(0.1, 8), rng.range(0.1, 8)])
+            let m = trs.toMatrix()
+            let round = TRS.from(matrix: m).toMatrix()
+            #expect(approxEqual(round, m, tol: 1e-6))
+        }
+    }
+
+    @Test func eulerRoundTripsWhenAwayFromGimbalLock() {
+        var rng = LCG(state: 0x1234ABCD)
+        for _ in 0..<500 {
+            let euler = [rng.range(-179, 179), rng.range(-85, 85), rng.range(-179, 179)]
+            let back = TRS.from(matrix: TRS(rotationEulerDegrees: euler).toMatrix())
+            #expect(approxEqual(back.rotationEulerDegrees, euler, tol: 1e-6))
+        }
+    }
+}
+
 @Suite("SnapSettings")
 struct SnapTests {
 

@@ -53,7 +53,7 @@ MODULES=(
   "CLI|CLI|Sources|95"
   # Ratchet floors — pinned below spec target (noted), gap tracked in ROADMAP Phase T.
   "USDBridge|Packages/USDBridge|Sources/USDBridge|90"          # spec target 95
-  "ViewportKit|Packages/ViewportKit|Sources/ViewportKit|40"    # spec target 90
+  "ViewportKit|Packages/ViewportKit|Sources/ViewportKit|90"    # met: gizmo family raised it to spec target
   "EditorUI|Packages/EditorUI|Sources/EditorUI|27"             # spec target 90
 )
 

@@ -86,6 +86,16 @@ public struct ViewportPane: View {
     /// `onTranslateGizmoDrag`.
     let translateGizmo: TranslateGizmoDescriptor?
     let onTranslateGizmoDrag: ((TranslateGizmoDragPhase) -> Void)?
+    /// Object-mode rotate gizmo (three axis rings at the selection's world
+    /// pivot); `nil` hides it. Dragging a ring reports phases through
+    /// `onRotateGizmoDrag`.
+    let rotateGizmo: RotateGizmoDescriptor?
+    let onRotateGizmoDrag: ((RotateGizmoDragPhase) -> Void)?
+    /// Object-mode scale gizmo (per-axis box handles + uniform centre at the
+    /// selection's world pivot); `nil` hides it. Dragging a handle reports
+    /// phases through `onScaleGizmoDrag`.
+    let scaleGizmo: ScaleGizmoDescriptor?
+    let onScaleGizmoDrag: ((ScaleGizmoDragPhase) -> Void)?
     /// Scripted camera (guided tour): while non-nil the pose overrides the
     /// user-driven orbit camera. `nil` = normal mouse control.
     let cameraPose: ViewportCameraPose?
@@ -126,6 +136,10 @@ public struct ViewportPane: View {
                 onGizmoDrag: ((ExtrudeGizmoDragPhase) -> Void)? = nil,
                 translateGizmo: TranslateGizmoDescriptor? = nil,
                 onTranslateGizmoDrag: ((TranslateGizmoDragPhase) -> Void)? = nil,
+                rotateGizmo: RotateGizmoDescriptor? = nil,
+                onRotateGizmoDrag: ((RotateGizmoDragPhase) -> Void)? = nil,
+                scaleGizmo: ScaleGizmoDescriptor? = nil,
+                onScaleGizmoDrag: ((ScaleGizmoDragPhase) -> Void)? = nil,
                 cameraPose: ViewportCameraPose? = nil,
                 liveTransforms: [String: float4x4]? = nil,
                 materialOverrides: [String: MaterialOverride]? = nil,
@@ -142,6 +156,10 @@ public struct ViewportPane: View {
         self.onGizmoDrag = onGizmoDrag
         self.translateGizmo = translateGizmo
         self.onTranslateGizmoDrag = onTranslateGizmoDrag
+        self.rotateGizmo = rotateGizmo
+        self.onRotateGizmoDrag = onRotateGizmoDrag
+        self.scaleGizmo = scaleGizmo
+        self.onScaleGizmoDrag = onScaleGizmoDrag
         self.cameraPose = cameraPose
         self.liveTransforms = liveTransforms
         self.materialOverrides = materialOverrides
@@ -158,6 +176,10 @@ public struct ViewportPane: View {
                                   extrudeGizmo: extrudeGizmo, onGizmoDrag: onGizmoDrag,
                                   translateGizmo: translateGizmo,
                                   onTranslateGizmoDrag: onTranslateGizmoDrag,
+                                  rotateGizmo: rotateGizmo,
+                                  onRotateGizmoDrag: onRotateGizmoDrag,
+                                  scaleGizmo: scaleGizmo,
+                                  onScaleGizmoDrag: onScaleGizmoDrag,
                                   cameraLink: cameraLink,
                                   cameraPose: cameraPose, liveTransforms: liveTransforms,
                                   materialOverrides: materialOverrides,
@@ -244,6 +266,10 @@ struct ViewportRepresentable: NSViewRepresentable {
     let onGizmoDrag: ((ExtrudeGizmoDragPhase) -> Void)?
     let translateGizmo: TranslateGizmoDescriptor?
     let onTranslateGizmoDrag: ((TranslateGizmoDragPhase) -> Void)?
+    let rotateGizmo: RotateGizmoDescriptor?
+    let onRotateGizmoDrag: ((RotateGizmoDragPhase) -> Void)?
+    let scaleGizmo: ScaleGizmoDescriptor?
+    let onScaleGizmoDrag: ((ScaleGizmoDragPhase) -> Void)?
     let cameraLink: ViewportCameraLink
     let cameraPose: ViewportCameraPose?
     let liveTransforms: [String: float4x4]?
@@ -277,6 +303,8 @@ struct ViewportRepresentable: NSViewRepresentable {
                                             hoverPreview: hoverPreview, onHoverFace: onHoverFace)
         context.coordinator.applyExtrudeGizmo(extrudeGizmo, onDrag: onGizmoDrag)
         context.coordinator.applyTranslateGizmo(translateGizmo, onDrag: onTranslateGizmoDrag)
+        context.coordinator.applyRotateGizmo(rotateGizmo, onDrag: onRotateGizmoDrag)
+        context.coordinator.applyScaleGizmo(scaleGizmo, onDrag: onScaleGizmoDrag)
         context.coordinator.applyCameraPose(cameraPose)
         context.coordinator.applyLiveTransforms(liveTransforms)
         context.coordinator.applyMaterialOverrides(materialOverrides)
@@ -350,7 +378,7 @@ final class ViewportCoordinator {
     // MARK: Gizmo drag dispatch
 
     // coverage:disable — mouse-capture routing between RealityKit gizmos; exercised by the editor-harness translate-gizmo scenario, unreachable from unit tests (no NSView/ARView)
-    private enum ActiveGizmoDrag { case extrude, translate }
+    private enum ActiveGizmoDrag { case extrude, translate, rotate, scale }
     private var activeGizmoDrag: ActiveGizmoDrag?
 
     private func anyGizmoMouseDown(at point: CGPoint) -> Bool {
@@ -362,6 +390,14 @@ final class ViewportCoordinator {
             activeGizmoDrag = .translate
             return true
         }
+        if rotateDescriptor != nil, rotateMouseDown(at: point) {
+            activeGizmoDrag = .rotate
+            return true
+        }
+        if scaleDescriptor != nil, scaleMouseDown(at: point) {
+            activeGizmoDrag = .scale
+            return true
+        }
         return false
     }
 
@@ -369,6 +405,8 @@ final class ViewportCoordinator {
         switch activeGizmoDrag {
         case .extrude: gizmoDragMoved(to: point)
         case .translate: translateDragMoved(to: point)
+        case .rotate: rotateDragMoved(to: point)
+        case .scale: scaleDragMoved(to: point)
         case nil: break
         }
     }
@@ -377,6 +415,8 @@ final class ViewportCoordinator {
         switch activeGizmoDrag {
         case .extrude: gizmoDragEnded()
         case .translate: translateDragEnded()
+        case .rotate: rotateDragEnded()
+        case .scale: scaleDragEnded()
         case nil: break
         }
         activeGizmoDrag = nil
@@ -1251,6 +1291,254 @@ final class ViewportCoordinator {
     }
     // coverage:enable
 
+    // MARK: Rotate gizmo (object-mode XYZ rings)
+
+    // coverage:disable — RealityKit ring rendering + drag glue; the math is unit-tested (RotateGizmoMathTests) and the document flow by the rotate/scale gizmo document tests
+    private let rotateAnchor = AnchorEntity(world: .zero)
+    private let rotateRoot = Entity()
+    private var rotateDescriptor: RotateGizmoDescriptor?
+    private var onRotateGizmoDrag: ((RotateGizmoDragPhase) -> Void)?
+    private var rotateRingModels: [Int: [ModelEntity]] = [:]
+    /// Grab reference frozen at mouse-down: the ring's axis, the pivot, the
+    /// axis world direction, and the ray that started the drag (the swept angle
+    /// is measured from it every frame).
+    private var rotateDragStart: (axis: GizmoAxis, origin: SIMD3<Double>,
+                                  normal: SIMD3<Double>, startRay: CameraRay.Ray)?
+    private var rotateLastAngle = 0.0
+
+    func applyRotateGizmo(_ descriptor: RotateGizmoDescriptor?,
+                          onDrag: ((RotateGizmoDragPhase) -> Void)?) {
+        onRotateGizmoDrag = onDrag
+        guard descriptor != rotateDescriptor else { return }
+        rotateDescriptor = descriptor
+        guard let descriptor else {
+            rotateDragStart = nil
+            rotateAnchor.removeFromParent()
+            return
+        }
+        if rotateRoot.parent == nil { rotateAnchor.addChild(rotateRoot) }
+        if rotateAnchor.parent == nil { view?.scene.addAnchor(rotateAnchor) }
+        rebuildRotateGizmoGeometry(descriptor.basis)
+        layoutRotateGizmo(descriptor)
+    }
+
+    /// Three axis rings (thin box segments swept into a circle), each oriented
+    /// so its plane normal points along the corresponding basis axis.
+    private func rebuildRotateGizmoGeometry(_ basis: GizmoBasis) {
+        rotateRoot.children.removeAll()
+        rotateRingModels = [:]
+        for axis in GizmoAxis.allCases {
+            let normal = simd_normalize(SIMD3<Float>(basis.direction(axis)))
+            let (ring, models) = Self.makeRing(normal: normal,
+                                               color: Self.axisColors[axis.rawValue])
+            rotateRoot.addChild(ring)
+            rotateRingModels[axis.rawValue] = models
+        }
+    }
+
+    private static func makeRing(normal: SIMD3<Float>, color: NSColor) -> (Entity, [ModelEntity]) {
+        let ring = Entity()
+        var models: [ModelEntity] = []
+        let segments = 48
+        let radius = Float(RotateGizmoMath.radiusFraction)
+        let thickness: Float = 0.025
+        let material = UnlitMaterial(color: color)
+        let arc = 2 * Float.pi * radius / Float(segments) * 1.15
+        let mesh = MeshResource.generateBox(size: SIMD3<Float>(thickness, thickness, arc))
+        for i in 0..<segments {
+            let angle = 2 * Float.pi * Float(i) / Float(segments)
+            let seg = ModelEntity(mesh: mesh, materials: [material])
+            seg.position = SIMD3<Float>(cos(angle) * radius, sin(angle) * radius, 0)
+            seg.orientation = simd_quatf(angle: angle + .pi / 2, axis: SIMD3<Float>(0, 0, 1))
+            ring.addChild(seg)
+            models.append(seg)
+        }
+        ring.orientation = simd_quatf(from: SIMD3<Float>(0, 0, 1), to: normal)
+        return (ring, models)
+    }
+
+    private func layoutRotateGizmo(_ descriptor: RotateGizmoDescriptor) {
+        rotateRoot.position = SIMD3<Float>(descriptor.origin)
+        let length = ExtrudeGizmoMath.handleLength(cameraDistance: camera.distance)
+        rotateRoot.scale = SIMD3<Float>(repeating: Float(length))
+    }
+
+    private func setRotateHighlight(_ axis: GizmoAxis?) {
+        for a in GizmoAxis.allCases {
+            let color = a == axis ? Self.activeAxisColor : Self.axisColors[a.rawValue]
+            for model in rotateRingModels[a.rawValue] ?? [] {
+                model.model?.materials = [UnlitMaterial(color: color)]
+            }
+        }
+    }
+
+    private func rotateMouseDown(at point: CGPoint) -> Bool {
+        guard let descriptor = rotateDescriptor, let ray = worldRay(at: point) else { return false }
+        let radius = ExtrudeGizmoMath.handleLength(cameraDistance: camera.distance)
+            * RotateGizmoMath.radiusFraction
+        guard let axis = RotateGizmoMath.hitAxis(ray: ray, origin: descriptor.origin,
+                                                 basis: descriptor.basis, radius: radius)
+        else { return false }
+        rotateDragStart = (axis, descriptor.origin,
+                           simd_normalize(descriptor.basis.direction(axis)), ray)
+        rotateLastAngle = 0
+        setRotateHighlight(axis)
+        onRotateGizmoDrag?(.began(axis))
+        return true
+    }
+
+    private func rotateDragMoved(to point: CGPoint) {
+        guard let start = rotateDragStart else { return }
+        if let ray = worldRay(at: point),
+           let angle = RotateGizmoMath.signedAngleDegrees(from: start.startRay, to: ray,
+                                                          origin: start.origin, axis: start.normal) {
+            rotateLastAngle = angle
+        }
+        onRotateGizmoDrag?(.changed(start.axis, rotateLastAngle))
+    }
+
+    private func rotateDragEnded() {
+        guard rotateDragStart != nil else { return }
+        rotateDragStart = nil
+        setRotateHighlight(nil)
+        onRotateGizmoDrag?(.ended)
+    }
+    // coverage:enable
+
+    // MARK: Scale gizmo (object-mode box handles + uniform centre)
+
+    // coverage:disable — RealityKit box rendering + drag glue; the math is unit-tested (ScaleGizmoMathTests) and the document flow by the rotate/scale gizmo document tests
+    private let scaleAnchor = AnchorEntity(world: .zero)
+    private let scaleRoot = Entity()
+    private var scaleDescriptor: ScaleGizmoDescriptor?
+    private var onScaleGizmoDrag: ((ScaleGizmoDragPhase) -> Void)?
+    private var scaleHandleModels: [Int: ModelEntity] = [:]
+    private var scaleUniformModel: ModelEntity?
+    /// Grab reference: the handle, the pivot, the world axis the drag is
+    /// measured along, and the axis parameter at grab time (factor = current /
+    /// start, per `ScaleGizmoMath.factor`).
+    private var scaleDragStart: (handle: ScaleHandle, origin: SIMD3<Double>,
+                                 axis: SIMD3<Double>, param: Double)?
+    private var scaleLastFactor = 1.0
+
+    func applyScaleGizmo(_ descriptor: ScaleGizmoDescriptor?,
+                         onDrag: ((ScaleGizmoDragPhase) -> Void)?) {
+        onScaleGizmoDrag = onDrag
+        guard descriptor != scaleDescriptor else { return }
+        scaleDescriptor = descriptor
+        guard let descriptor else {
+            scaleDragStart = nil
+            scaleAnchor.removeFromParent()
+            return
+        }
+        if scaleRoot.parent == nil { scaleAnchor.addChild(scaleRoot) }
+        if scaleAnchor.parent == nil { view?.scene.addAnchor(scaleAnchor) }
+        rebuildScaleGizmoGeometry(descriptor.basis)
+        layoutScaleGizmo(descriptor)
+    }
+
+    /// Three per-axis stalks capped with a box handle, plus a central uniform
+    /// cube, built along each basis axis.
+    private func rebuildScaleGizmoGeometry(_ basis: GizmoBasis) {
+        scaleRoot.children.removeAll()
+        scaleHandleModels = [:]
+        let shaftRadius = Float(ExtrudeGizmoMath.shaftRadiusFraction)
+        let shaftMesh: MeshResource = {
+            if #available(macOS 15.0, *) {
+                return .generateCylinder(height: 0.8, radius: shaftRadius)
+            } else {
+                return .generateBox(size: SIMD3<Float>(shaftRadius * 2, 0.8, shaftRadius * 2))
+            }
+        }()
+        let tipMesh = MeshResource.generateBox(size: 0.14)
+        for axis in GizmoAxis.allCases {
+            let material = UnlitMaterial(color: Self.axisColors[axis.rawValue])
+            let shaft = ModelEntity(mesh: shaftMesh, materials: [material])
+            shaft.position = SIMD3<Float>(0, 0.4, 0)
+            let tip = ModelEntity(mesh: tipMesh, materials: [material])
+            tip.position = SIMD3<Float>(0, 0.9, 0)
+            let arm = Entity()
+            arm.addChild(shaft)
+            arm.addChild(tip)
+            arm.orientation = simd_quatf(from: SIMD3<Float>(0, 1, 0),
+                                         to: simd_normalize(SIMD3<Float>(basis.direction(axis))))
+            scaleRoot.addChild(arm)
+            scaleHandleModels[axis.rawValue] = tip
+        }
+        let centre = ModelEntity(mesh: .generateBox(size: 0.2),
+                                 materials: [UnlitMaterial(color: Self.uniformColor)])
+        scaleRoot.addChild(centre)
+        scaleUniformModel = centre
+    }
+
+    private func layoutScaleGizmo(_ descriptor: ScaleGizmoDescriptor) {
+        scaleRoot.position = SIMD3<Float>(descriptor.origin)
+        let length = ExtrudeGizmoMath.handleLength(cameraDistance: camera.distance)
+        scaleRoot.scale = SIMD3<Float>(repeating: Float(length))
+    }
+
+    private static let uniformColor = NSColor(srgbRed: 0.85, green: 0.85, blue: 0.88, alpha: 1)
+
+    private func setScaleHighlight(_ handle: ScaleHandle?) {
+        for a in GizmoAxis.allCases {
+            let active = handle == .axis(a)
+            scaleHandleModels[a.rawValue]?.model?.materials =
+                [UnlitMaterial(color: active ? Self.activeAxisColor : Self.axisColors[a.rawValue])]
+        }
+        let uniformActive = handle == .uniform
+        scaleUniformModel?.model?.materials =
+            [UnlitMaterial(color: uniformActive ? Self.activeAxisColor : Self.uniformColor)]
+    }
+
+    /// The world axis a uniform drag is measured along — the camera's right
+    /// vector, so left/right cursor motion grows/shrinks the object.
+    private func cameraRightAxis() -> SIMD3<Double> {
+        let forward = camera.target - camera.position
+        let right = simd_cross(forward, SIMD3<Double>(0, 1, 0))
+        let len = simd_length(right)
+        return len > 1e-9 ? right / len : SIMD3<Double>(1, 0, 0)
+    }
+
+    private func scaleMouseDown(at point: CGPoint) -> Bool {
+        guard let descriptor = scaleDescriptor, let ray = worldRay(at: point) else { return false }
+        let length = ExtrudeGizmoMath.handleLength(cameraDistance: camera.distance)
+        guard let handle = ScaleGizmoMath.hitHandle(ray: ray, origin: descriptor.origin,
+                                                    basis: descriptor.basis, length: length)
+        else { return false }
+        let axis: SIMD3<Double> = switch handle {
+        case .uniform: cameraRightAxis()
+        case let .axis(a): simd_normalize(descriptor.basis.direction(a))
+        }
+        guard let param = ExtrudeGizmoMath.axisParameter(ray: ray, origin: descriptor.origin,
+                                                         axis: axis) else { return false }
+        // The tip sits ~one handle-length out; seed the reference at that
+        // radius so a static click reads factor 1 even when param starts small.
+        let seed = abs(param) > length * 0.25 ? param : (param < 0 ? -length : length)
+        scaleDragStart = (handle, descriptor.origin, axis, seed)
+        scaleLastFactor = 1
+        setScaleHighlight(handle)
+        onScaleGizmoDrag?(.began(handle))
+        return true
+    }
+
+    private func scaleDragMoved(to point: CGPoint) {
+        guard let start = scaleDragStart else { return }
+        if let ray = worldRay(at: point),
+           let param = ExtrudeGizmoMath.axisParameter(ray: ray, origin: start.origin, axis: start.axis),
+           let factor = ScaleGizmoMath.factor(fromParam: start.param, toParam: param) {
+            scaleLastFactor = max(0.01, factor)
+        }
+        onScaleGizmoDrag?(.changed(start.handle, scaleLastFactor))
+    }
+
+    private func scaleDragEnded() {
+        guard scaleDragStart != nil else { return }
+        scaleDragStart = nil
+        setScaleHighlight(nil)
+        onScaleGizmoDrag?(.ended)
+    }
+    // coverage:enable
+
     private func frameModel() {
         // A scripted pose owns the camera; auto-framing would fight it.
         guard appliedPose == nil, let modelBounds else { return }
@@ -1267,6 +1555,8 @@ final class ViewportCoordinator {
         // Keep the gizmo handles a constant apparent size as the camera moves.
         if let descriptor = gizmoDescriptor { layoutGizmo(descriptor) }
         if let descriptor = translateDescriptor { layoutTranslateGizmo(descriptor) }
+        if let descriptor = rotateDescriptor { layoutRotateGizmo(descriptor) }
+        if let descriptor = scaleDescriptor { layoutScaleGizmo(descriptor) }
     }
 
     private func rebuildGrid(halfExtent: Float) {
