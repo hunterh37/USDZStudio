@@ -37,9 +37,10 @@ policy_for() {
     ScriptingKit)         echo "USDCore" ;;
     ViewportKit)          echo "USDCore MeshKit" ;;     # component-overlay rendering (specs/mesh-editing.md)
     EditingKit)           echo "USDCore ValidationKit MeshKit" ;;  # QuickFixRegistry maps Diagnostics -> undoable commands
+    AgentMCP)             echo "USDCore USDBridge EditingKit ValidationKit ConversionKit ScriptingKit MeshKit" ;;  # MCP adapter over the kits (docs/AGENT_MCP_PLAN.md); never EditorUI
     EditorUI)             echo "USDCore USDBridge ConversionKit ViewportKit EditingKit ValidationKit ScriptingKit DicyaninDesignSystem MeshKit" ;;
     App)                  echo "USDCore USDBridge ConversionKit ViewportKit EditingKit ValidationKit ScriptingKit EditorUI DicyaninDesignSystem MeshKit" ;;
-    CLI)                  echo "USDCore USDBridge ConversionKit ValidationKit ScriptingKit EditingKit MeshKit" ;;  # never EditorUI/DesignSystem
+    CLI)                  echo "USDCore USDBridge ConversionKit ValidationKit ScriptingKit EditingKit MeshKit AgentMCP" ;;  # never EditorUI/DesignSystem
     EditorHarness)        echo "USDCore USDBridge EditingKit MeshKit EditorUI" ;;  # dev tool: drives the real UI
     *)                    return 1 ;;
   esac

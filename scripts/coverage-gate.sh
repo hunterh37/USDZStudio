@@ -47,6 +47,7 @@ MODULES=(
   "ValidationKit|Packages/ValidationKit|Sources/ValidationKit|100"
   "ConversionKit|Packages/ConversionKit|Sources/ConversionKit|100"
   "ScriptingKit|Packages/ScriptingKit|Sources/ScriptingKit|100"
+  "AgentMCP|Packages/AgentMCP|Sources/AgentMCP|100"
   "DicyaninDesignSystem|Packages/DicyaninDesignSystem|Sources/DicyaninDesignSystem|95"
   "CLI|CLI|Sources|95"
   # Ratchet floors — pinned below spec target (noted), gap tracked in ROADMAP Phase T.

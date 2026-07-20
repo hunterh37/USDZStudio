@@ -218,6 +218,32 @@ The comprehensive USD authoring endgame — always profile-flagged.
 - [ ] Instancing authoring (point instancers, scenegraph instancing) for volume scenes.
 - **Harness:** composed-vs-flattened equivalence tests; profile-degradation snapshots (what each construct becomes under RealityKit export).
 
+## Phase A — Agent MCP Layer (shipped; docs/AGENT_MCP_PLAN.md)
+
+Typed, transactional, verification-gated MCP editing API over the kits
+(`Packages/AgentMCP`, served by `openusdz mcp <file>`).
+
+- [x] P1 — read + transactional mutate: JSON-RPC/stdio server, `EditSession`
+      (BridgedStage → InMemoryStage → CommandStack), all §3.1/§3.2 tools,
+      stable `primId` handles, synthesized diffs, undo/redo/undo_to/save,
+      inline validation with off/warn/strict modes.
+- [x] P2 — verify loop: `check_mesh`, 4-gate `score`, multi-view/isolated
+      `render_views` (per-view cameras via usdrecord) with `statsOnly`, `raycast`.
+- [x] P3 — spatial solver: `set_transform` `relativeTo` rules
+      (on_top/below/left_of/right_of/in_front_of/behind/inside_center, align, gap).
+- [x] P4 — assets: `import_asset` → graft → auto-`normalize_asset` → validate,
+      `search_assets`, async `generate_asset`/`asset_job_status`/`fetch_asset`
+      behind a pluggable provider protocol.
+- [x] P5 — escape hatch + polish: manifest-validated `run_script`, MCP
+      resources (`usd://scene|stats|history`), tool groups (`--groups`),
+      4 workflow-recipe prompts.
+- [ ] Follow-ups: in-app streamable-HTTP transport (Epic UE 5.8 direction),
+      real generation providers (Meshy/Tripo) behind env keys, asset-folder
+      job metadata/history, main-actor marshaling when serving a live GUI document.
+- **Harness:** 100% line-coverage floor in `scripts/coverage-gate.sh`; every
+  tool tested valid × invalid through full JSON-RPC dispatch; process seams
+  (stdio loop, usdrecord, Python) injected and excluded with manifest reasons.
+
 ## Continuous / Platform
 
 - [ ] Python console REPL + `app.*` scripting parity for every command above (single-undo script runs).

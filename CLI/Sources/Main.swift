@@ -45,6 +45,15 @@ enum CLIRunner {
                                Render the model via usdrecord. --frames N > 1
                                renders a turntable (output needs a frame
                                placeholder, e.g. turn.###.png).
+      mcp <file.usd[z|a|c]> [--groups a,b,c] [--strictness off|warn|strict]
+                     [--library DIR]
+                               Serve the stage over the Agent MCP layer
+                               (JSON-RPC/stdio): typed, transactional,
+                               verification-gated editing tools for coding
+                               agents (docs/AGENT_MCP_PLAN.md). --groups
+                               limits the tool surface (read, mutate, verify,
+                               render, asset, script, transaction); --library
+                               adds asset-search folders.
       validate <file.usd[z|a|c]> [--profile NAME] [--strict]
                                Run a compliance profile's rule catalog and print
                                diagnostics (most-severe first) with an export
@@ -98,6 +107,8 @@ enum CLIRunner {
         case "thumbnail":
             return ThumbnailCommand.run(arguments: Array(arguments.dropFirst()),
                                         print: output, printError: printError)
+        case "mcp":
+            return await McpCommand.run(arguments: Array(arguments.dropFirst()), printError: printError)
         case "validate":
             return await validate(
                 arguments: Array(arguments.dropFirst()),

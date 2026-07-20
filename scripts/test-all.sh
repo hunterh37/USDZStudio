@@ -18,6 +18,7 @@ PACKAGES=(
   Packages/ValidationKit
   Packages/ConversionKit
   Packages/ScriptingKit
+  Packages/AgentMCP
   Packages/ViewportKit
   Packages/EditorUI
   CLI
