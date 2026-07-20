@@ -17,20 +17,23 @@ Translate shipped; close the set so direct-manipulation editing is whole. Rotate
 - Shared gizmo infrastructure: a mode switch (W/E/R idiom), pivot/orientation options (median vs. individual, world vs. local), and a single hit-test/drag-routing seam reused across all three.
 - **Exit / harness:** parity tests against `TransformDragSession`; property-based compose/decompose round-trips; snapshot tests of gizmo layout per camera; ViewportKit ratchet floor raised.
 
-### Milestone 2 — Land the "best free viewer" surface (finishes Phase 1, unblocks public launch)
-The Phase 1 exit ("best free USDZ viewer on macOS, ship publicly") is gated on four still-open viewer features. Close them together so the public release is credible.
-- Environment & lighting: IBL presets + custom HDR/EXR, exposure control, background modes.
-- Debug view modes: wireframe, normals, UV checker, matcap.
-- Animation playback transport: play/pause/scrub/loop over authored time-samples, driving the RealityKit viewport (the data model already carries `playbackRate`).
-- QuickLook thumbnail + preview extension for `.usda` (Finder-level `.appex`, distinct from the existing CLI `usdrecord` thumbnail path).
+### Milestone 2 — Land the "best free viewer" surface (finishes Phase 1, unblocks public launch) — 🚧 **Not done**
+All four viewer features are built (see the Phase 1 `[x]` entries below), but the milestone is **not** complete: its exit is still gated on the distribution items and the golden-image harness. Do not mark this Done until both blockers below clear.
+- ✅ Environment & lighting: IBL presets + custom HDR/EXR, exposure control, background modes.
+- ✅ Debug view modes: wireframe, normals, UV checker, matcap.
+- ✅ Animation playback transport: play/pause/scrub/loop over authored time-samples, driving the RealityKit viewport (the data model already carries `playbackRate`).
+- ✅ QuickLook thumbnail + preview extension for `.usda` (Finder-level `.appex`, distinct from the existing CLI `usdrecord` thumbnail path).
+- **Remaining blockers (why this is not Done):**
+  - Build-from-source docs + unsigned release builds on GitHub Releases (Phase 1, line 124 — still `[ ]`).
+  - The T1 golden-image ΔE harness itself (per-debug-mode + per-IBL-preset renders vs. reference PNGs; deterministic sampled-pose playback frames) — unbuilt (Phase T1).
 - **Exit / harness:** golden-image renders per debug mode and IBL preset with a ΔE gate (this is the T1 golden-image harness — build it here); deterministic sampled-pose frames for playback; ship unsigned release builds + build-from-source docs.
 
-### Milestone 3 — Part-level editing flagship (finishes Phase 3 differentiators)
-The headline editing capability, currently absent.
-- Drill-down / walk-up viewport selection with a breadcrumb; move any child prim at any depth.
-- Clear Hide (visibility) vs. Disable (active) vs. Delete semantics with distinct, discoverable UI.
-- Isolate mode via a non-dirtying session layer.
-- **Exit / harness:** selection-path unit tests; round-trip invariants proving isolate never dirties the root layer; XCUITest smoke flow for drill-down → edit → export.
+### Milestone 3 — Part-level editing flagship (finishes Phase 3 differentiators) — ✅ **Done**
+The headline editing capability, shipped in #16 (see the Phase 3 part-level entries for detail).
+- Drill-down / walk-up viewport selection with a breadcrumb; move any child prim at any depth — `PartSelection` + `BreadcrumbBar` shipped.
+- Clear Hide (visibility) vs. Disable (active) vs. Delete semantics with distinct, discoverable UI — `PartEditKind` + outliner context menu shipped.
+- Isolate mode via a non-dirtying session layer — `IsolationState` view-only overlay shipped (⌘I / Esc).
+- **Exit / harness:** `PartSelectionTests` selection-path units and the `part-editing.json` round-trip invariant (isolate → exit leaves the stage byte-identical, `dirty == false`) landed in the same PR. The drill-down → edit → export XCUITest smoke flow remains parked under the Phase T1 XCUITest layer, alongside the other cross-cutting UI harnesses.
 
 ### Milestone 4 — Durability & reliability (enterprise hardening) — ✅ **Done**
 Make the editor safe to trust with real work. All four items shipped; see specs/editing-model.md §Dirty State & Saving and specs/testing.md §Test Layers 2/4/5 for the contracts.
@@ -41,11 +44,11 @@ Make the editor safe to trust with real work. All four items shipped; see specs/
 
 > **Known round-trip gaps recorded by the new gate** (both pre-existing and outside this milestone's scope, now enforced rather than silent): `USDASerializer` emits no `variantSet` blocks, so variant sets are dropped on save (Phase 12); and attributes the bridge surfaces as `.unsupported` — a purely time-sampled channel has no default-time value — are written as an "omitted" comment, so their values are dropped on save (Phase 10). Closing either one requires tightening `EXPECTATIONS` in `scripts/roundtrip-gate.sh`, which the gate enforces.
 
-### Milestone 5 — Validation & scripting power tools (finishes Phase 4)
-- Python console REPL with injected `stage`/`selection`/`app` and single-undo script runs (the script-library panel already runs bundled/user scripts; add the interactive console).
-- Complete the live diagnostics quick-fix set and wire the export path through `ComplianceChecker` gating in the app UI.
-- FBX support via checksum-verified FBX2glTF download flow.
-- **Exit / harness:** CLI subcommand × {valid, invalid, warning} × {default, --json, --strict} matrix (T1 CLI layer); REPL single-undo contract test.
+### Milestone 5 — Validation & scripting power tools (finishes Phase 4) — 🚧 **In progress**
+- Python console REPL with injected `stage`/`selection`/`app` and single-undo script runs (the script-library panel already runs bundled/user scripts; add the interactive console). *(still open)*
+- ✅ **Complete the live diagnostics quick-fix set and wire the export path through `ComplianceChecker` gating in the app UI.** The quick-fix registry now covers the empty-mesh (delete) and missing-normals (area-weighted smooth-normal synthesis, reversible via `oldAttribute: nil`) rules on top of the existing scale/defaultPrim fixes; `stage.upAxis` deliberately stays fix-less because flipping the token reinterprets geometry rather than re-orienting it (documented at the fix site). Export now runs through `ExportGate` — a pure, unit-tested policy type wrapping `ComplianceChecker` — with a profile picker (`arkit`/`arkit-strict`), a clean/advisory/blocked verdict, inline blocking + advisory diagnostics, and a deliberate "Export Anyway" override that permits but never launders the verdict. An unknown persisted profile degrades to the default rather than wedging export.
+- FBX support via checksum-verified FBX2glTF download flow. *(still open)*
+- **Exit / harness:** ✅ CLI `validate` gained `--json` (machine-readable report whose `exportAllowed` field mirrors the exit code) and the full {valid, invalid, warning} × {default, --json, --strict} matrix now runs as a parametrised T1 CLI suite, with JSON↔human agreement asserted diagnostic-for-diagnostic. REPL single-undo contract test lands with the console item.
 
 ### Milestone 6 — Perceptual texture recoloring (Phase 4.5, the category-defining differentiator)
 Nothing else in the USDZ ecosystem does this; it is the strongest reason to choose this tool.
