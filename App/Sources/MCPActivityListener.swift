@@ -1,6 +1,8 @@
+import AgentMCP
 import EditorUI
 import Foundation
 import Network
+import USDCore
 
 /// App-side mirror of the NDJSON activity protocol pushed by `openusdz mcp`.
 /// Dependency-lint forbids the app from importing AgentMCP, so this is a
@@ -8,22 +10,39 @@ import Network
 struct InboundEvent: Decodable {
     var type: String
     var pid: Int
-    var ts: Int?
-    var protocolVersion: String?
-    var servedFile: String?
-    var toolCount: Int?
-    var groups: [String]?
-    var seq: Int?
-    var tool: String?
-    var argsSummary: String?
-    var durationMs: Int?
-    var isError: Bool?
-    var summary: String?
+    var ts: Int? = nil
+    var protocolVersion: String? = nil
+    var servedFile: String? = nil
+    var toolCount: Int? = nil
+    var groups: [String]? = nil
+    var seq: Int? = nil
+    var tool: String? = nil
+    var argsSummary: String? = nil
+    var durationMs: Int? = nil
+    var isError: Bool? = nil
+    var summary: String? = nil
+}
+
+/// One JSON-RPC relay frame from `openusdz mcp` running as a pump: the request
+/// carries a correlation `id` and the raw JSON-RPC `line` (specs/agent-live-editing.md).
+struct RpcRequestFrame: Decodable {
+    var type: String
+    var id: Int
+    var line: String
+}
+
+/// The app's reply on the same socket: the JSON-RPC response `line` (empty for
+/// notifications), tagged with the request `id`.
+struct RpcResponseFrame: Encodable {
+    var v = 1
+    var type = "rpc_response"
+    var id: Int
+    var line: String
 }
 
 /// The editor's discovery record, written while the app runs so an
 /// independently-spawned `openusdz mcp` can find the localhost activity port.
-struct EndpointRecord: Encodable {
+struct EndpointRecord: Codable {
     var port: Int
     var pid: Int
     var token: String
@@ -57,13 +76,28 @@ final class MCPActivityListener: ObservableObject {
 
     // MARK: Lifecycle
 
+    private var listenerRetries = 0
+    private let maxListenerRetries = 6
+
     func start() {
         guard listener == nil else { return }
         do {
             let listener = try NWListener(using: .tcp)
             listener.stateUpdateHandler = { [weak self] state in
-                guard case .ready = state, let self else { return }
-                Task { @MainActor in self.writeEndpoint() }
+                Task { @MainActor in
+                    guard let self else { return }
+                    switch state {
+                    case .ready:
+                        self.listenerRetries = 0
+                        self.writeEndpoint()
+                    case .failed, .cancelled:
+                        // A transient bind/ready failure must not leave the
+                        // feature permanently inert — restart with backoff.
+                        self.restartListener()
+                    default:
+                        break
+                    }
+                }
             }
             listener.newConnectionHandler = { [weak self] conn in
                 Task { @MainActor in self?.accept(conn) }
@@ -71,16 +105,38 @@ final class MCPActivityListener: ObservableObject {
             listener.start(queue: .global(qos: .utility))
             self.listener = listener
         } catch {
-            // Listener unavailable (e.g. sandbox without entitlement) — the app
-            // still runs; the activity feature is simply inert.
             NSLog("MCPActivityListener: failed to start: \(error)")
+            restartListener()
+        }
+    }
+
+    /// Bounded-backoff restart so a slow/failed `NWListener` recovers instead of
+    /// silently disabling agent connectivity.
+    private func restartListener() {
+        listener?.cancel()
+        listener = nil
+        guard listenerRetries < maxListenerRetries else {
+            NSLog("MCPActivityListener: giving up after \(maxListenerRetries) retries")
+            return
+        }
+        listenerRetries += 1
+        let delay = Double(listenerRetries) * 0.5   // 0.5s, 1.0s, … 3.0s
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+            self?.start()
         }
     }
 
     func stop() {
         listener?.cancel()
         listener = nil
-        try? FileManager.default.removeItem(at: Self.endpointURL())
+        // Only remove the discovery file if it's still ours — otherwise a
+        // second instance that has since taken over would be orphaned.
+        let url = Self.endpointURL()
+        if let data = try? Data(contentsOf: url),
+           let record = try? JSONDecoder().decode(EndpointRecord.self, from: data),
+           record.pid == Int(ProcessInfo.processInfo.processIdentifier) {
+            try? FileManager.default.removeItem(at: url)
+        }
     }
 
     private func writeEndpoint() {
@@ -137,9 +193,14 @@ final class MCPActivityListener: ObservableObject {
         var buffer = buffers[key] ?? Data()
         buffer.append(data)
         while let newline = buffer.firstIndex(of: 0x0A) {
-            let line = buffer[buffer.startIndex..<newline]
+            let line = Data(buffer[buffer.startIndex..<newline])
             buffer.removeSubrange(buffer.startIndex...newline)
-            if let event = try? JSONDecoder().decode(InboundEvent.self, from: Data(line)) {
+            // A relay request (editor hosts the server) takes priority; anything
+            // else is legacy activity from an in-process CLI server.
+            if let frame = try? JSONDecoder().decode(RpcRequestFrame.self, from: line),
+               frame.type == "rpc_request" {
+                handleRpc(frame, on: conn)
+            } else if let event = try? JSONDecoder().decode(InboundEvent.self, from: line) {
                 apply(event)
             }
         }
@@ -149,6 +210,52 @@ final class MCPActivityListener: ObservableObject {
     private func connectionClosed(_ conn: NWConnection) {
         buffers[ObjectIdentifier(conn)] = nil
         markDisconnected()
+    }
+
+    // MARK: In-app MCP host (specs/agent-live-editing.md)
+
+    private var hostSession: EditSession?
+    private var hostServer: MCPServer?
+    private weak var boundDocument: EditorDocument?
+
+    /// Bind (or rebind) the hosted editing session to the front document. The
+    /// session runs on its own stage seeded from the document; after each agent
+    /// request its result is mirrored into the live document (which refreshes
+    /// the viewport). Rebinding starts a fresh agent session.
+    func bindDocument(_ document: EditorDocument?) {
+        boundDocument = document
+        guard let document else { hostSession = nil; hostServer = nil; return }
+        let session = EditSession(snapshot: document.snapshot, strictness: .warn)
+        let hostPID = Int(ProcessInfo.processInfo.processIdentifier)
+        let sink = HostActivitySink(pid: hostPID) { [weak self] event in
+            Task { @MainActor in self?.apply(event) }
+        }
+        hostSession = session
+        hostServer = AgentMCPServer.make(
+            session: session,
+            configuration: AgentMCPServer.Configuration(eventSink: sink))
+    }
+
+    /// Run one relayed JSON-RPC request against the hosted server, mirror the
+    /// resulting stage into the live document, and reply on the same socket.
+    private func handleRpc(_ frame: RpcRequestFrame, on conn: NWConnection) {
+        guard let server = hostServer, let session = hostSession else {
+            send(RpcResponseFrame(id: frame.id, line: ""), on: conn)
+            return
+        }
+        Task { @MainActor in
+            let response = await server.handle(data: Data(frame.line.utf8))
+            // Mirror agent edits into the open document → viewport refresh.
+            boundDocument?.applyConsoleEdit(
+                after: session.stage.currentSnapshot, label: "Agent Edit")
+            send(RpcResponseFrame(id: frame.id, line: response?.serializedString ?? ""), on: conn)
+        }
+    }
+
+    private func send(_ frame: RpcResponseFrame, on conn: NWConnection) {
+        guard var data = try? JSONEncoder().encode(frame) else { return }
+        data.append(0x0A)
+        conn.send(content: data, completion: .contentProcessed { _ in })
     }
 
     // MARK: Pure reducer (unit-tested)
@@ -191,5 +298,34 @@ final class MCPActivityListener: ObservableObject {
     func markDisconnected() {
         model.isConnected = false
         model.connectedSince = nil
+    }
+}
+
+/// Adapts the hosted server's `MCPEventSink` callbacks into the app's
+/// `InboundEvent` reducer, so the activity panel reflects the in-app host the
+/// same way it reflected the out-of-process CLI server.
+final class HostActivitySink: MCPEventSink, @unchecked Sendable {
+    let pid: Int
+    let forward: @Sendable (InboundEvent) -> Void
+
+    init(pid: Int, forward: @escaping @Sendable (InboundEvent) -> Void) {
+        self.pid = pid
+        self.forward = forward
+    }
+
+    func sessionStart(servedFile: String, toolCount: Int, groups: [String]) {
+        forward(InboundEvent(type: "session_start", pid: pid,
+                             servedFile: servedFile, toolCount: toolCount, groups: groups))
+    }
+    func toolStart(seq: Int, tool: String, argsSummary: String) {
+        forward(InboundEvent(type: "tool_started", pid: pid,
+                             seq: seq, tool: tool, argsSummary: argsSummary))
+    }
+    func toolFinish(seq: Int, tool: String, durationMs: Int, isError: Bool, summary: String) {
+        forward(InboundEvent(type: "tool_finished", pid: pid,
+                             seq: seq, durationMs: durationMs, isError: isError, summary: summary))
+    }
+    func sessionEnd() {
+        forward(InboundEvent(type: "session_end", pid: pid))
     }
 }

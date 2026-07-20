@@ -114,7 +114,7 @@ public struct EditorShellView: View {
     /// Menu-bar commands post these; the shell mirrors its toolbar actions so
     /// menu shortcuts and toolbar buttons drive the same state.
     public enum MenuCommand: String {
-        case convert, batch, scripts, library, console, validate, mcpActivity, export
+        case convert, batch, scripts, library, console, validate, mcpActivity, export, sculptDemo
         public static let notification = Notification.Name("EditorUI.MenuCommand")
     }
 
@@ -197,6 +197,11 @@ public struct EditorShellView: View {
             case .validate: if stage != nil { showValidation.toggle() }
             case .mcpActivity: if mcpActivity != nil { showMCPActivity.toggle() }
             case .export: if document != nil { activeSheet = .export }
+            case .sculptDemo:
+                if let document {
+                    // Build the demo house live in the viewport, pass by pass.
+                    Task { await SculptBuildRunner.playLive(SculptDemos.lowPolyHouse(), into: document) }
+                }
             }
         }
     }
