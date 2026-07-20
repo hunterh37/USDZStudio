@@ -14,7 +14,9 @@ concurrency:
 
 jobs:
   lint:
-    runs-on: macos-15
+    # Shell-only governance scripts (no Xcode/Swift build) — run on abundant
+    # Linux runners to skip the scarce macOS queue. The test job stays macOS.
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - name: Dependency lint
