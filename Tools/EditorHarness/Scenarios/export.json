@@ -1,0 +1,9 @@
+{ "name": "export",
+  "open": "Tests/Fixtures/test-cube.usda",
+  "steps": [
+    { "do": "shot", "name": "1-export-panel", "tab": "export" },
+    { "do": "save", "path": ".harness-out/export/exported.usda" },
+    { "do": "reopen", "path": ".harness-out/export/exported.usda" },
+    { "do": "select", "path": "/Cube" },
+    { "do": "dump" }
+  ] }

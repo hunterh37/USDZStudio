@@ -38,6 +38,11 @@ public struct EditorShellView: View {
     /// is open (nil if the host can't create one, e.g. previews).
     let onCreateDocument: () -> EditorDocument?
 
+    /// Writes the live scene to `url`. Supplied by the app, which owns the USD
+    /// bridge executor needed to package `.usdc`/`.usdz`. Defaults to a no-op so
+    /// previews/tests can construct the shell without a bridge.
+    let onExport: (URL) async throws -> Void
+
     @State private var searchText = ""
     @State private var collapsed: Set<PrimPath> = []
 
@@ -63,20 +68,36 @@ public struct EditorShellView: View {
     @State private var showMCPActivity = false
     @State private var activeSheet: Sheet?
 
+    /// Output format for the one-click export, shared with the export panel and
+    /// persisted across launches.
+    @AppStorage("editor.export.format") private var exportFormatRaw = ExportFormat.usdz.rawValue
+
+    /// In-flight one-click export (drives the button spinner + disables re-fire).
+    @State private var isExporting = false
+    /// Outcome of the most recent export; drives the confirmation toast.
+    @State private var exportResult: ExportResult?
+
+    /// Result of an export attempt, surfaced as a transient toast.
+    private struct ExportResult: Identifiable, Equatable {
+        let id = UUID()
+        let url: URL
+        let errorMessage: String?
+    }
+
     /// Live MCP agent activity (nil when the feature isn't wired, e.g. previews).
     /// Owned/updated by the app; observed inside the activity panel subviews.
     let mcpActivity: MCPActivityModel?
 
 
     private enum Sheet: String, Identifiable {
-        case convert, batch, scripts, library
+        case convert, batch, scripts, library, export
         var id: String { rawValue }
     }
 
     /// Menu-bar commands post these; the shell mirrors its toolbar actions so
     /// menu shortcuts and toolbar buttons drive the same state.
     public enum MenuCommand: String {
-        case convert, batch, scripts, library, validate, mcpActivity
+        case convert, batch, scripts, library, validate, mcpActivity, export
         public static let notification = Notification.Name("EditorUI.MenuCommand")
     }
 
@@ -87,7 +108,8 @@ public struct EditorShellView: View {
                 mcpActivity: MCPActivityModel? = nil,
                 makeScriptExecutor: @escaping () -> (any ScriptExecuting)? = { nil },
                 onReimportFile: @escaping (URL) async -> Void = { _ in },
-                onCreateDocument: @escaping () -> EditorDocument? = { nil }) {
+                onCreateDocument: @escaping () -> EditorDocument? = { nil },
+                onExport: @escaping (URL) async throws -> Void = { _ in }) {
         self.document = document
         self.isImporting = isImporting
         self.importingFileName = importingFileName
@@ -96,6 +118,7 @@ public struct EditorShellView: View {
         self.makeScriptExecutor = makeScriptExecutor
         self.onReimportFile = onReimportFile
         self.onCreateDocument = onCreateDocument
+        self.onExport = onExport
     }
 
     public var body: some View {
@@ -124,8 +147,13 @@ public struct EditorShellView: View {
             case .library:
                 LibraryPanel(onClose: dismissSheet, document: document,
                              onCreateDocument: onCreateDocument)
+            case .export:
+                ExportPanel(sourceURL: modelURL,
+                            onExport: { runExport(to: $0) },
+                            onClose: dismissSheet)
             }
         }
+        .overlay(alignment: .bottom) { exportToast }
         .onReceive(NotificationCenter.default.publisher(for: MenuCommand.notification)) { note in
             guard let raw = note.object as? String,
                   let command = MenuCommand(rawValue: raw) else { return }
@@ -136,6 +164,7 @@ public struct EditorShellView: View {
             case .library: activeSheet = .library
             case .validate: if stage != nil { showValidation.toggle() }
             case .mcpActivity: if mcpActivity != nil { showMCPActivity.toggle() }
+            case .export: if document != nil { activeSheet = .export }
             }
         }
     }
@@ -164,10 +193,67 @@ public struct EditorShellView: View {
             if let stage {
                 StatusPill(text: "\(stage.primCount) prims", tint: Palette.success)
             }
+            ExportButton(onQuickExport: quickExport,
+                         onOpenPanel: { activeSheet = .export },
+                         isEnabled: document != nil,
+                         isBusy: isExporting)
         }
         .padding(.horizontal, Spacing.sm)
         .padding(.vertical, Spacing.xs)
         .background(Palette.surfaceElevated.color)
+    }
+
+    // MARK: Export
+
+    private var exportFormat: ExportFormat {
+        ExportFormat(rawValue: exportFormatRaw) ?? .usdz
+    }
+
+    /// One-click export: writes the live scene to the smart destination (beside
+    /// the open file, or the Desktop when untitled) with no dialog.
+    private func quickExport() {
+        guard document != nil else { return }
+        let fallback = FileManager.default
+            .urls(for: .desktopDirectory, in: .userDomainMask).first
+            ?? FileManager.default.homeDirectoryForCurrentUser
+        let destination = ExportPlan.smartDestination(
+            sourceURL: modelURL, format: exportFormat, fallbackDirectory: fallback)
+        runExport(to: destination)
+    }
+
+    /// Performs the write through the app-supplied `onExport`, then raises a
+    /// success/failure toast.
+    private func runExport(to destination: URL) {
+        guard !isExporting else { return }
+        isExporting = true
+        Task { @MainActor in
+            defer { isExporting = false }
+            do {
+                try await onExport(destination)
+                exportResult = ExportResult(url: destination, errorMessage: nil)
+            } catch {
+                exportResult = ExportResult(url: destination, errorMessage: "\(error)")
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var exportToast: some View {
+        if let result = exportResult {
+            ExportToast(fileName: result.url.lastPathComponent,
+                        errorMessage: result.errorMessage,
+                        onReveal: { NSWorkspace.shared.activateFileViewerSelecting([result.url]) },
+                        onDismiss: { exportResult = nil })
+                .padding(.bottom, Spacing.lg)
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+                .task(id: result.id) {
+                    // Auto-dismiss the success toast after a few seconds; errors
+                    // stay until dismissed so they aren't missed.
+                    guard result.errorMessage == nil else { return }
+                    try? await Task.sleep(nanoseconds: 4_000_000_000)
+                    if exportResult?.id == result.id { exportResult = nil }
+                }
+        }
     }
 
     private func actionButton(_ title: String, systemImage: String,

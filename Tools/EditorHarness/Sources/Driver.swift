@@ -461,6 +461,19 @@ final class Driver {
                 to: url)
             return url
         }
+        // The advanced export panel (sheet chrome). Renders over the window
+        // backdrop; closures are inert since we're capturing pixels, not driving.
+        if tab == "export" {
+            try Render.png(
+                ZStack {
+                    Color(red: 0.078, green: 0.086, blue: 0.11) // Palette.windowBackground
+                    ExportPanel(sourceURL: document.modelURL,
+                                onExport: { _ in }, onClose: {})
+                },
+                size: CGSize(width: 460, height: 420),
+                to: url)
+            return url
+        }
         let resolvedTab = InspectorView.Tab(rawValue: (tab ?? "prim").capitalized) ?? .prim
         try Render.png(
             InspectorView(document: document, initialTab: resolvedTab),
