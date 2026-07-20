@@ -245,6 +245,27 @@ public final class EditorDocument {
         }
     }
 
+    /// The move gizmo's world-space pivot, or `nil` when hidden — a
+    /// string/array surface for tooling (harness, scripting) that can't
+    /// import ViewportKit's descriptor types directly.
+    public var translateGizmoOrigin: [Double]? {
+        translateGizmo.map { [$0.origin.x, $0.origin.y, $0.origin.z] }
+    }
+
+    /// A complete began→changed→ended gizmo drag along a named world axis
+    /// ("x" | "y" | "z") — the tooling counterpart of an arrow drag. Returns
+    /// `false` (and does nothing) when the gizmo is hidden or the axis name
+    /// is unknown.
+    @discardableResult
+    public func performTranslateGizmoDrag(axis name: String, distance: Double) -> Bool {
+        guard translateGizmo != nil,
+              let axis = ["x": GizmoAxis.x, "y": .y, "z": .z][name.lowercased()] else { return false }
+        handleTranslateGizmoDrag(.began(axis))
+        handleTranslateGizmoDrag(.changed(axis, distance))
+        handleTranslateGizmoDrag(.ended)
+        return true
+    }
+
     /// A world-space translation delta expressed in `path`'s parent space —
     /// what a local-transform translation must change by to move the prim by
     /// `delta` in world space. Row-vector convention (`v' = v·M⁻¹`, direction

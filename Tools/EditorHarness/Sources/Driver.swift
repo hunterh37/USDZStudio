@@ -5,7 +5,6 @@ import EditingKit
 import USDBridge
 import MeshKit
 import EditorUI
-import ViewportKit
 
 /// Runs a `Scenario` against the **real** `EditorDocument` and the **real**
 /// SwiftUI panels — the same types the app builds — and records what happened.
@@ -212,21 +211,17 @@ final class Driver {
         case "gizmo.drag":
             // The full drag lifecycle the viewport reports for an arrow grab:
             // began → changed(distance) → ended, against the live selection.
-            guard document.translateGizmo != nil else {
-                throw HarnessError.stepFailed(
-                    step: index, verb: step.do, detail: "move gizmo not visible (no selection?)")
-            }
-            guard let raw = step.axis,
-                  let axis = ["x": GizmoAxis.x, "y": .y, "z": .z][raw.lowercased()] else {
-                throw HarnessError.stepFailed(
-                    step: index, verb: step.do, detail: "axis must be x|y|z, got '\(step.axis ?? "")'")
+            guard let raw = step.axis else {
+                throw HarnessError.stepFailed(step: index, verb: step.do, detail: "no axis (x|y|z)")
             }
             guard let distance = step.number else {
                 throw HarnessError.stepFailed(step: index, verb: step.do, detail: "no drag distance (number)")
             }
-            document.handleTranslateGizmoDrag(.began(axis))
-            document.handleTranslateGizmoDrag(.changed(axis, distance))
-            document.handleTranslateGizmoDrag(.ended)
+            guard document.performTranslateGizmoDrag(axis: raw, distance: distance) else {
+                throw HarnessError.stepFailed(
+                    step: index, verb: step.do,
+                    detail: "drag refused (gizmo hidden or axis not x|y|z: '\(raw)')")
+            }
             log("gizmo.drag \(raw) by \(distance) → \(document.undoLabel ?? "no command")")
 
         case "expect":
@@ -343,7 +338,7 @@ final class Driver {
             return
         }
         if let wanted = step.gizmoVisible {
-            let actual = document.translateGizmo != nil
+            let actual = document.translateGizmoOrigin != nil
             guard actual == wanted else {
                 throw HarnessError.expectationFailed(
                     step: index, detail: "gizmoVisible expected \(wanted), got \(actual)")
@@ -352,10 +347,9 @@ final class Driver {
             return
         }
         if let wanted = step.gizmoOrigin {
-            guard let gizmo = document.translateGizmo else {
+            guard let actual = document.translateGizmoOrigin else {
                 throw HarnessError.expectationFailed(step: index, detail: "gizmo not visible")
             }
-            let actual = [gizmo.origin.x, gizmo.origin.y, gizmo.origin.z]
             guard wanted.count == 3,
                   zip(actual, wanted).allSatisfy({ abs($0 - $1) <= 1e-6 }) else {
                 throw HarnessError.expectationFailed(

@@ -128,6 +128,28 @@ struct TranslateGizmoDragTests {
         #expect(doc.canUndo == false)
     }
 
+    @Test func namedAxisDragHelperDrivesFullGesture() {
+        let (doc, child) = makeNestedDocument()
+        doc.selection = Selection([child])
+        #expect(doc.translateGizmoOrigin == [0, 0, 0])
+        #expect(doc.performTranslateGizmoDrag(axis: "Y", distance: 2) == true)
+        #expect(doc.transform(at: child).translation == [0, 2, 0])
+        #expect(doc.translateGizmoOrigin == [0, 2, 0])
+        #expect(doc.undoLabel == "Move Panel")
+    }
+
+    @Test func namedAxisDragHelperRefusesBadInput() {
+        let (doc, child) = makeNestedDocument()
+        // Hidden gizmo (no selection): refused.
+        #expect(doc.performTranslateGizmoDrag(axis: "x", distance: 1) == false)
+        #expect(doc.translateGizmoOrigin == nil)
+        // Unknown axis: refused, nothing moves.
+        doc.selection = Selection([child])
+        #expect(doc.performTranslateGizmoDrag(axis: "w", distance: 1) == false)
+        #expect(doc.transform(at: child).translation == [0, 0, 0])
+        #expect(doc.canUndo == false)
+    }
+
     @Test func snappingAppliesDuringDrag() {
         let (doc, child) = makeNestedDocument()
         doc.snap = SnapSettings(translation: 0.5)
