@@ -102,6 +102,9 @@ struct OpenUSDZEditorApp: App {
                     .disabled(document == nil)
             }
             CommandMenu("Convert") {
+                Button("Library…") { postMenu(.library) }
+                    .keyboardShortcut("l", modifiers: [.command, .shift])
+                Divider()
                 Button("Convert File…") { postMenu(.convert) }
                     .keyboardShortcut("k")
                 Button("Batch Convert…") { postMenu(.batch) }

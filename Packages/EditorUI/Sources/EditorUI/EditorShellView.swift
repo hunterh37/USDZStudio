@@ -59,14 +59,14 @@ public struct EditorShellView: View {
 
 
     private enum Sheet: String, Identifiable {
-        case convert, batch, scripts
+        case convert, batch, scripts, library
         var id: String { rawValue }
     }
 
     /// Menu-bar commands post these; the shell mirrors its toolbar actions so
     /// menu shortcuts and toolbar buttons drive the same state.
     public enum MenuCommand: String {
-        case convert, batch, scripts, validate
+        case convert, batch, scripts, library, validate
         public static let notification = Notification.Name("EditorUI.MenuCommand")
     }
 
@@ -107,6 +107,8 @@ public struct EditorShellView: View {
                              inputURL: modelURL,
                              makeExecutor: makeScriptExecutor,
                              onReimport: onReimportFile)
+            case .library:
+                LibraryPanel(onClose: dismissSheet, document: document)
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: MenuCommand.notification)) { note in
@@ -116,6 +118,7 @@ public struct EditorShellView: View {
             case .convert: activeSheet = .convert
             case .batch: activeSheet = .batch
             case .scripts: activeSheet = .scripts
+            case .library: activeSheet = .library
             case .validate: if stage != nil { showValidation.toggle() }
             }
         }
@@ -127,6 +130,7 @@ public struct EditorShellView: View {
 
     private var actionBar: some View {
         HStack(spacing: Spacing.xs) {
+            actionButton("Library", systemImage: "square.grid.2x2") { activeSheet = .library }
             actionButton("Convert", systemImage: "arrow.triangle.2.circlepath") { activeSheet = .convert }
             actionButton("Batch", systemImage: "square.stack.3d.up") { activeSheet = .batch }
             actionButton("Scripts", systemImage: "curlybraces") { activeSheet = .scripts }
