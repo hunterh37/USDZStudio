@@ -81,15 +81,42 @@ struct QuickFixTests {
         #expect(QuickFixRegistry.quickFix(for: d, in: s) == nil)
     }
 
+    // MARK: upAxis
+
+    @Test func upAxisFixReorientsAndClearsDiagnostic() throws {
+        let root = Prim(path: PrimPath("/Model")!, typeName: "Xform")
+        let s = InMemoryStage(StageSnapshot(
+            metadata: StageMetadata(upAxis: .z, defaultPrim: "Model"),
+            rootPrims: [root]))
+        let d = diagnostic(ruleID: "stage.upAxis", in: s)
+
+        let fix = try #require(QuickFixRegistry.quickFix(for: d, in: s))
+        #expect(fix.title == "Re-orient to Y-up")
+        try fix.command.execute(on: s)
+
+        #expect(s.metadata.upAxis == .y)
+        // The untransformed root gains the −90° X reorientation.
+        #expect(abs(s.transform(at: PrimPath("/Model")!).rotationEulerDegrees[0] - (-90)) < 1e-6)
+        #expect(remainingCount(ruleID: "stage.upAxis", in: s) == 0)
+    }
+
+    @Test func noUpAxisFixWhenAlreadyYUp() {
+        let s = InMemoryStage(StageSnapshot(
+            metadata: StageMetadata(upAxis: .y),
+            rootPrims: [Prim(path: PrimPath("/Model")!, typeName: "Xform")]))
+        let d = Diagnostic(ruleID: "stage.upAxis", severity: .warning, message: "x")
+        #expect(QuickFixRegistry.quickFix(for: d, in: s) == nil)
+    }
+
     // MARK: rules without fixes
 
     @Test func noFixForUnfixableRules() {
         let s = InMemoryStage(StageSnapshot())
         // Topology/normals/materials need human judgement; duplicate-name is
         // handled by manual rename (its fix cannot round-trip the uniqueness
-        // guard); upAxis re-orientation is an export-time concern.
+        // guard).
         for ruleID in ["mesh.topology", "mesh.empty", "mesh.unbound", "mesh.normals",
-                       "stage.upAxis", "prim.duplicateName"] {
+                       "prim.duplicateName"] {
             let d = Diagnostic(ruleID: ruleID, severity: .warning, message: "x")
             #expect(QuickFixRegistry.quickFix(for: d, in: s) == nil, "\(ruleID) should have no quick-fix")
         }

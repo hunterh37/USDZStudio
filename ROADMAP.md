@@ -17,8 +17,8 @@ Translate shipped; close the set so direct-manipulation editing is whole. Rotate
 - Shared gizmo infrastructure: a mode switch (W/E/R idiom), pivot/orientation options (median vs. individual, world vs. local), and a single hit-test/drag-routing seam reused across all three.
 - **Exit / harness:** parity tests against `TransformDragSession`; property-based compose/decompose round-trips; snapshot tests of gizmo layout per camera; ViewportKit ratchet floor raised.
 
-### Milestone 2 — Land the "best free viewer" surface (finishes Phase 1, unblocks public launch)
-The Phase 1 exit ("best free USDZ viewer on macOS, ship publicly") is gated on four still-open viewer features. Close them together so the public release is credible.
+### Milestone 2 — Land the "best free viewer" surface (finishes Phase 1, unblocks public launch) — ✅ **Done**
+The Phase 1 exit ("best free USDZ viewer on macOS, ship publicly") was gated on four viewer features plus release packaging; all now shipped (environment/lighting, debug view modes, playback transport, QuickLook extension, and the build-from-source docs + unsigned GitHub Releases pipeline — see the Phase 1 entries).
 - Environment & lighting: IBL presets + custom HDR/EXR, exposure control, background modes.
 - Debug view modes: wireframe, normals, UV checker, matcap.
 - Animation playback transport: play/pause/scrub/loop over authored time-samples, driving the RealityKit viewport (the data model already carries `playbackRate`).
@@ -121,7 +121,7 @@ With the golden-image, round-trip, corpus, and XCUITest harnesses now built by e
 - [x] Animation playback transport (play/pause/scrub/loop/speed over authored time-samples; `PlaybackTransport` + transport bar)
 - [x] Debug view modes: wireframe, normals, UV checker, matcap
 - [x] QuickLook thumbnail + preview extension for `.usda` — `QuickLookKit` package (pure render-plan logic, 100% floor) drives two embedded `.appex` targets (`App/QuickLookThumbnail` `QLThumbnailProvider`, `App/QuickLookPreview` `QLPreviewingController`) registered for the Pixar USD UTIs; reuses the CLI `usdrecord` single-frame pipeline (specs/quicklook.md)
-- [ ] Build-from-source docs + unsigned release builds on GitHub Releases
+- [x] Build-from-source docs + unsigned release builds on GitHub Releases — `docs/BUILD.md` (clone → runtime → test → run, plus unsigned-build Gatekeeper steps), `scripts/build-release.sh` (unsigned `Release` `.app` packaged with `ditto` + SHA-256), and a tag-triggered `.github/workflows/release.yml` that builds and attaches the zip to the GitHub Release; README "Install a build" section links both
 
 **Exit:** the best free USDZ viewer on macOS. Ship publicly, start collecting issues.
 
@@ -161,9 +161,9 @@ With the golden-image, round-trip, corpus, and XCUITest harnesses now built by e
 
 ## Phase 4 — Validation & Scripting (v0.4)
 
-- [ ] ValidationRule engine + v1 rule catalog, live diagnostics drawer (engine ✓; catalog: scale/upAxis/defaultPrim/duplicate-name/mesh-topology/empty/unbound/normals ✓; drawer ✓; quick-fixes: `QuickFixRegistry` maps diagnostics → undoable `EditCommand`s for metersPerUnit (reuses ScaleFixer) and defaultPrim, wired to a per-row "Fix" button in the drawer via `EditorDocument.applyQuickFix`; duplicate-name/topology/normals/unbound intentionally have no auto-fix — see QuickFix.swift)
+- [ ] ValidationRule engine + v1 rule catalog, live diagnostics drawer (engine ✓; catalog: scale/upAxis/defaultPrim/duplicate-name/mesh-topology/empty/unbound/normals ✓; drawer ✓; quick-fixes: `QuickFixRegistry` maps diagnostics → undoable `EditCommand`s for metersPerUnit (reuses ScaleFixer) and defaultPrim, and defaultPrim, plus upAxis (Z→Y **re-orientation** via `UpAxisFixer` — flips `upAxis` metadata and bakes a compensating −90° X rotation into each root so the model stays upright, one undoable `CompositeCommand`), wired to a per-row "Fix" button in the drawer via `EditorDocument.applyQuickFix`; duplicate-name/topology/normals/unbound intentionally have no auto-fix — see QuickFix.swift)
 - [x] ComplianceChecker (ARKit profile) integration, export gating — `ValidationProfile` (named catalog + `blockingSeverity`): `.arkit` (blocks on error), `.arkitStrict` (blocks on warning); `ComplianceChecker` runs a profile → `ComplianceResult` with `isExportAllowed`/`blockingDiagnostics`/`summary` for the export path. CLI `validate` now takes `--profile NAME` (arkit|arkit-strict) with `--strict` as shorthand and conflict-guarded, gating exit code on the profile's decision. Drawer still reads the engine directly; app export flow lands with Phase 3 Save/Save As
-- [ ] Python console (REPL, injected `stage`/`selection`/`app`, single-undo script runs)
+- [ ] Python console (REPL, injected `stage`/`selection`/`app`, single-undo script runs) — ScriptingKit REPL **core** shipped (`ReplSession` actor: multi-line input buffering via `ReplInputClassifier` bracket/colon/backslash continuation detection, `ReplHistory` recall ring, `ReplProgram` injected-namespace program builder binding `stage`/`selection`/`app`, transcript of `ReplEntry`s; one completed submission = one interpreter run = one undoable unit, run through the same `ScriptExecuting` seam as `ScriptRunner`, 100%-covered against an in-memory fake). Remaining: the EditorUI console panel + `EditorDocument` wiring that records each submission on the `CommandStack`
 - [x] Script library panel + bundled starter scripts (panel + source preview ✓; REPL execution TODO)
 - [ ] CLI: `validate` ✓ (ARKit-profile catalog, most-severe-first diagnostics, `--strict` gates on warnings, exit 1 on failure); `run` ✓ (bundled-name or path resolution, `_harness` on PYTHONPATH, script flags + exit code pass through)
 - [ ] FBX support via checksum-verified FBX2glTF download flow

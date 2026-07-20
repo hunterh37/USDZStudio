@@ -48,6 +48,8 @@ public enum QuickFixRegistry {
             return scaleFix(diagnostic, stage)
         case DefaultPrimRule().id:
             return defaultPrimFix(diagnostic, stage)
+        case UpAxisRule().id:
+            return upAxisFix(diagnostic, stage)
         default:
             return nil
         }
@@ -88,5 +90,15 @@ public enum QuickFixRegistry {
             ruleID: diagnostic.ruleID,
             title: "Set defaultPrim to '\(first.name)'",
             command: SetStageMetadataCommand(newMetadata: updated, oldMetadata: old))
+    }
+
+    /// Re-orient a Z-up stage to Y-up, baking a compensating rotation into the
+    /// roots so the model keeps its rendered orientation.
+    private static func upAxisFix(_ diagnostic: Diagnostic, _ stage: any USDStageProtocol) -> QuickFix? {
+        guard let command = UpAxisFixer.command(for: stage) else { return nil }
+        return QuickFix(
+            ruleID: diagnostic.ruleID,
+            title: "Re-orient to Y-up",
+            command: command)
     }
 }
