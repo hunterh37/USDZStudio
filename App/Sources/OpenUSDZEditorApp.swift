@@ -124,6 +124,8 @@ struct OpenUSDZEditorApp: App {
                     .keyboardShortcut("u")
                     .disabled(document == nil)
                 Button("Scripts…") { postMenu(.scripts) }
+                Button("Library…") { postMenu(.library) }
+                    .keyboardShortcut("l", modifiers: [.command, .shift])
             }
             CommandGroup(before: .help) {
                 Button("Welcome Tour") { startTutorial() }

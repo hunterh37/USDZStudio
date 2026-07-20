@@ -64,14 +64,14 @@ public struct EditorShellView: View {
 
 
     private enum Sheet: String, Identifiable {
-        case convert, batch, scripts
+        case convert, batch, scripts, library
         var id: String { rawValue }
     }
 
     /// Menu-bar commands post these; the shell mirrors its toolbar actions so
     /// menu shortcuts and toolbar buttons drive the same state.
     public enum MenuCommand: String {
-        case convert, batch, scripts, validate, mcpActivity
+        case convert, batch, scripts, library, validate, mcpActivity
         public static let notification = Notification.Name("EditorUI.MenuCommand")
     }
 
@@ -114,6 +114,8 @@ public struct EditorShellView: View {
                              inputURL: modelURL,
                              makeExecutor: makeScriptExecutor,
                              onReimport: onReimportFile)
+            case .library:
+                LibraryPanel(onClose: dismissSheet, document: document)
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: MenuCommand.notification)) { note in
@@ -123,6 +125,7 @@ public struct EditorShellView: View {
             case .convert: activeSheet = .convert
             case .batch: activeSheet = .batch
             case .scripts: activeSheet = .scripts
+            case .library: activeSheet = .library
             case .validate: if stage != nil { showValidation.toggle() }
             case .mcpActivity: if mcpActivity != nil { showMCPActivity.toggle() }
             }
@@ -144,6 +147,8 @@ public struct EditorShellView: View {
                          isActive: showValidation) {
                 showValidation.toggle()
             }
+            Divider().frame(height: 16).overlay(Palette.borderSubtle.color)
+            actionButton("Library", systemImage: "square.grid.2x2") { activeSheet = .library }
             Spacer()
             if let mcpActivity {
                 MCPStatusAccessory(model: mcpActivity, showActivity: $showMCPActivity)
