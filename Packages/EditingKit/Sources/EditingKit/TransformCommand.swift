@@ -135,6 +135,16 @@ public final class TransformDragSession {
         return try update(trs)
     }
 
+    /// Per-axis scale multipliers `[sx, sy, sz]` relative to the drag-start
+    /// transform — the scale gizmo's per-axis box handles, where a `1` leaves
+    /// that axis untouched.
+    @discardableResult
+    public func scale(byPerAxis factors: [Double]) throws -> TRS {
+        var trs = startTRS
+        trs.scale = zip(startTRS.scale, factors).map(*)
+        return try update(trs)
+    }
+
     /// Restores the stage to its pre-drag state (for an escaped/cancelled drag).
     public func cancel() throws {
         let restore = startAttribute

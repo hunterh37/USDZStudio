@@ -40,6 +40,18 @@ public final class EditorDocument {
     /// Snapping shared by the numeric inspector fields and the viewport gizmo.
     public var snap: SnapSettings = .off
 
+    /// The active transform gizmo (W/E/R). Only the matching gizmo descriptor
+    /// is published, so the viewport shows one manipulator at a time.
+    public var gizmoMode: GizmoMode = .translate
+
+    /// Whether the rotate/scale gizmos are drawn (and manipulated) in world or
+    /// the selection's local basis. Translate is always world-axis.
+    public var gizmoOrientation: GizmoOrientation = .world
+
+    /// Where a multi-selection rotate/scale pivots: the shared median centroid
+    /// (default) or each prim's own origin.
+    public var gizmoPivotMode: GizmoPivot = .median
+
     /// Live mesh edit-mode state; `nil` in object mode (Phase 6,
     /// specs/mesh-editing.md). Managed by `EditorDocument+MeshEdit.swift`.
     public var meshEdit: MeshEditState?
@@ -293,7 +305,7 @@ public final class EditorDocument {
     /// pivot in object mode; hidden in mesh edit mode or with nothing selected.
     /// The revision bump keeps it following the object during its own drag.
     public var translateGizmo: TranslateGizmoDescriptor? {
-        guard meshEdit == nil, let path = selection.primary,
+        guard gizmoMode == .translate, meshEdit == nil, let path = selection.primary,
               snapshot.prim(at: path) != nil else { return nil }
         let m = snapshot.worldMatrix(at: path)
         return TranslateGizmoDescriptor(origin: SIMD3(m[12], m[13], m[14]),
@@ -367,6 +379,238 @@ public final class EditorDocument {
             delta.x * inv[0] + delta.y * inv[4] + delta.z * inv[8],
             delta.x * inv[1] + delta.y * inv[5] + delta.z * inv[9],
             delta.x * inv[2] + delta.y * inv[6] + delta.z * inv[10])
+    }
+
+    // MARK: Rotate / scale gizmos (shared infrastructure)
+
+    /// The selection's world-space gizmo pivot (median centroid of the selected
+    /// prims' world origins, or the primary prim's origin for `individual`),
+    /// or `nil` when nothing eligible is selected.
+    private var gizmoPivot: SIMD3<Double>? {
+        let paths = selection.paths.filter { snapshot.prim(at: $0) != nil }
+        guard !paths.isEmpty else { return nil }
+        func origin(_ p: PrimPath) -> SIMD3<Double> {
+            let m = snapshot.worldMatrix(at: p); return SIMD3(m[12], m[13], m[14])
+        }
+        switch gizmoPivotMode {
+        case .individual:
+            guard let primary = selection.primary else { return origin(paths[0]) }
+            return origin(primary)
+        case .median:
+            let sum = paths.reduce(SIMD3<Double>.zero) { $0 + origin($1) }
+            return sum / Double(paths.count)
+        }
+    }
+
+    /// The gizmo's basis for the current orientation: `world`, or the primary
+    /// selection's world rotation basis for `local` (the normalized rows of its
+    /// world matrix, row-vector convention).
+    private var gizmoBasis: GizmoBasis {
+        guard gizmoOrientation == .local, let path = selection.primary,
+              snapshot.prim(at: path) != nil else { return .world }
+        let m = snapshot.worldMatrix(at: path)
+        func row(_ r: Int) -> SIMD3<Double> {
+            Self.normalize(SIMD3(m[r * 4], m[r * 4 + 1], m[r * 4 + 2]))
+        }
+        return GizmoBasis(x: row(0), y: row(1), z: row(2))
+    }
+
+    /// The rotate gizmo, shown at the selection pivot in rotate mode.
+    public var rotateGizmo: RotateGizmoDescriptor? {
+        guard gizmoMode == .rotate, meshEdit == nil, let pivot = gizmoPivot else { return nil }
+        return RotateGizmoDescriptor(origin: pivot, basis: gizmoBasis, revision: revision)
+    }
+
+    /// The scale gizmo, shown at the selection pivot in scale mode.
+    public var scaleGizmo: ScaleGizmoDescriptor? {
+        guard gizmoMode == .scale, meshEdit == nil, let pivot = gizmoPivot else { return nil }
+        return ScaleGizmoDescriptor(origin: pivot, basis: gizmoBasis, revision: revision)
+    }
+
+    /// A rotate/scale drag in flight: the per-prim session plus the world and
+    /// parent-world matrices captured at grab time (the op composes from the
+    /// pre-drag pose, so repeated live frames don't accumulate).
+    private struct GizmoTransformDrag {
+        let session: TransformDragSession
+        let startWorld: [Double]
+        let startParentWorld: [Double]
+    }
+    @ObservationIgnored private var gizmoTransformDrags: [GizmoTransformDrag] = []
+    @ObservationIgnored private var gizmoDragPivot: SIMD3<Double> = .zero
+    @ObservationIgnored private var gizmoDragBasis: GizmoBasis = .world
+
+    private func beginGizmoTransformDrag() {
+        gizmoDragPivot = gizmoPivot ?? .zero
+        gizmoDragBasis = gizmoBasis
+        gizmoTransformDrags = selection.paths
+            .filter { snapshot.prim(at: $0) != nil }
+            .map { path in
+                let parent = path.parent
+                return GizmoTransformDrag(
+                    session: makeDragSession(for: path),
+                    startWorld: snapshot.worldMatrix(at: path),
+                    startParentWorld: parent.isRoot ? Matrix4.identity
+                        : snapshot.worldMatrix(at: parent))
+            }
+    }
+
+    private func endGizmoTransformDrag(verb: String) {
+        let commands = gizmoTransformDrags.compactMap { $0.session.makeCommand(verb: verb) }
+        gizmoTransformDrags = []
+        switch commands.count {
+        case 0: break
+        case 1: run(commands[0])
+        default: run(CompositeCommand(label: "\(verb) \(commands.count) prims", commands: commands))
+        }
+    }
+
+    /// Composes a world-space op about the drag pivot into each dragged prim's
+    /// pre-drag world pose, converts back to parent-local, and previews it.
+    /// `world' = startWorld · T(-pivot) · op · T(pivot)`; `local' = world' ·
+    /// startParentWorld⁻¹` (row-vector convention).
+    private func applyWorldOp(_ op: [Double]) {
+        let mid = Matrix4.multiply(
+            Matrix4.multiply(Self.translationMatrix(-gizmoDragPivot), op),
+            Self.translationMatrix(gizmoDragPivot))
+        for drag in gizmoTransformDrags {
+            let worldPrime = Matrix4.multiply(drag.startWorld, mid)
+            let local = Matrix4.inverse(drag.startParentWorld)
+                .map { Matrix4.multiply(worldPrime, $0) } ?? worldPrime
+            try? drag.session.update(TRS.from(matrix: local))
+        }
+        refresh()
+    }
+
+    /// Routes rotate-gizmo drag phases: live world-space rotation about the
+    /// pivot during the drag, then one coalesced undoable "Rotate" on release.
+    public func handleRotateGizmoDrag(_ phase: RotateGizmoDragPhase) {
+        switch phase {
+        case .began:
+            beginGizmoTransformDrag()
+        case let .changed(axis, degrees):
+            let snapped = Self.snapValue(degrees, to: snap.rotationDegrees)
+            let dir = gizmoDragBasis.direction(axis)
+            applyWorldOp(Self.axisRotationMatrix(axis: dir, degrees: snapped))
+        case .ended:
+            endGizmoTransformDrag(verb: "Rotate")
+        }
+    }
+
+    /// Routes scale-gizmo drag phases: a uniform handle scales about the pivot
+    /// in world space; a per-axis handle scales that axis in each prim's own
+    /// local frame (shear-free). Coalesces into one undoable "Scale".
+    public func handleScaleGizmoDrag(_ phase: ScaleGizmoDragPhase) {
+        switch phase {
+        case .began:
+            beginGizmoTransformDrag()
+        case let .changed(handle, factor):
+            switch handle {
+            case .uniform:
+                let f = Self.snapFactor(factor, step: snap.scale)
+                applyWorldOp(Self.diagonalScaleMatrix([f, f, f]))
+            case let .axis(axis):
+                for drag in gizmoTransformDrags {
+                    var factors = [1.0, 1.0, 1.0]
+                    factors[axis.rawValue] = factor
+                    try? drag.session.scale(byPerAxis: factors)
+                }
+                refresh()
+            }
+        case .ended:
+            endGizmoTransformDrag(verb: "Scale")
+        }
+    }
+
+    /// The rotate gizmo's world pivot, or `nil` when hidden — string/array
+    /// surface for tooling that can't import ViewportKit's descriptor types.
+    public var rotateGizmoOrigin: [Double]? {
+        rotateGizmo.map { [$0.origin.x, $0.origin.y, $0.origin.z] }
+    }
+
+    /// The scale gizmo's world pivot, or `nil` when hidden.
+    public var scaleGizmoOrigin: [Double]? {
+        scaleGizmo.map { [$0.origin.x, $0.origin.y, $0.origin.z] }
+    }
+
+    /// A complete began→changed→ended rotate-gizmo drag about a named axis
+    /// ("x" | "y" | "z") by `degrees` — the tooling counterpart of a ring drag.
+    /// Returns `false` (no-op) when the gizmo is hidden or the axis is unknown.
+    @discardableResult
+    public func performRotateGizmoDrag(axis name: String, degrees: Double) -> Bool {
+        guard rotateGizmo != nil, let axis = Self.namedAxis(name) else { return false }
+        handleRotateGizmoDrag(.began(axis))
+        handleRotateGizmoDrag(.changed(axis, degrees))
+        handleRotateGizmoDrag(.ended)
+        return true
+    }
+
+    /// A complete began→changed→ended scale-gizmo drag on a named handle
+    /// ("uniform" | "x" | "y" | "z") by `factor`. Returns `false` (no-op) when
+    /// the gizmo is hidden or the handle name is unknown.
+    @discardableResult
+    public func performScaleGizmoDrag(handle name: String, factor: Double) -> Bool {
+        guard scaleGizmo != nil else { return false }
+        let handle: ScaleHandle
+        if name.lowercased() == "uniform" {
+            handle = .uniform
+        } else if let axis = Self.namedAxis(name) {
+            handle = .axis(axis)
+        } else {
+            return false
+        }
+        handleScaleGizmoDrag(.began(handle))
+        handleScaleGizmoDrag(.changed(handle, factor))
+        handleScaleGizmoDrag(.ended)
+        return true
+    }
+
+    // MARK: Gizmo math helpers (pure)
+
+    private static func namedAxis(_ name: String) -> GizmoAxis? {
+        ["x": GizmoAxis.x, "y": .y, "z": .z][name.lowercased()]
+    }
+
+    private static func normalize(_ v: SIMD3<Double>) -> SIMD3<Double> {
+        let l = (v.x * v.x + v.y * v.y + v.z * v.z).squareRoot()
+        return l > 1e-12 ? v / l : v
+    }
+
+    static func snapValue(_ value: Double, to step: Double?) -> Double {
+        guard let step, step > 0 else { return value }
+        return (value / step).rounded() * step
+    }
+
+    /// Snaps a multiplicative scale factor by snapping the *resulting* unit
+    /// (`1 + delta`) to the step, so a 0.25 step lands on ×0.75, ×1.0, ×1.25…
+    static func snapFactor(_ factor: Double, step: Double?) -> Double {
+        guard let step, step > 0 else { return factor }
+        return snapValue(factor, to: step)
+    }
+
+    /// A row-major translation matrix (row-vector convention).
+    static func translationMatrix(_ t: SIMD3<Double>) -> [Double] {
+        var m = Matrix4.identity; m[12] = t.x; m[13] = t.y; m[14] = t.z; return m
+    }
+
+    /// A row-major diagonal scale matrix.
+    static func diagonalScaleMatrix(_ s: [Double]) -> [Double] {
+        [s[0], 0, 0, 0, 0, s[1], 0, 0, 0, 0, s[2], 0, 0, 0, 0, 1]
+    }
+
+    /// Row-vector rotation matrix about an arbitrary world axis by `degrees`
+    /// (right-hand rule) — the transpose of the column-vector Rodrigues form,
+    /// matching `Matrix4.rotationX/Y/Z`.
+    static func axisRotationMatrix(axis k: SIMD3<Double>, degrees: Double) -> [Double] {
+        let n = normalize(k)
+        let r = degrees * .pi / 180
+        let c = cos(r), s = sin(r), t = 1 - c
+        let x = n.x, y = n.y, z = n.z
+        return [
+            t * x * x + c,     t * x * y + s * z, t * x * z - s * y, 0,
+            t * x * y - s * z, t * y * y + c,     t * y * z + s * x, 0,
+            t * x * z + s * y, t * y * z - s * x, t * z * z + c,     0,
+            0, 0, 0, 1,
+        ]
     }
 
     /// Per-prim local transforms for the viewport (column-major, RealityKit
