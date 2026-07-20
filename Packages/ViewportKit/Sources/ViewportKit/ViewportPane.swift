@@ -305,6 +305,7 @@ final class ViewportCoordinator {
 
     // MARK: Gizmo drag dispatch
 
+    // coverage:disable — mouse-capture routing between RealityKit gizmos; exercised by the editor-harness translate-gizmo scenario, unreachable from unit tests (no NSView/ARView)
     private enum ActiveGizmoDrag { case extrude, translate }
     private var activeGizmoDrag: ActiveGizmoDrag?
 
@@ -336,6 +337,7 @@ final class ViewportCoordinator {
         }
         activeGizmoDrag = nil
     }
+    // coverage:enable
 
     func load(url: URL?) {
         guard url != loadedURL else { return }
@@ -791,6 +793,7 @@ final class ViewportCoordinator {
 
     // MARK: Translate gizmo (object-mode XYZ move arrows)
 
+    // coverage:disable — RealityKit arrow rendering + drag glue; the math is unit-tested (TranslateGizmoMathTests) and the document flow by the editor-harness translate-gizmo scenario
     /// World-space container for the three arrows; positioned at the
     /// selection's world pivot and scaled to screen-constant size.
     private let translateAnchor = AnchorEntity(world: .zero)
@@ -928,6 +931,7 @@ final class ViewportCoordinator {
         setTranslateHighlight(nil)
         onTranslateGizmoDrag?(.ended)
     }
+    // coverage:enable
 
     private func frameModel() {
         // A scripted pose owns the camera; auto-framing would fight it.
