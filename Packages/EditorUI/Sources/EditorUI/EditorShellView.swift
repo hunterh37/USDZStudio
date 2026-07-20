@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import UniformTypeIdentifiers
 import USDCore
 import ViewportKit
 import ScriptingKit
@@ -56,6 +57,10 @@ public struct EditorShellView: View {
 
     @State private var showValidation = false
     @State private var showMCPActivity = false
+    /// Viewport image-based-lighting + background state (specs/viewport.md
+    /// "Environment & Lighting"); edited via the popover control strip.
+    @State private var environment = EnvironmentSettings()
+    @State private var showEnvironment = false
     @State private var activeSheet: Sheet?
 
     /// Live MCP agent activity (nil when the feature isn't wired, e.g. previews).
@@ -391,6 +396,33 @@ public struct EditorShellView: View {
         return OutlinerModel.filtered(rows, searchText: searchText)
     }
 
+    /// Top-trailing button that opens the environment/lighting popover.
+    private var environmentButton: some View {
+        Button {
+            showEnvironment.toggle()
+        } label: {
+            Image(systemName: "sun.max")
+        }
+        .buttonStyle(.borderless)
+        .help("Environment & lighting")
+        .padding(8)
+        .popover(isPresented: $showEnvironment, arrowEdge: .top) {
+            EnvironmentControls(settings: $environment,
+                                onChooseCustomEnvironment: Self.chooseEnvironmentFile)
+                .frame(width: 280)
+        }
+    }
+
+    /// Presents an open panel for a custom `.hdr`/`.exr` environment map.
+    static func chooseEnvironmentFile() -> URL? {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = EnvironmentModel.supportedFileExtensions
+            .compactMap { UTType(filenameExtension: $0) }
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        return panel.runModal() == .OK ? panel.url : nil
+    }
+
     @ViewBuilder
     private var viewport: some View {
         // Always render the live viewport — with no document open it shows the
@@ -412,7 +444,9 @@ public struct EditorShellView: View {
                 },
                 cameraPose: tutorial?.cameraPose,
                 liveTransforms: tutorial?.liveTransforms,
-                materialOverrides: document?.viewportMaterialOverrides)
+                materialOverrides: document?.viewportMaterialOverrides,
+                environment: environment)
+                .overlay(alignment: .topTrailing) { environmentButton }
                 .overlay {
                     // Mesh edit mode: tool strip + active-tool indicator over
                     // the viewport (Phase 6; specs/mesh-editing.md).
