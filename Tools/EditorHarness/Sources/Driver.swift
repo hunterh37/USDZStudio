@@ -224,6 +224,38 @@ final class Driver {
             }
             log("gizmo.drag \(raw) by \(distance) → \(document.undoLabel ?? "no command")")
 
+        case "drill":
+            let leaf = try primPath(step.path, step: index, verb: step.do)
+            document.drillInto(leaf)
+            log("drill \(leaf) → \(document.selection.primary?.description ?? "none")")
+
+        case "walkUp":
+            document.walkUpSelection()
+            log("walkUp → \(document.selection.primary?.description ?? "none")")
+
+        case "part":
+            let path: PrimPath
+            if let raw = step.path { path = try primPath(raw, step: index, verb: step.do) }
+            else if let primary = document.selection.primary { path = primary }
+            else { throw HarnessError.stepFailed(step: index, verb: step.do, detail: "no path and no selection") }
+            guard let raw = step.kind, let kind = PartEditKind(rawValue: raw) else {
+                throw HarnessError.stepFailed(step: index, verb: step.do, detail: "kind must be hide|disable|delete")
+            }
+            document.performPartEdit(kind, on: path)
+            log("part \(kind.rawValue) \(path) → \(document.undoLabel ?? "no command")")
+
+        case "isolate":
+            if let raw = step.path {
+                let path = try primPath(raw, step: index, verb: step.do)
+                document.selection = Selection([path])
+            }
+            document.isolateSelection()
+            log("isolate \(document.isolation.roots.map(\.description).sorted().joined(separator: ",")) ")
+
+        case "exit-isolate":
+            document.exitIsolation()
+            log("exit-isolate")
+
         case "expect":
             try expect(step, index: index, document: document)
 
@@ -356,6 +388,41 @@ final class Driver {
                     step: index, detail: "gizmoOrigin expected \(wanted), got \(actual)")
             }
             log("expect gizmoOrigin == \(wanted) ✓")
+            return
+        }
+        if let wanted = step.selection {
+            let actual = document.selection.primary?.description ?? ""
+            guard actual == wanted else {
+                throw HarnessError.expectationFailed(
+                    step: index, detail: "selection expected '\(wanted)', got '\(actual)'")
+            }
+            log("expect selection == '\(wanted)' ✓")
+            return
+        }
+        if let wanted = step.visible {
+            let raw = try primPath(step.path, step: index, verb: "expect")
+            let actual = document.viewportLivePrimPaths.contains(raw.description)
+            guard actual == wanted else {
+                throw HarnessError.expectationFailed(
+                    step: index, detail: "visible(\(raw)) expected \(wanted), got \(actual)")
+            }
+            log("expect visible(\(raw)) == \(wanted) ✓")
+            return
+        }
+        if let wanted = step.isolated {
+            guard document.isolation.isActive == wanted else {
+                throw HarnessError.expectationFailed(
+                    step: index, detail: "isolated expected \(wanted), got \(document.isolation.isActive)")
+            }
+            log("expect isolated == \(wanted) ✓")
+            return
+        }
+        if let wanted = step.dirty {
+            guard document.hasUnsavedChanges == wanted else {
+                throw HarnessError.expectationFailed(
+                    step: index, detail: "dirty expected \(wanted), got \(document.hasUnsavedChanges)")
+            }
+            log("expect dirty == \(wanted) ✓")
             return
         }
         throw HarnessError.stepFailed(step: index, verb: "expect", detail: "no expectation named")
