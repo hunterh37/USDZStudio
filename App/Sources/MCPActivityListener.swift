@@ -115,13 +115,19 @@ final class MCPActivityListener: ObservableObject {
     nonisolated private func receive(on conn: NWConnection) {
         conn.receive(minimumIncompleteLength: 1, maximumLength: 64 * 1024) {
             [weak self] data, _, isComplete, error in
-            if let data, !data.isEmpty {
-                Task { @MainActor in self?.ingest(data, from: conn) }
-            }
-            if isComplete || error != nil {
-                Task { @MainActor in self?.connectionClosed(conn) }
-            } else {
-                self?.receive(on: conn)
+            // Hop to the main actor exactly once: consolidating the ingest,
+            // close, and re-arm into a single @MainActor task keeps `self`'s
+            // isolated state from being touched across concurrent hops (Swift 6
+            // strict-concurrency: "sending 'self' risks data races").
+            let closed = isComplete || error != nil
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                if let data, !data.isEmpty { self.ingest(data, from: conn) }
+                if closed {
+                    self.connectionClosed(conn)
+                } else {
+                    self.receive(on: conn)
+                }
             }
         }
     }
