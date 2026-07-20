@@ -1,0 +1,44 @@
+{ "name": "part-editing",
+  "open": "Tests/Fixtures/part-hierarchy.usda",
+  "steps": [
+    { "do": "expect", "selection": "" },
+
+    { "do": "drill", "path": "/Scene/Car/Wheels/Left" },
+    { "do": "expect", "selection": "/Scene" },
+    { "do": "drill", "path": "/Scene/Car/Wheels/Left" },
+    { "do": "expect", "selection": "/Scene/Car" },
+    { "do": "drill", "path": "/Scene/Car/Wheels/Left" },
+    { "do": "expect", "selection": "/Scene/Car/Wheels" },
+    { "do": "drill", "path": "/Scene/Car/Wheels/Left" },
+    { "do": "expect", "selection": "/Scene/Car/Wheels/Left" },
+
+    { "do": "walkUp" },
+    { "do": "expect", "selection": "/Scene/Car/Wheels" },
+
+    { "do": "isolate", "path": "/Scene/Car/Wheels/Left" },
+    { "do": "expect", "isolated": true },
+    { "do": "expect", "dirty": false },
+    { "do": "expect", "visible": true,  "path": "/Scene/Car/Wheels/Left" },
+    { "do": "expect", "visible": true,  "path": "/Scene/Car" },
+    { "do": "expect", "visible": false, "path": "/Scene/Car/Wheels/Right" },
+    { "do": "expect", "visible": false, "path": "/Scene/Ground" },
+    { "do": "shot", "name": "1-isolated-wheel", "tab": "transform" },
+    { "do": "exit-isolate" },
+    { "do": "expect", "isolated": false },
+    { "do": "expect", "dirty": false },
+    { "do": "expect", "visible": true, "path": "/Scene/Ground" },
+
+    { "do": "select", "path": "/Scene/Car/Wheels/Left" },
+    { "do": "gizmo.drag", "axis": "x", "number": 1.5 },
+    { "do": "expect", "translation": [1.5, 0, 0], "path": "/Scene/Car/Wheels/Left" },
+    { "do": "expect", "dirty": true },
+
+    { "do": "part", "kind": "hide", "path": "/Scene/Car/Body" },
+    { "do": "part", "kind": "disable", "path": "/Scene/Car/Wheels/Right" },
+    { "do": "part", "kind": "delete", "path": "/Scene/Ground" },
+
+    { "do": "save", "path": ".harness-out/part-editing-out.usdz" },
+    { "do": "reopen", "path": ".harness-out/part-editing-out.usdz" },
+    { "do": "expect", "translation": [1.5, 0, 0], "path": "/Scene/Car/Wheels/Left" },
+    { "do": "shot", "name": "2-after-export" }
+  ] }

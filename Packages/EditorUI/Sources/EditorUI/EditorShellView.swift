@@ -418,18 +418,23 @@ public struct EditorShellView: View {
 
         Divider()
 
-        if row.visibility == .invisible {
-            Button("Show") { document?.setVisibility(row.path, .inherited) }
-        } else {
-            Button("Hide") { document?.setVisibility(row.path, .invisible) }
+        Button(document?.isolation.isActive == true ? "Exit Isolate" : "Isolate Selection") {
+            if document?.isolation.isActive == true { document?.exitIsolation() }
+            else { select(row.path); document?.isolateSelection() }
         }
-        Button(row.isActive ? "Disable" : "Enable") {
-            document?.setActive(row.path, !row.isActive)
-        }
+        .help("Focus the viewport on this part only. View-only — nothing is written to the file.")
 
         Divider()
 
-        Button("Delete", role: .destructive) { document?.delete(row.path) }
+        // Hide vs. Disable vs. Delete, presented together with explicit copy —
+        // this distinction is the top user-confusion risk (specs/editor-ui.md),
+        // so each control spells out exactly what it does.
+        ForEach(document?.partEditControls(for: row.path) ?? []) { control in
+            Button(control.title, role: control.isDestructive ? .destructive : nil) {
+                document?.performPartEdit(control.kind, on: row.path)
+            }
+            .help(control.help)
+        }
     }
 
     // MARK: Inline rename
@@ -527,8 +532,8 @@ public struct EditorShellView: View {
         // "open a file" placeholder, so the app opens straight into 3D space.
         ViewportPane(
                 modelURL: modelURL,
-                livePrimPaths: document?.scenePrimPaths,
-                sceneRevision: document?.revision ?? 0,
+                livePrimPaths: document?.viewportLivePrimPaths,
+                sceneRevision: document?.viewportSceneRevision ?? 0,
                 editedMesh: document?.viewportEditedMesh,
                 onPickFace: { [weak document] index, additive in
                     document?.pickMeshFace(index: index, additive: additive)
@@ -561,6 +566,10 @@ public struct EditorShellView: View {
                     // the viewport (Phase 6; specs/mesh-editing.md).
                     if let document { MeshEditOverlay(document: document) }
                 }
+                .overlay(alignment: .top) {
+                    // Drill-down breadcrumb + isolate indicator (Milestone 3).
+                    if let document { BreadcrumbBar(document: document) }
+                }
                 .overlay(alignment: .bottom) {
                     // The tour's narration card owns the bottom edge while it
                     // runs; the hotkey hints return afterwards. The transport bar
@@ -577,5 +586,24 @@ public struct EditorShellView: View {
                     }
                 }
                 .background(editModeToggleShortcut)
+                .background(partEditingShortcuts)
+    }
+
+    /// Hidden hotkeys for part-level navigation (ROADMAP Milestone 3):
+    /// ⌘↑ walk-up, ⌘I toggle isolate, Esc exit isolate.
+    @ViewBuilder
+    private var partEditingShortcuts: some View {
+        if let document {
+            Group {
+                Button("") { document.walkUpSelection() }
+                    .keyboardShortcut(.upArrow, modifiers: [.command])
+                Button("") { document.toggleIsolation() }
+                    .keyboardShortcut("i", modifiers: [.command])
+                Button("") { document.exitIsolation() }
+                    .keyboardShortcut(.escape, modifiers: [])
+            }
+            .opacity(0)
+            .allowsHitTesting(false)
+        }
     }
 }

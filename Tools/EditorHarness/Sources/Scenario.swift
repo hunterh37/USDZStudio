@@ -47,6 +47,21 @@ struct Scenario: Decodable {
         /// `number` (world units).
         var axis: String?
 
+        // Part-level editing operands (Milestone 3).
+        /// Part-edit kind for the `part` verb: "hide" | "disable" | "delete".
+        var kind: String?
+
+        // Part-level expectations.
+        /// Assert the primary selection's path (empty string = no selection).
+        var selection: String?
+        /// Assert whether the step's `path` renders in the viewport's live set
+        /// (drives isolate-mode visibility assertions).
+        var visible: Bool?
+        /// Assert whether isolate mode is engaged.
+        var isolated: Bool?
+        /// Assert the document's unsaved-changes flag (isolate must keep it false).
+        var dirty: Bool?
+
         // Expectations.
         /// Assert the step's path/selection prim's local translation.
         var translation: [Double]?

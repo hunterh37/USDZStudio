@@ -175,6 +175,93 @@ public final class EditorDocument {
         group(selection.paths, named: name)
     }
 
+    // MARK: Part-level editing (ROADMAP Milestone 3)
+
+    /// Isolate-mode session overlay. **View-only**: it never authors to the
+    /// stage, so entering/exiting isolate leaves `hasUnsavedChanges` untouched
+    /// (specs/editing-model.md mutation rule 1). The viewport consults
+    /// `viewportLivePrimPaths` to draw only the isolated lineage.
+    public private(set) var isolation = IsolationState()
+
+    /// The breadcrumb trail for the primary selection (empty with no selection).
+    /// Drives the viewport breadcrumb bar and shows exactly where a drill-down
+    /// landed in the hierarchy.
+    public var breadcrumb: [PartSelection.Crumb] {
+        guard let path = selection.primary else { return [] }
+        return PartSelection.breadcrumb(to: path, in: snapshot)
+    }
+
+    /// Handles a viewport click that resolved to the deepest pickable prim
+    /// `leaf`, applying the drill-down idiom: first click selects the whole
+    /// top-level object, repeat clicks drill one level deeper toward `leaf`.
+    public func drillInto(_ leaf: PrimPath) {
+        guard let next = PartSelection.drillDown(picked: leaf, from: selection.primary) else { return }
+        selection = Selection([next])
+    }
+
+    /// Walks the selection up one level toward the scene root. No-op at a
+    /// top-level prim. Bound to the breadcrumb "up" affordance and ⌘↑.
+    public func walkUpSelection() {
+        guard let path = selection.primary, let up = PartSelection.walkUp(from: path) else { return }
+        selection = Selection([up])
+    }
+
+    /// The Hide · Disable · Delete controls for `path`, pre-resolved to their
+    /// current state (Hide↔Show, Disable↔Enable) for a context menu / inspector.
+    public func partEditControls(for path: PrimPath) -> [PartEditControl] {
+        guard let prim = snapshot.prim(at: path) else { return [] }
+        return PartEditKind.controls(for: prim)
+    }
+
+    /// Applies a Hide / Disable / Delete action to `path` as one undoable edit,
+    /// following the selection appropriately (delete clears it).
+    public func performPartEdit(_ kind: PartEditKind, on path: PrimPath) {
+        guard let command = PartEditCommandFactory.command(kind, for: path, in: snapshot),
+              run(command) != nil else { return }
+        if kind == .delete, selection.contains(path) { selection = .empty }
+    }
+
+    /// Isolate the current selection (or clear isolation when nothing is
+    /// selected). View-only; bumps the revision so the viewport re-prunes.
+    public func isolateSelection() {
+        setIsolation(isolation.isolating(selection.paths))
+    }
+
+    /// Exit isolate mode.
+    public func exitIsolation() { setIsolation(isolation.cleared()) }
+
+    /// Toggle isolate mode on the current selection.
+    public func toggleIsolation() {
+        isolation.isActive ? exitIsolation() : isolateSelection()
+    }
+
+    /// View-only revision counter — bumped by isolate and other non-authoring
+    /// view changes. Kept **separate** from `revision` so it never touches
+    /// `hasUnsavedChanges`; folded into the viewport's scene revision so the
+    /// viewport still re-prunes.
+    public private(set) var viewRevision: Int = 0
+
+    private func setIsolation(_ new: IsolationState) {
+        guard new != isolation else { return }
+        isolation = new
+        viewRevision &+= 1   // re-prune the viewport without dirtying the document
+    }
+
+    /// The revision the viewport prunes against — combines authored edits and
+    /// view-only changes (isolate) so both trigger a re-sync.
+    public var viewportSceneRevision: Int { revision &+ viewRevision }
+
+    /// The prim paths the viewport should draw: the live stage set minus any
+    /// prims isolate mode hides. When isolation is inactive this equals
+    /// `scenePrimPaths`. Because the hidden prims are merely dropped from the
+    /// live set (the same seam structural deletes use), no stage opinion is
+    /// authored — isolate stays non-dirtying.
+    public var viewportLivePrimPaths: Set<String> {
+        guard isolation.isActive else { return scenePrimPaths }
+        let hidden = Set(isolation.hiddenPaths(in: snapshot).map(\.description))
+        return scenePrimPaths.subtracting(hidden)
+    }
+
     // MARK: Transform edits
 
     /// The prim's local transform as an editable TRS.
