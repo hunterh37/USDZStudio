@@ -35,9 +35,41 @@ struct RealCorpus {
     }
 
     /// A real process executor, or `nil` when usd-core isn't importable.
+    ///
+    /// The interpreter is resolved the same way the app resolves it, but with
+    /// the repo's fetched runtime as the bundled root: `scripts/fetch-python-
+    /// runtime.sh` installs usd-core into `Resources/Python/runtime`, *not* into
+    /// the system `python3`. Looking only at `python3` is why these tests once
+    /// passed locally (where the system interpreter happens to have `pxr`) while
+    /// silently skipping in CI — which let USDBridge's real save-path coverage
+    /// quietly fall through the gate.
     static func executor() async -> ProcessBridgeExecutor? {
-        guard let exec = ProcessBridgeExecutor(scriptPath: snapshotScript) else { return nil }
+        let locator = PythonRuntimeLocator(
+            environment: ProcessInfo.processInfo.environment,
+            bundledRuntimeRoot: repoRoot.appendingPathComponent("Resources/Python/runtime").path)
+        guard let exec = ProcessBridgeExecutor(locator: locator, scriptPath: snapshotScript) else {
+            return nil
+        }
         if case .available = await exec.checkAvailability() { return exec }
+        return nil
+    }
+
+    /// CI sets `USDBRIDGE_REQUIRE_USD=1`: there, a missing interpreter must fail
+    /// loudly instead of skipping. A suite that silently no-ops when its
+    /// dependency is absent reports green while testing nothing.
+    static var requireUSD: Bool {
+        ProcessInfo.processInfo.environment["USDBRIDGE_REQUIRE_USD"] == "1"
+    }
+
+    /// Returns an executor, or records a failure (CI) / signals a skip (local).
+    static func executorOrSkip(_ function: String = #function) async -> ProcessBridgeExecutor? {
+        if let exec = await executor() { return exec }
+        if requireUSD {
+            Issue.record("""
+                \(function): usd-core is required here but no interpreter with `pxr` was found. \
+                Run scripts/fetch-python-runtime.sh, or unset USDBRIDGE_REQUIRE_USD to skip.
+                """)
+        }
         return nil
     }
 
@@ -48,7 +80,7 @@ struct RealCorpus {
 struct BridgeCorpusTests {
 
     @Test func cubeOpensWithMeshChild() async throws {
-        guard let exec = await RealCorpus.executor() else { return }
+        guard let exec = await RealCorpus.executorOrSkip() else { return }
         for ext in ["usda", "usdz"] {
             let stage = try await BridgedStage.open(url: RealCorpus.fixture("cube.\(ext)"), executor: exec)
             #expect(stage.prim(at: PrimPath("/Cube")!)?.typeName == "Xform")
@@ -57,7 +89,7 @@ struct BridgeCorpusTests {
     }
 
     @Test func variantsExposeVariantSet() async throws {
-        guard let exec = await RealCorpus.executor() else { return }
+        guard let exec = await RealCorpus.executorOrSkip() else { return }
         let stage = try await BridgedStage.open(url: RealCorpus.fixture("variants.usda"), executor: exec)
         let widget = try #require(stage.prim(at: PrimPath("/Widget")!))
         let set = try #require(widget.variantSets.first)
@@ -67,7 +99,7 @@ struct BridgeCorpusTests {
     }
 
     @Test func skeletonCarriesJoints() async throws {
-        guard let exec = await RealCorpus.executor() else { return }
+        guard let exec = await RealCorpus.executorOrSkip() else { return }
         for ext in ["usda", "usdz"] {
             let stage = try await BridgedStage.open(url: RealCorpus.fixture("skel.\(ext)"), executor: exec)
             #expect(stage.prim(at: PrimPath("/Character")!)?.typeName == "SkelRoot")
@@ -95,7 +127,7 @@ struct BridgeCorpusTests {
     /// emit `timeSamples`, this test should flip to asserting `isAnimated` —
     /// which is exactly the regression signal the corpus exists to give.
     @Test func animatedStagePreservesTimeSampledAttributes() async throws {
-        guard let exec = await RealCorpus.executor() else { return }
+        guard let exec = await RealCorpus.executorOrSkip() else { return }
         let stage = try await BridgedStage.open(url: RealCorpus.fixture("animated.usda"), executor: exec)
         #expect(stage.prim(at: PrimPath("/Mover")!)?.typeName == "Xform")
         #expect(stage.prim(at: PrimPath("/Mover/Ball")!)?.typeName == "Sphere")
@@ -110,7 +142,7 @@ struct BridgeCorpusTests {
     /// time-sampled channels preserved, and the *uniform* `joints` token array
     /// (which does have a default value) decodes properly.
     @Test func skelAnimationPrimPreservesChannels() async throws {
-        guard let exec = await RealCorpus.executor() else { return }
+        guard let exec = await RealCorpus.executorOrSkip() else { return }
         let stage = try await BridgedStage.open(url: RealCorpus.fixture("skel.usda"), executor: exec)
         let anim = try #require(stage.prim(at: PrimPath("/Character/Anim")!))
         #expect(anim.typeName == "SkelAnimation")
@@ -121,7 +153,7 @@ struct BridgeCorpusTests {
     }
 
     @Test func malformedFileSurfacesAnError() async throws {
-        guard let exec = await RealCorpus.executor() else { return }
+        guard let exec = await RealCorpus.executorOrSkip() else { return }
         await #expect(throws: BridgeError.self) {
             _ = try await BridgedStage.open(url: RealCorpus.fixture("malformed.usda"), executor: exec)
         }
@@ -147,7 +179,7 @@ struct StageSaverRoundTripTests {
 
     @Test(arguments: ["usda", "usdc", "usdz"])
     func authorSaveReopenPreservesStructure(_ ext: String) async throws {
-        guard let exec = await RealCorpus.executor() else { return }
+        guard let exec = await RealCorpus.executorOrSkip() else { return }
         let dir = try tempDir()
         defer { try? FileManager.default.removeItem(at: dir) }
         let out = dir.appendingPathComponent("model.\(ext)")
@@ -161,7 +193,7 @@ struct StageSaverRoundTripTests {
     }
 
     @Test func overwritingExistingUsdzReplacesInPlace() async throws {
-        guard let exec = await RealCorpus.executor() else { return }
+        guard let exec = await RealCorpus.executorOrSkip() else { return }
         let dir = try tempDir()
         defer { try? FileManager.default.removeItem(at: dir) }
         let out = dir.appendingPathComponent("model.usdz")

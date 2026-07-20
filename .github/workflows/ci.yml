@@ -34,6 +34,13 @@ jobs:
       - name: Fetch Python runtime (usd-core)
         run: bash scripts/fetch-python-runtime.sh
       - name: Test all packages (with coverage)
+        env:
+          # The real-usd-core corpus + StageSaver save-path tests resolve the
+          # interpreter fetched into Resources/Python/runtime. Requiring it here
+          # turns "no interpreter" from a silent skip into a hard failure — those
+          # tests are what hold USDBridge at its 95% floor, so a skip would drop
+          # coverage rather than report a problem.
+          USDBRIDGE_REQUIRE_USD: "1"
         run: bash scripts/test-all.sh --coverage
       - name: Per-module coverage gate + deep fuzz corpus
         env:
