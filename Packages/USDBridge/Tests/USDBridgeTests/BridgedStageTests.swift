@@ -65,6 +65,15 @@ struct LocatorTests {
         func isExecutableFile(atPath path: String) -> Bool { executables.contains(path) }
     }
 
+    /// Distinguishes "exists" from "can import pxr" so the pxr-aware selection
+    /// and its fallback are both exercised.
+    struct CapabilityChecker: FileExistenceChecking {
+        var executables: Set<String>
+        var usdCapable: Set<String>
+        func isExecutableFile(atPath path: String) -> Bool { executables.contains(path) }
+        func canImportUSD(atPath path: String) -> Bool { usdCapable.contains(path) }
+    }
+
     @Test func environmentOverrideWinsWhenExecutable() {
         let locator = PythonRuntimeLocator(
             environment: ["DICYANIN_PYTHON": "/custom/python3"],
@@ -92,6 +101,51 @@ struct LocatorTests {
         let locator = PythonRuntimeLocator(environment: [:], checker: StubChecker(executables: []))
         #expect(locator.locate() == nil)
         #expect(ProcessBridgeExecutor(locator: locator, scriptPath: "s.py") == nil)
+    }
+
+    // A higher-priority interpreter that exists but lacks usd-core must not be
+    // chosen over a lower-priority one that can import pxr — the bug behind the
+    // "No module named 'pxr'" export failure.
+    @Test func skipsExistingInterpreterWithoutUSDCore() {
+        let locator = PythonRuntimeLocator(
+            environment: [:],
+            bundledRuntimeRoot: "/app/Resources/Python/runtime",
+            checker: CapabilityChecker(
+                executables: ["/app/Resources/Python/runtime/bin/python3", "/usr/bin/python3"],
+                usdCapable: ["/usr/bin/python3"]))
+        #expect(locator.locate() == "/usr/bin/python3")
+    }
+
+    // The bundled runtime is still preferred when it has usd-core, even though a
+    // lower-priority system interpreter is also capable.
+    @Test func prefersHigherPriorityWhenBothCapable() {
+        let locator = PythonRuntimeLocator(
+            environment: [:],
+            bundledRuntimeRoot: "/app/Resources/Python/runtime",
+            checker: CapabilityChecker(
+                executables: ["/app/Resources/Python/runtime/bin/python3", "/usr/bin/python3"],
+                usdCapable: ["/app/Resources/Python/runtime/bin/python3", "/usr/bin/python3"]))
+        #expect(locator.locate() == "/app/Resources/Python/runtime/bin/python3")
+    }
+
+    // When no candidate can import pxr, fall back to the first existing one so
+    // the caller still surfaces an actionable pythonUnavailable error.
+    @Test func fallsBackToFirstExistingWhenNoneCapable() {
+        let locator = PythonRuntimeLocator(
+            environment: [:],
+            bundledRuntimeRoot: "/app/Resources/Python/runtime",
+            checker: CapabilityChecker(
+                executables: ["/opt/homebrew/bin/python3", "/usr/bin/python3"],
+                usdCapable: []))
+        #expect(locator.locate() == "/opt/homebrew/bin/python3")
+    }
+
+    // The default `canImportUSD` (used by pure-logic stubs) treats any
+    // executable as capable.
+    @Test func defaultCapabilityFollowsExecutability() {
+        let checker = StubChecker(executables: ["/usr/bin/python3"])
+        #expect(checker.canImportUSD(atPath: "/usr/bin/python3"))
+        #expect(!checker.canImportUSD(atPath: "/nope/python3"))
     }
 }
 
