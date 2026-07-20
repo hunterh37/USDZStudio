@@ -76,8 +76,18 @@ public struct Prim: Hashable, Sendable, Codable {
     }
 
     /// Depth-first traversal of this prim and all descendants.
+    ///
+    /// Iterative rather than recursive: the previous `[self] + children.flatMap`
+    /// form reallocated and copied an array at every level of the hierarchy,
+    /// which is pathological on the deep trees enterprise scenes carry.
     public func flattened() -> [Prim] {
-        [self] + children.flatMap { $0.flattened() }
+        var result: [Prim] = []
+        var stack: [Prim] = [self]
+        while let next = stack.popLast() {
+            result.append(next)
+            stack.append(contentsOf: next.children.reversed())
+        }
+        return result
     }
 
     /// Finds a descendant (or self) by absolute path.
