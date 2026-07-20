@@ -76,7 +76,20 @@ public enum GeometryProbe {
         guard case .float3Array(let flat)? = prim.attribute(named: "points")?.value,
               flat.count >= 3
         else { return nil }
-        return stride(from: 0, to: flat.count - 2, by: 3).map { [flat[$0], flat[$0 + 1], flat[$0 + 2]] }
+        // Written imperatively with explicit types: the equivalent
+        // `stride(...).map { [flat[$0], flat[$0+1], flat[$0+2]] }` one-liner
+        // intermittently blows the Swift type-checker's time budget on CI.
+        var triples: [[Double]] = []
+        triples.reserveCapacity(flat.count / 3)
+        var i = 0
+        while i + 2 < flat.count {
+            let x = Double(flat[i])
+            let y = Double(flat[i + 1])
+            let z = Double(flat[i + 2])
+            triples.append([x, y, z])
+            i += 3
+        }
+        return triples
     }
 
     /// Build a MeshKit `FlatMesh` from a Mesh prim's authored topology.
