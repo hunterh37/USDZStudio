@@ -96,6 +96,7 @@ public struct ViewportPane: View {
     @State private var showStats = true
     @State private var loadError: String?
     @State private var cameraMode: CameraInteractionMode = .rotate
+    @State private var debugMode: DebugViewMode = .shaded
     @StateObject private var cameraLink = ViewportCameraLink()
 
     public init(modelURL: URL?,
@@ -134,8 +135,14 @@ public struct ViewportPane: View {
                                   cameraLink: cameraLink,
                                   cameraPose: cameraPose, liveTransforms: liveTransforms,
                                   materialOverrides: materialOverrides,
+                                  debugMode: debugMode,
                                   stats: $stats, loadError: $loadError)
-            cameraModeControl
+            VStack(alignment: .leading, spacing: 6) {
+                cameraModeControl
+                debugModeControl
+            }
+            .padding(10)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             AxisGizmoView(link: cameraLink)
                 .padding(10)
                 .frame(maxWidth: .infinity, maxHeight: .infinity,
@@ -174,8 +181,22 @@ public struct ViewportPane: View {
         .pickerStyle(.segmented)
         .labelsHidden()
         .fixedSize()
-        .padding(10)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
+    /// Debug view-mode segmented control (specs/viewport.md "Debug View
+    /// Modes"): shaded / wireframe / normals / UV checker / matcap. Swaps the
+    /// projection materials (or adds the wireframe overlay) live.
+    private var debugModeControl: some View {
+        Picker("Debug view mode", selection: $debugMode) {
+            ForEach(DebugViewMode.allCases) { mode in
+                Image(systemName: mode.symbol)
+                    .help(mode.helpText)
+                    .tag(mode)
+            }
+        }
+        .pickerStyle(.segmented)
+        .labelsHidden()
+        .fixedSize()
     }
 }
 
@@ -197,6 +218,7 @@ struct ViewportRepresentable: NSViewRepresentable {
     let cameraPose: ViewportCameraPose?
     let liveTransforms: [String: float4x4]?
     let materialOverrides: [String: MaterialOverride]?
+    let debugMode: DebugViewMode
     @Binding var stats: SceneStats?
     @Binding var loadError: String?
 
@@ -225,6 +247,7 @@ struct ViewportRepresentable: NSViewRepresentable {
         context.coordinator.applyCameraPose(cameraPose)
         context.coordinator.applyLiveTransforms(liveTransforms)
         context.coordinator.applyMaterialOverrides(materialOverrides)
+        context.coordinator.applyDebugMode(debugMode)
     }
 }
 
@@ -309,7 +332,9 @@ final class ViewportCoordinator {
                 // freshly loaded entities in line with the live stage.
                 self.pruneModelEntities()
                 self.reapplyLiveTransforms()
-                self.reapplyMaterialOverrides()
+                // Re-establishes overrides and the active debug mode together
+                // on the freshly loaded entity tree.
+                self.reapplyDebugMode()
             } catch {
                 guard !Task.isCancelled else { return }
                 self?.onError?("Viewport could not load model: \(error.localizedDescription)")
@@ -376,7 +401,13 @@ final class ViewportCoordinator {
     func applyMaterialOverrides(_ overrides: [String: MaterialOverride]?) {
         guard overrides != appliedMaterialOverrides else { return }
         appliedMaterialOverrides = overrides
-        reapplyMaterialOverrides()
+        if debugMode == .shaded {
+            reapplyMaterialOverrides()
+        } else {
+            // A debug mode owns the materials; fold the new overrides into the
+            // clean base so `shaded` later restores the correct look.
+            reapplyDebugMode()
+        }
     }
 
     private func reapplyMaterialOverrides() {
@@ -420,6 +451,157 @@ final class ViewportCoordinator {
 
     private static func nsColor(_ c: SIMD3<Float>, alpha: Float = 1) -> NSColor {
         NSColor(srgbRed: CGFloat(c.x), green: CGFloat(c.y), blue: CGFloat(c.z), alpha: CGFloat(alpha))
+    }
+
+    // MARK: Debug view modes (wireframe / normals / UV checker / matcap)
+
+    private var debugMode: DebugViewMode = .shaded
+    /// Pristine (or override) materials captured before a material-swap debug
+    /// mode replaced them, keyed by entity identity, so `shaded` restores them.
+    private var savedMaterials: [ObjectIdentifier: [any RealityFoundation.Material]] = [:]
+    private let wireframeAnchor = AnchorEntity(world: .zero)
+    /// Generated debug textures, built once and reused across mode toggles.
+    private var debugTextureCache: [DebugMaterialSpec.Kind: TextureResource] = [:]
+    /// Safety cap: skip wireframe generation for a mesh part above this edge
+    /// count so the debug overlay never tanks a huge scene.
+    private static let maxWireframeEdges = 200_000
+
+    /// Switches the debug shading mode. Cheap when unchanged (mode-gated).
+    func applyDebugMode(_ mode: DebugViewMode) {
+        guard mode != debugMode else { return }
+        debugMode = mode
+        reapplyDebugMode()
+    }
+
+    /// Re-establishes the current debug mode from a clean base. Restores the
+    /// saved materials, re-applies the user's material overrides on top, then
+    /// layers the active debug mode (overlay for wireframe, material swap for
+    /// the rest). Re-run after a model load or an override change.
+    private func reapplyDebugMode() {
+        restoreSavedMaterials()
+        reapplyMaterialOverrides()
+        clearWireframe()
+        switch debugMode {
+        case .shaded:
+            break
+        case .wireframe:
+            buildWireframe()
+        default:
+            if let spec = debugMode.materialSpec { applyDebugMaterial(spec) }
+        }
+    }
+
+    private func forEachModelEntity(_ body: (Entity) -> Void) {
+        for child in modelAnchor.children {
+            child.visit { if $0.components[ModelComponent.self] != nil { body($0) } }
+        }
+    }
+
+    private func restoreSavedMaterials() {
+        for (id, materials) in savedMaterials {
+            forEachModelEntity { entity in
+                guard ObjectIdentifier(entity) == id,
+                      var model = entity.components[ModelComponent.self] else { return }
+                model.materials = materials
+                entity.components.set(model)
+            }
+        }
+        savedMaterials.removeAll()
+    }
+
+    private func applyDebugMaterial(_ spec: DebugMaterialSpec) {
+        guard let material = debugMaterial(spec) else { return }
+        forEachModelEntity { entity in
+            guard var model = entity.components[ModelComponent.self] else { return }
+            let id = ObjectIdentifier(entity)
+            if savedMaterials[id] == nil { savedMaterials[id] = model.materials }
+            model.materials = Array(repeating: material, count: max(1, model.materials.count))
+            entity.components.set(model)
+        }
+    }
+
+    private func debugMaterial(_ spec: DebugMaterialSpec) -> (any RealityFoundation.Material)? {
+        guard let texture = debugTexture(spec.kind) else { return nil }
+        if spec.unlit {
+            var material = UnlitMaterial()
+            material.color = .init(tint: .white, texture: .init(texture))
+            return material
+        }
+        var material = PhysicallyBasedMaterial()
+        material.baseColor = .init(tint: .white, texture: .init(texture))
+        material.roughness = 0.7
+        return material
+    }
+
+    private func debugTexture(_ kind: DebugMaterialSpec.Kind) -> TextureResource? {
+        if let cached = debugTextureCache[kind] { return cached }
+        let source = DebugTextureFactory.texture(for: kind, size: 256)
+        guard let cgImage = Self.cgImage(from: source) else { return nil }
+        // Normals/matcap carry raw colour (no colour-space transform); the UV
+        // checker is a display-space colour texture.
+        let semantic: TextureResource.Semantic = kind == .uvChecker ? .color : .raw
+        guard let resource = try? TextureResource.generate(
+            from: cgImage, options: .init(semantic: semantic)) else { return nil }
+        debugTextureCache[kind] = resource
+        return resource
+    }
+
+    private static func cgImage(from texture: DebugTexture) -> CGImage? {
+        let data = Data(texture.rgba)
+        guard let provider = CGDataProvider(data: data as CFData) else { return nil }
+        return CGImage(
+            width: texture.width, height: texture.height,
+            bitsPerComponent: 8, bitsPerPixel: 32, bytesPerRow: texture.width * 4,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue),
+            provider: provider, decode: nil, shouldInterpolate: false, intent: .defaultIntent)
+    }
+
+    private func clearWireframe() {
+        wireframeAnchor.children.removeAll()
+        if wireframeAnchor.parent != nil { wireframeAnchor.removeFromParent() }
+    }
+
+    /// Builds a thin-box edge overlay for every projection mesh, in world space
+    /// (so it tracks the entities' transforms), from the pure edge extraction.
+    private func buildWireframe() {
+        let material = UnlitMaterial(color: NSColor(white: 0.05, alpha: 0.9))
+        var added = false
+        forEachModelEntity { entity in
+            guard let model = entity.components[ModelComponent.self] else { return }
+            let world = entity.transformMatrix(relativeTo: nil)
+            for part in model.mesh.contents.models.flatMap(\.parts) {
+                guard let indices = part.triangleIndices.map(Array.init) else { continue }
+                let positions = Array(part.positions)
+                let edges = WireframeGeometry.uniqueEdges(triangleIndices: indices)
+                guard edges.count <= Self.maxWireframeEdges else { continue }
+                for edge in edges {
+                    let i0 = Int(edge.x), i1 = Int(edge.y)
+                    guard i0 < positions.count, i1 < positions.count else { continue }
+                    let a = (world * SIMD4<Float>(positions[i0], 1))
+                    let b = (world * SIMD4<Float>(positions[i1], 1))
+                    if let box = Self.edgeBox(SIMD3(a.x, a.y, a.z), SIMD3(b.x, b.y, b.z),
+                                              material: material) {
+                        wireframeAnchor.addChild(box)
+                        added = true
+                    }
+                }
+            }
+        }
+        if added, wireframeAnchor.parent == nil { view?.scene.addAnchor(wireframeAnchor) }
+    }
+
+    private static func edgeBox(_ a: SIMD3<Float>, _ b: SIMD3<Float>,
+                                material: UnlitMaterial) -> ModelEntity? {
+        let dir = b - a
+        let length = simd_length(dir)
+        guard length > 1e-6 else { return nil }
+        let thickness = max(length * 0.02, 1e-4)
+        let box = ModelEntity(mesh: .generateBox(size: SIMD3(thickness, length, thickness)),
+                              materials: [material])
+        box.position = (a + b) / 2
+        box.orientation = simd_quatf(from: SIMD3<Float>(0, 1, 0), to: dir / length)
+        return box
     }
 
     // MARK: Live-stage sync (structural edits)
