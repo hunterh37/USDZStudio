@@ -54,6 +54,13 @@ enum CLIRunner {
                                limits the tool surface (read, mutate, verify,
                                render, asset, script, transaction); --library
                                adds asset-search folders.
+      roundtrip <file.usd[z|a|c]>... [--strict] [--json]
+                               Verify the round-trip invariants: open→save→open
+                               is a fixed point, and open→edit→undo-all→save
+                               lands back on the opened model. --strict also
+                               diffs the flattened USD text against the original
+                               (only lossless-modelled files pass). Exits 1 when
+                               any invariant fails.
       validate <file.usd[z|a|c]> [--profile NAME] [--strict]
                                Run a compliance profile's rule catalog and print
                                diagnostics (most-severe first) with an export
@@ -109,6 +116,11 @@ enum CLIRunner {
                                         print: output, printError: printError)
         case "mcp":
             return await McpCommand.run(arguments: Array(arguments.dropFirst()), printError: printError)
+        case "roundtrip":
+            return await RoundTripCommand.run(
+                arguments: Array(arguments.dropFirst()),
+                environment: defaultRoundTripEnvironment(),
+                print: output, printError: printError)
         case "validate":
             return await validate(
                 arguments: Array(arguments.dropFirst()),
@@ -647,7 +659,60 @@ enum CLIRunner {
         return lines.joined(separator: "\n")
     }
 
-    // coverage:disable — resolves and opens a stage through the real Python bridge; covered by USDBridge integration, not CLI unit tests.
+    // coverage:disable — real-subprocess wiring for the round-trip harness (spawns Python for open/save/diff); the pure logic it drives is unit-tested via RoundTripCommand.Environment injection.
+    /// Production wiring for `openusdz roundtrip`: real bridge open, real
+    /// `StageSaver` save, real `usd_roundtrip.py` text diff.
+    ///
+    /// `sourceURL` is deliberately normalized to `nil` on open — it records
+    /// *which file* a snapshot came from, not what is in it, and the round-trip
+    /// compares the original against a copy saved to a scratch path.
+    static func defaultRoundTripEnvironment() -> RoundTripCommand.Environment {
+        RoundTripCommand.Environment(
+            open: { url in
+                let stage = try await defaultOpen(url: url)
+                return StageSnapshot(sourceURL: nil,
+                                     metadata: stage.metadata,
+                                     rootPrims: stage.rootPrims)
+            },
+            save: { snapshot, url in
+                guard let executor = ProcessBridgeExecutor(scriptPath: try snapshotScriptPath()) else {
+                    throw BridgeError.pythonUnavailable(detail: "no Python interpreter found")
+                }
+                try await StageSaver.save(snapshot, to: url, executor: executor)
+            },
+            textDiffClean: { a, b in try runFlattenedTextDiff(a, b) },
+            temporaryDirectory: {
+                let dir = FileManager.default.temporaryDirectory
+                    .appendingPathComponent("openusdz-roundtrip-\(UUID().uuidString)", isDirectory: true)
+                try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+                return dir
+            })
+    }
+
+    /// Runs `usd_roundtrip.py a b`; exit 0 means the flattened text matches.
+    static func runFlattenedTextDiff(_ a: URL, _ b: URL) throws -> Bool {
+        guard let python = PythonRuntimeLocator().locate() else {
+            throw BridgeError.pythonUnavailable(detail: "no Python interpreter found")
+        }
+        let script = URL(fileURLWithPath: try snapshotScriptPath())
+            .deletingLastPathComponent()
+            .appendingPathComponent("usd_roundtrip.py").path
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: python)
+        process.arguments = [script, a.path, b.path]
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = pipe
+        try process.run()
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+        if process.terminationStatus == 2 {
+            throw BridgeError.executionFailed(
+                pythonTraceback: String(data: data, encoding: .utf8) ?? "<no output>")
+        }
+        return process.terminationStatus == 0
+    }
+
     static func defaultOpen(url: URL) async throws -> any USDStageProtocol {
         guard let executor = ProcessBridgeExecutor(scriptPath: try snapshotScriptPath()) else {
             throw BridgeError.pythonUnavailable(detail: "no Python interpreter found")

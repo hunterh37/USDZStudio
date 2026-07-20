@@ -18,6 +18,7 @@ bash scripts/module-governance.sh     # module governance gate
 bash scripts/fetch-python-runtime.sh  # one-time: usd-core runtime
 bash scripts/test-all.sh --coverage   # all package tests
 bash scripts/coverage-gate.sh         # coverage floors + fuzz corpus
+bash scripts/roundtrip-gate.sh        # round-trip invariants over the bridge mini-corpus
 ```
 
 ## Architecture — modern Swift (2026)

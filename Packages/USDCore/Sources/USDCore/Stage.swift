@@ -8,7 +8,7 @@ public enum UpAxis: String, Hashable, Sendable, Codable {
 }
 
 /// Root-layer metadata (PRD §5.3 "Edit stage/root metadata").
-public struct StageMetadata: Hashable, Sendable {
+public struct StageMetadata: Hashable, Sendable, Codable {
     public var upAxis: UpAxis
     public var metersPerUnit: Double
     public var defaultPrim: String?
@@ -75,7 +75,7 @@ extension USDStageProtocol {
 
 /// An immutable, value-typed stage snapshot. USDBridge produces these; the
 /// outliner, inspector, and viewport consume them.
-public struct StageSnapshot: USDStageProtocol, Hashable {
+public struct StageSnapshot: USDStageProtocol, Hashable, Codable {
     public var sourceURL: URL?
     public var metadata: StageMetadata
     public var rootPrims: [Prim]
@@ -95,7 +95,7 @@ public protocol USDStageMutable: USDStageProtocol {
 
 /// The closed set of stage mutations the editor authors (Phase 3 scope;
 /// enumerated now so the command layer has a stable vocabulary).
-public enum StageMutation: Hashable, Sendable {
+public enum StageMutation: Hashable, Sendable, Codable {
     case setAttribute(path: PrimPath, attribute: Attribute)
     /// Removes the named attribute from the prim at `path`. Absent attributes are
     /// tolerated (idempotent), so this is the clean inverse of `setAttribute` when

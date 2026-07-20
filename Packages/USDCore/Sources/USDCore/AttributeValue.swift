@@ -3,7 +3,7 @@
 /// This is intentionally a *closed, RealityKit-relevant* subset (see PRD §4.2):
 /// exotic value types arriving from other tools are preserved as
 /// `.unsupported(typeName:)` so no data is silently destroyed.
-public enum AttributeValue: Hashable, Sendable {
+public enum AttributeValue: Hashable, Sendable, Codable {
     case bool(Bool)
     case int(Int)
     case double(Double)
@@ -63,7 +63,7 @@ public enum AttributeValue: Hashable, Sendable {
 }
 
 /// One keyframe of a time-sampled attribute: a time code and the value at it.
-public struct TimeSample: Hashable, Sendable {
+public struct TimeSample: Hashable, Sendable, Codable {
     public var time: Double
     public var value: AttributeValue
 
@@ -80,7 +80,7 @@ public struct TimeSample: Hashable, Sendable {
 /// crucially, the declared type). `isUniform` and `metadata` model the USD
 /// attribute qualifiers UsdSkel relies on (`uniform`, `elementSize`,
 /// `interpolation`).
-public struct Attribute: Hashable, Sendable {
+public struct Attribute: Hashable, Sendable, Codable {
     public var name: String
     public var value: AttributeValue
     public var isUniform: Bool
@@ -110,7 +110,7 @@ public struct Attribute: Hashable, Sendable {
 
 /// A USD relationship: a named, typed pointer from one prim to others
 /// (e.g. `skel:skeleton`, `skel:animationSource`, `material:binding`).
-public struct Relationship: Hashable, Sendable {
+public struct Relationship: Hashable, Sendable, Codable {
     public var name: String
     public var targets: [PrimPath]
     public var isUniform: Bool

@@ -8,7 +8,7 @@ public enum Visibility: String, Hashable, Sendable, Codable {
 }
 
 /// A variant set on a prim, e.g. `color = {red, blue, green}`.
-public struct VariantSet: Hashable, Sendable {
+public struct VariantSet: Hashable, Sendable, Codable {
     public var name: String
     public var variants: [String]
     public var selection: String?
@@ -31,7 +31,7 @@ public struct VariantSet: Hashable, Sendable {
 /// The stage (via USDBridge) is the source of truth; `Prim` values are the
 /// derived, observable projection consumed by the outliner, inspector, and
 /// viewport (see `specs/architecture.md` — Core Data Flow).
-public struct Prim: Hashable, Sendable {
+public struct Prim: Hashable, Sendable, Codable {
     public var path: PrimPath
     /// The USD type name, e.g. `Xform`, `Mesh`, `Material`. Empty for typeless prims.
     public var typeName: String

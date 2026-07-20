@@ -81,7 +81,7 @@ Golden-mesh fixtures (committed .usda) cover the known nasty cases: bowtie verts
 
 ### Undo & commands
 - `MeshEditCommand` wraps a `MeshOp`: undo restores the prior `HalfEdgeMesh` snapshot (CoW makes this cheap); redo re-applies deterministically. Stage write happens on commit: mesh exported to USD arrays → `SetAttributeCommand` batch on points/indices/normals/uvs.
-- Edit-mode session keeps the working half-edge mesh in memory; leaving edit mode (or saving) flushes to the stage. Crash journal stores the op list.
+- Edit-mode session keeps the working half-edge mesh in memory; leaving edit mode (or saving) flushes to the stage. `MeshEditSession` keeps its own in-session op list for the label on commit; crash safety itself is handled one level up by the app-wide command write-ahead log (specs/editing-model.md §Dirty State & Saving), which captures the committed `MeshEditCommand` like any other command.
 
 ### Skinned/animated meshes
 - Edit mode disabled with an explanatory badge ("mesh has skeletal binding — mesh editing would break weights"). Explicit non-silent refusal, per app philosophy.

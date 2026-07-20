@@ -1,0 +1,32 @@
+#usda 1.0
+(
+    defaultPrim = "Character"
+    upAxis = "Y"
+)
+
+def SkelRoot "Character"
+{
+    def Skeleton "Skel"
+    {
+        uniform matrix4d[] bindTransforms = [( (1,0,0,0),(0,1,0,0),(0,0,1,0),(0,0,0,1) ), ( (1,0,0,0),(0,1,0,0),(0,0,1,0),(0,1,0,1) )]
+        uniform token[] joints = ["Root", "Root/Bone"]
+        uniform matrix4d[] restTransforms = [( (1,0,0,0),(0,1,0,0),(0,0,1,0),(0,0,0,1) ), ( (1,0,0,0),(0,1,0,0),(0,0,1,0),(0,1,0,1) )]
+    }
+
+    def SkelAnimation "Anim"
+    {
+        uniform token[] joints = ["Root", "Root/Bone"]
+        quatf[] rotations.timeSamples = {
+            1: [(1,0,0,0), (1,0,0,0)],
+            24: [(1,0,0,0), (0.707,0.707,0,0)],
+        }
+        half3[] scales.timeSamples = {
+            1: [(1,1,1), (1,1,1)],
+            24: [(1,1,1), (1,1,1)],
+        }
+        float3[] translations.timeSamples = {
+            1: [(0,0,0), (0,1,0)],
+            24: [(0,0,0), (0,2,0)],
+        }
+    }
+}
