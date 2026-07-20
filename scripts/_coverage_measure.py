@@ -70,9 +70,42 @@ all_manifest = []
 file_reports = []
 uncovered_detail = []
 
+def under_source_dir(fn):
+    """Is `fn` inside the module's source tree?
+
+    A plain case-sensitive `startswith` is wrong here. macOS and Windows have
+    case-INSENSITIVE filesystems, so the same directory legitimately reaches us
+    spelled two ways: llvm bakes the on-disk casing into codecov.json
+    (`/Users/hunter/Dev/...`) while `source_dir` inherits whatever casing the
+    caller happened to `cd` through (`/Users/hunter/dev/...`). Both resolve to
+    the same directory; a case-sensitive prefix test says they don't, silently
+    matches zero files, and reports a vacuous 100%.
+
+    `os.path.normcase` is a no-op on POSIX, so probe the filesystem instead and
+    only fold case when it is genuinely case-insensitive — that keeps the test
+    exact on case-sensitive Linux CI, where two paths differing only in case
+    really are different files.
+    """
+    a, b = os.path.abspath(fn), source_dir + os.sep
+    if a.startswith(b):
+        return True
+    return FS_CASE_INSENSITIVE and a.lower().startswith(b.lower())
+
+
+def _fs_is_case_insensitive(path):
+    """True when `path` resolves identically under a case-flipped spelling."""
+    flipped = path.upper() if path != path.upper() else path.lower()
+    try:
+        return os.path.samefile(path, flipped)
+    except OSError:
+        return False
+
+
+FS_CASE_INSENSITIVE = _fs_is_case_insensitive(source_dir)
+
 for f in sorted(data["files"], key=lambda f: f["filename"]):
     fn = f["filename"]
-    if not os.path.abspath(fn).startswith(source_dir + os.sep):
+    if not under_source_dir(fn):
         continue
     rel = fn.split("/Packages/")[-1] if "/Packages/" in fn else fn.split("/")[-1]
 
@@ -101,6 +134,22 @@ for f in sorted(data["files"], key=lambda f: f["filename"]):
     if uncovered:
         src = open(fn).read().splitlines()
         uncovered_detail.append((rel, [(L, src[L - 1].strip()) for L in uncovered]))
+
+# Defence in depth, independent of the cause. Measuring zero source files means
+# the gate did not measure anything — which is not the same as "everything is
+# covered" and must never be reported as a pass. This is the failure mode that
+# silently made all 13 module gates vacuous: a case-mismatched source_dir
+# matched no files, total_lines stayed 0, and `100.0 if total_lines == 0` turned
+# "measured nothing" into a green 100%. Fail loudly instead, in report mode too.
+if not file_reports:
+    print(f"    ✗ measured ZERO source files under {source_dir}")
+    print("      The coverage report contains no files from this module's source")
+    print("      tree, so nothing was measured. This is a gate/config fault, not")
+    print("      a passing module. Check that the path exists, that its casing")
+    print("      matches the paths in codecov.json, and that the suite ran with")
+    print("      --enable-code-coverage.")
+    print("  MODULE_PCT=0.0  (0/0 lines — NOT MEASURED)")
+    sys.exit(1)
 
 module_pct = 100.0 if total_lines == 0 else 100.0 * covered_lines / total_lines
 

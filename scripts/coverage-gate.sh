@@ -54,8 +54,8 @@ MODULES=(
   "CLI|CLI|Sources|95"
   "USDBridge|Packages/USDBridge|Sources/USDBridge|95"          # spec floor; measures 100 today
   # Ratchet floors — pinned below spec target (noted), gap tracked in ROADMAP Phase T.
-  "ViewportKit|Packages/ViewportKit|Sources/ViewportKit|46"    # ratchet raised 40→46 by the gizmo-family math; spec target 90
-  "EditorUI|Packages/EditorUI|Sources/EditorUI|27"             # spec target 90
+  "ViewportKit|Packages/ViewportKit|Sources/ViewportKit|50"    # ratchet 46→50; spec target 90
+  "EditorUI|Packages/EditorUI|Sources/EditorUI|34"             # ratchet 27→34; spec target 90
 )
 
 REPORT=0
@@ -68,6 +68,11 @@ for arg in "$@"; do
 done
 
 overall_fail=0
+# A module that measured ZERO source files is a gate/config fault, not a low
+# score. It fails even in --report mode, which otherwise never fails: report
+# mode is for auditing real numbers, and "no number at all" is never a real
+# number. Kept separate from overall_fail for exactly that reason.
+not_measured=0
 summary=()
 
 for row in "${MODULES[@]}"; do
@@ -89,7 +94,13 @@ for row in "${MODULES[@]}"; do
   result="$(python3 "$ROOT/scripts/_coverage_measure.py" \
               "$codecov_json" "$ROOT/$pkgdir/$srcsub" "$floor" "$REPORT")" || {
     echo "$result"
-    overall_fail=1; summary+=("$name: BELOW-FLOOR"); continue
+    overall_fail=1
+    if [[ "$result" == *"NOT MEASURED"* ]]; then
+      not_measured=1; summary+=("$name: NOT-MEASURED (gate fault)")
+    else
+      summary+=("$name: BELOW-FLOOR")
+    fi
+    continue
   }
   echo "$result"
   pct="$(echo "$result" | sed -n 's/.*MODULE_PCT=\([0-9.]*\).*/\1/p')"
@@ -100,6 +111,12 @@ echo ""
 echo "──── coverage summary"
 for s in "${summary[@]}"; do echo "  $s"; done
 
+if [[ "$not_measured" == "1" ]]; then
+  echo ""
+  echo "Coverage gate FAILED — a module measured zero source files."
+  echo "This is a gate/config fault: nothing was measured, so nothing is proven."
+  exit 1
+fi
 if [[ "$REPORT" == "1" ]]; then
   echo ""
   echo "(report mode — no gate enforced)"
