@@ -1,0 +1,52 @@
+name: Release
+
+# Cuts an unsigned macOS build on every version tag and attaches it to the
+# GitHub Release (ROADMAP Phase 1 / Milestone 2 — "unsigned release builds on
+# GitHub Releases"). Signing is intentionally out of scope: the project has no
+# Developer ID, so downloaders clear Gatekeeper themselves (docs/BUILD.md).
+on:
+  push:
+    tags:
+      - "v*"
+  # Allow a manual dry run from the Actions tab without publishing a Release.
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode_16.4.app || true
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Build unsigned Release app
+        run: bash scripts/build-release.sh dist
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: OpenUSDZEditor-macos
+          path: dist/OpenUSDZEditor-macos.zip
+
+      - name: Attach to GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/OpenUSDZEditor-macos.zip
+          body: |
+            Unsigned macOS build of OpenUSDZEditor ${{ github.ref_name }}.
+
+            This build is **not code-signed or notarized**. To run it, see
+            [docs/BUILD.md](https://github.com/hunterh37/OpenUSDZEditor/blob/main/docs/BUILD.md)
+            § Running an unsigned build.

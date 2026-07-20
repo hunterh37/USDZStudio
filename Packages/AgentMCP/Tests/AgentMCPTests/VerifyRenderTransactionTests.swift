@@ -198,6 +198,103 @@ struct StubRenderer: RenderExecuting {
     }
 }
 
+@Suite struct ArbitraryAngleRenderTests {
+
+    private func renderServer(failFor: String? = nil) -> (MCPServer, URL) {
+        let work = Fixtures.tempDirectory()
+        let server = Fixtures.server(
+            session: Fixtures.session(),
+            configuration: .init(renderer: StubRenderer(recorded: { _ in }, failFor: failFor),
+                                 workDirectory: work))
+        return (server, work)
+    }
+
+    @Test func rendersArbitraryOrbitAngles() async {
+        let recorder = Recorder()
+        let work = Fixtures.tempDirectory()
+        let server = Fixtures.server(
+            session: Fixtures.session(),
+            configuration: .init(renderer: StubRenderer(recorded: { recorder.append($0) }),
+                                 workDirectory: work))
+        // Angles-only: no default named views injected.
+        let rendered = await callOK(server, "render_views", [
+            "angles": [["azimuth": 30, "elevation": 20], ["azimuth": 120, "elevation": 80, "distance": 1.5]],
+        ])
+        let images = rendered["images"].arrayValue!
+        #expect(images.count == 2)
+        #expect(images.map { $0["view"].stringValue! } == ["angle0", "angle1"])
+        #expect(recorder.snapshot().map(\.camera).sorted() == ["/AgentCam_angle0", "/AgentCam_angle1"])
+
+        // Named views and custom angles combine.
+        let both = await callOK(server, "render_views", ["views": ["front"], "angles": [["azimuth": 45, "elevation": 30]]])
+        #expect(both["images"].arrayValue?.map { $0["view"].stringValue! } == ["front", "angle0"])
+    }
+
+    @Test func angleValidation() async {
+        let (server, _) = renderServer()
+        _ = await callError(server, "render_views", ["angles": "nope"])
+        _ = await callError(server, "render_views", ["angles": [["azimuth": 10]]])
+        _ = await callError(server, "render_views", ["angles": [["azimuth": 10, "elevation": 120]]])
+        _ = await callError(server, "render_views", ["angles": [["azimuth": 10, "elevation": 10, "distance": 0]]])
+        // Empty views + empty angles → nothing to render.
+        _ = await callError(server, "render_views", ["views": [], "angles": []])
+        // Bad named view still rejected.
+        _ = await callError(server, "render_views", ["views": ["hero"]])
+        // Angle render failure surfaces the shot name.
+        let (failing, _) = renderServer(failFor: "angle0")
+        let failure = await callError(failing, "render_views", ["angles": [["azimuth": 0, "elevation": 45]]])
+        #expect(failure.contains("render 'angle0' failed"))
+    }
+
+    @Test func findBestViewRanksAngles() async {
+        let server = Fixtures.server(session: Fixtures.session())
+        let result = await callOK(server, "find_best_view", ["count": 2])
+        let angles = result["angles"].arrayValue!
+        #expect(angles.count == 2)
+        // Coverage is monotonically non-increasing (best first).
+        let coverages = angles.map { $0["coverage"].doubleValue! }
+        #expect(coverages[0] >= coverages[1])
+        #expect(coverages.allSatisfy { $0 > 0 })
+        #expect(angles[0]["azimuth"].doubleValue != nil)
+
+        // Isolated subject + default count.
+        let solo = await callOK(server, "find_best_view", ["paths": ["/Root/Box"]])
+        #expect(solo["angles"].arrayValue?.count == 3)
+
+        // Errors: bad count, empty geometry.
+        _ = await callError(server, "find_best_view", ["count": 0])
+        let empty = EditSession(snapshot: StageSnapshot(
+            rootPrims: [Prim(path: PrimPath("/Empty")!, typeName: "Xform")]))
+        let emptyServer = Fixtures.server(session: empty)
+        let message = await callError(emptyServer, "find_best_view")
+        #expect(message.contains("nothing measurable"))
+    }
+
+    @Test func sphericalCameraGeometry() {
+        let bbox = GeometryProbe.BBox(min: [-1, -1, -1], max: [1, 1, 1])
+        // Azimuth 0 / elevation 0 sits on +Z, like the front view.
+        let front = RenderTools.eyePosition(
+            angle: .init(azimuth: 0, elevation: 0), distance: 5, center: [0, 0, 0])
+        #expect(abs(front[2] - 5) < 1e-9 && abs(front[0]) < 1e-9 && abs(front[1]) < 1e-9)
+        // Elevation 90 lifts straight up and swaps the up reference at the pole.
+        let top = RenderTools.eyePosition(
+            angle: .init(azimuth: 0, elevation: 90), distance: 5, center: [0, 0, 0])
+        #expect(abs(top[1] - 5) < 1e-9)
+        #expect(RenderTools.upVector(elevation: 90) == [0, 0, -1])
+        #expect(RenderTools.upVector(elevation: 30) == [0, 1, 0])
+
+        let cam = RenderTools.sphericalCamera(
+            name: "angle0", angle: .init(azimuth: 45, elevation: 30, distance: 2), framing: bbox)
+        #expect(cam.typeName == "Camera")
+        #expect(cam.path.description == "/AgentCam_angle0")
+
+        // A frontal box projects a unit-ish square; footprint is positive.
+        let footprint = RenderTools.projectedFootprint(framing: bbox, angle: .init(azimuth: 0, elevation: 0))
+        #expect(footprint > 0)
+        #expect(RenderTools.corners(of: bbox).count == 8)
+    }
+}
+
 /// Tiny thread-safe recorder for stub callbacks.
 final class Recorder: @unchecked Sendable {
     private var items: [StubRenderer.Invocation] = []

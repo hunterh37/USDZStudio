@@ -157,6 +157,12 @@ public struct EditorShellView: View {
                              onCreateDocument: onCreateDocument)
             case .export:
                 ExportPanel(sourceURL: modelURL,
+                            // Re-evaluated per profile change against the live
+                            // snapshot, so the gate reflects edits made while
+                            // the sheet is open rather than a stale check.
+                            evaluate: stage.map { current in
+                                { ExportGate.evaluate(stage: current, profileID: $0) }
+                            },
                             onExport: { runExport(to: $0) },
                             onClose: dismissSheet)
             }
