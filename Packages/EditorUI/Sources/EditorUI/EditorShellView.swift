@@ -34,6 +34,12 @@ public struct EditorShellView: View {
     /// which holds the document).
     let onReimportFile: (URL) async -> Void
 
+    /// Builds a fresh interactive-console controller wired to the live document
+    /// (nil when no Python/document is available). Supplied by the app, which
+    /// owns the bridge executor and StageSaver seams the console round-trips
+    /// through. Rebuilt each time the console opens so it binds current state.
+    let makeConsoleController: () -> ReplController?
+
     /// Creates a fresh, empty scratch document and makes it the live document,
     /// returning it. Lets features like the library start a new scene when none
     /// is open (nil if the host can't create one, e.g. previews).
@@ -75,6 +81,9 @@ public struct EditorShellView: View {
     /// sync with the open stage's authored time range via `configure(from:)`.
     @State private var playback = PlaybackController()
     @State private var activeSheet: Sheet?
+    /// The console controller for the currently-open console sheet (built via
+    /// `makeConsoleController` when the console opens).
+    @State private var consoleController: ReplController?
 
     /// Output format for the one-click export, shared with the export panel and
     /// persisted across launches.
@@ -98,14 +107,14 @@ public struct EditorShellView: View {
 
 
     private enum Sheet: String, Identifiable {
-        case convert, batch, scripts, library, export
+        case convert, batch, scripts, library, console, export
         var id: String { rawValue }
     }
 
     /// Menu-bar commands post these; the shell mirrors its toolbar actions so
     /// menu shortcuts and toolbar buttons drive the same state.
     public enum MenuCommand: String {
-        case convert, batch, scripts, library, validate, mcpActivity, export
+        case convert, batch, scripts, library, console, validate, mcpActivity, export
         public static let notification = Notification.Name("EditorUI.MenuCommand")
     }
 
@@ -116,6 +125,7 @@ public struct EditorShellView: View {
                 mcpActivity: MCPActivityModel? = nil,
                 makeScriptExecutor: @escaping () -> (any ScriptExecuting)? = { nil },
                 onReimportFile: @escaping (URL) async -> Void = { _ in },
+                makeConsoleController: @escaping () -> ReplController? = { nil },
                 onCreateDocument: @escaping () -> EditorDocument? = { nil },
                 onExport: @escaping (URL) async throws -> Void = { _ in }) {
         self.document = document
@@ -125,6 +135,7 @@ public struct EditorShellView: View {
         self.mcpActivity = mcpActivity
         self.makeScriptExecutor = makeScriptExecutor
         self.onReimportFile = onReimportFile
+        self.makeConsoleController = makeConsoleController
         self.onCreateDocument = onCreateDocument
         self.onExport = onExport
     }
@@ -155,6 +166,12 @@ public struct EditorShellView: View {
             case .library:
                 LibraryPanel(onClose: dismissSheet, document: document,
                              onCreateDocument: onCreateDocument)
+            case .console:
+                if let consoleController {
+                    ConsolePanel(controller: consoleController, onClose: dismissSheet)
+                } else {
+                    unavailableSheet("The Python console needs an open document and a Python runtime.")
+                }
             case .export:
                 ExportPanel(sourceURL: modelURL,
                             // Re-evaluated per profile change against the live
@@ -176,6 +193,7 @@ public struct EditorShellView: View {
             case .batch: activeSheet = .batch
             case .scripts: activeSheet = .scripts
             case .library: activeSheet = .library
+            case .console: openConsole()
             case .validate: if stage != nil { showValidation.toggle() }
             case .mcpActivity: if mcpActivity != nil { showMCPActivity.toggle() }
             case .export: if document != nil { activeSheet = .export }
@@ -185,6 +203,31 @@ public struct EditorShellView: View {
 
     private func dismissSheet() { activeSheet = nil }
 
+    /// Builds a fresh console controller bound to current state, then opens the
+    /// console sheet. No-op when the host can't supply one (no document/Python).
+    private func openConsole() {
+        guard let controller = makeConsoleController() else { return }
+        consoleController = controller
+        activeSheet = .console
+    }
+
+    /// Placeholder shown when a sheet's backing feature isn't available.
+    private func unavailableSheet(_ message: String) -> some View {
+        VStack(spacing: Spacing.md) {
+            Image(systemName: "exclamationmark.triangle")
+                .font(.system(size: TypeScale.title))
+                .foregroundStyle(Palette.textSecondary.color)
+            Text(message)
+                .font(.system(size: TypeScale.body))
+                .foregroundStyle(Palette.textSecondary.color)
+                .multilineTextAlignment(.center)
+            Button("Close", action: dismissSheet).keyboardShortcut(.cancelAction)
+        }
+        .padding(Spacing.xl)
+        .frame(width: 420, height: 240)
+        .background(Palette.windowBackground.color)
+    }
+
     // MARK: Action bar
 
     private var actionBar: some View {
@@ -192,6 +235,8 @@ public struct EditorShellView: View {
             actionButton("Convert", systemImage: "arrow.triangle.2.circlepath") { activeSheet = .convert }
             actionButton("Batch", systemImage: "square.stack.3d.up") { activeSheet = .batch }
             actionButton("Scripts", systemImage: "curlybraces") { activeSheet = .scripts }
+            actionButton("Console", systemImage: "terminal") { openConsole() }
+                .disabled(document == nil)
             Divider().frame(height: 16).overlay(Palette.borderSubtle.color)
             actionButton(showValidation ? "Hide Issues" : "Validate",
                          systemImage: "checkmark.shield",
