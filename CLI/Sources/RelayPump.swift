@@ -1,5 +1,4 @@
 import Foundation
-import Network
 
 /// Pure frame codec + decision logic for the CLI↔editor relay
 /// (specs/agent-live-editing.md).
@@ -93,9 +92,9 @@ enum RelayCodec {
 }
 
 // coverage:disable — composition-root network IO: opens/reopens a live
-// localhost connection to the running editor and pumps stdin↔socket↔stdout.
+// AF_UNIX connection to the running editor and pumps stdin↔socket↔stdout.
 // The frame codec and decision logic (`RelayCodec`) are unit-tested; exercising
-// NWConnection needs a live listener, covered by the end-to-end recipe.
+// a live UNIX socket needs a listening editor, covered by the end-to-end recipe.
 
 /// Result of awaiting one relayed request.
 private enum RelayReply {
@@ -111,7 +110,7 @@ final class RelayPump: @unchecked Sendable {
     private let queue = DispatchQueue(label: "openusdz.relay")
     private let lock = NSLock()
 
-    private var connection: NWConnection?
+    private var connection: UnixSocketClient?
     private var buffer = Data()
     private var waiters: [Int: CheckedContinuation<RelayReply, Never>] = [:]
     private var nextID = 0
@@ -126,10 +125,11 @@ final class RelayPump: @unchecked Sendable {
         self.endpointURL = endpointURL
     }
 
-    /// A live, reachable editor endpoint right now (nil otherwise).
+    /// A live, reachable editor endpoint right now (nil otherwise): a discovery
+    /// record naming a non-empty socket path whose owning pid is still alive.
     static func liveEndpoint(at url: URL) -> MCPEndpointInfo? {
         guard let info = SocketEventSink.readEndpoint(from: url),
-              info.port > 0,
+              !info.socketPath.isEmpty,
               kill(pid_t(info.pid), 0) == 0 || errno == EPERM
         else { return nil }
         return info
@@ -194,19 +194,34 @@ final class RelayPump: @unchecked Sendable {
         lock.lock()
         if connection != nil { lock.unlock(); return true }
         lock.unlock()
+        // Re-resolve on every (re)connect so an app restart onto a new socket
+        // path (or a new pid) is picked up transparently.
         guard let info = Self.liveEndpoint(at: endpointURL),
-              let port = NWEndpoint.Port(rawValue: UInt16(info.port)) else { return false }
-        let conn = NWConnection(host: "127.0.0.1", port: port, using: .tcp)
-        conn.stateUpdateHandler = { [weak self] state in
-            switch state {
-            case .failed, .cancelled: self?.dropConnection()
-            default: break
+              let conn = UnixSocketClient.connect(path: info.socketPath, queue: queue)
+        else { return false }
+        conn.startReceiving(
+            onData: { [weak self] data in self?.ingest(data) },
+            onClose: { [weak self] in self?.dropConnection() })
+        lock.lock(); connection = conn; buffer = Data(); lock.unlock()
+        return true
+    }
+
+    /// Fold received bytes into the rolling buffer, resolve any complete
+    /// `rpc_response` lines, and resume the matching request waiters.
+    private func ingest(_ data: Data) {
+        lock.lock()
+        buffer.append(data)
+        let (lines, rest) = RelayCodec.drainLines(buffer)
+        buffer = rest
+        var resumed: [(CheckedContinuation<RelayReply, Never>, String)] = []
+        for line in lines {
+            if let resp = RelayCodec.decodeResponse(line),
+               let c = waiters.removeValue(forKey: resp.id) {
+                resumed.append((c, resp.line))
             }
         }
-        conn.start(queue: queue)
-        lock.lock(); connection = conn; buffer = Data(); lock.unlock()
-        receiveLoop(conn)
-        return true
+        lock.unlock()
+        for (c, line) in resumed { c.resume(returning: .ok(line)) }
     }
 
     private func allocID() -> Int {
@@ -215,7 +230,7 @@ final class RelayPump: @unchecked Sendable {
 
     private func send(_ data: Data) {
         lock.lock(); let conn = connection; lock.unlock()
-        conn?.send(content: data, completion: .contentProcessed { _ in })
+        conn?.send(data)
     }
 
     private func awaitReply(id: Int) async -> RelayReply {
@@ -232,32 +247,9 @@ final class RelayPump: @unchecked Sendable {
         }
     }
 
-    private func receiveLoop(_ conn: NWConnection) {
-        conn.receive(minimumIncompleteLength: 1, maximumLength: 64 * 1024) { [weak self] data, _, isComplete, error in
-            guard let self else { return }
-            if let data, !data.isEmpty {
-                self.lock.lock()
-                self.buffer.append(data)
-                let (lines, rest) = RelayCodec.drainLines(self.buffer)
-                self.buffer = rest
-                var resumed: [(CheckedContinuation<RelayReply, Never>, String)] = []
-                for line in lines {
-                    if let resp = RelayCodec.decodeResponse(line),
-                       let c = self.waiters.removeValue(forKey: resp.id) {
-                        resumed.append((c, resp.line))
-                    }
-                }
-                self.lock.unlock()
-                for (c, line) in resumed { c.resume(returning: .ok(line)) }
-            }
-            if isComplete || error != nil { self.dropConnection(); return }
-            self.receiveLoop(conn)
-        }
-    }
-
     private func dropConnection() {
         lock.lock()
-        connection?.cancel()
+        connection?.close()
         connection = nil
         let pending = waiters
         waiters.removeAll()

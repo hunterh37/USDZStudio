@@ -18,9 +18,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
-        // Remove the activity-endpoint discovery file so a later-spawned server
-        // doesn't try to reach a dead port.
-        try? FileManager.default.removeItem(at: MCPActivityListener.endpointURL())
+        // Remove the discovery file + UNIX socket so a later-spawned pump doesn't
+        // try to reach a dead editor — but only if this instance owns them, so a
+        // quitting second instance never orphans the first's endpoint.
+        MCPActivityListener.removeEndpointIfOwned()
     }
 }
 
