@@ -33,6 +33,25 @@ struct LibraryInsertionTests {
         #expect(doc.snapshot.rootPrims.isEmpty)
     }
 
+    @Test func insertSelectsTheNewPrim() {
+        let doc = EditorDocument(snapshot: StageSnapshot(rootPrims: []))
+        LibraryInsertion.insert(cube(), into: doc)
+        // The inserted Xform must be selected so it behaves like any other
+        // freshly created prim.
+        #expect(doc.selection.paths == [PrimPath("/Cube")!])
+    }
+
+    @Test func insertedPrimCanEnterMeshEditModeViaToggle() {
+        let doc = EditorDocument(snapshot: StageSnapshot(rootPrims: []))
+        LibraryInsertion.insert(cube(), into: doc)
+        // ⇥ right after a library insert must enter edit mode, not hit the
+        // "Nothing selected" guard. `toggleMeshEditMode` descends the Xform to
+        // its editable Mesh child.
+        doc.toggleMeshEditMode()
+        #expect(doc.meshEdit != nil)
+        #expect(doc.meshEditRefusal == nil)
+    }
+
     @Test func insertUniquifiesCollidingNames() {
         let doc = EditorDocument(snapshot: StageSnapshot(rootPrims: []))
         LibraryInsertion.insert(cube(), into: doc)
