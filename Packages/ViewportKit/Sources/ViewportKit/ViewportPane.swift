@@ -81,6 +81,11 @@ public struct ViewportPane: View {
     /// hides it. Dragging the handle reports phases through `onGizmoDrag`.
     let extrudeGizmo: ExtrudeGizmoDescriptor?
     let onGizmoDrag: ((ExtrudeGizmoDragPhase) -> Void)?
+    /// Object-mode move gizmo (three XYZ arrows at the selection's world
+    /// pivot); `nil` hides it. Dragging an arrow reports phases through
+    /// `onTranslateGizmoDrag`.
+    let translateGizmo: TranslateGizmoDescriptor?
+    let onTranslateGizmoDrag: ((TranslateGizmoDragPhase) -> Void)?
     /// Scripted camera (guided tour): while non-nil the pose overrides the
     /// user-driven orbit camera. `nil` = normal mouse control.
     let cameraPose: ViewportCameraPose?
@@ -103,6 +108,7 @@ public struct ViewportPane: View {
     @State private var showStats = true
     @State private var loadError: String?
     @State private var cameraMode: CameraInteractionMode = .rotate
+    @State private var debugMode: DebugViewMode = .shaded
     @StateObject private var cameraLink = ViewportCameraLink()
 
     public init(modelURL: URL?,
@@ -114,6 +120,8 @@ public struct ViewportPane: View {
                 onHoverFace: ((Int?) -> Void)? = nil,
                 extrudeGizmo: ExtrudeGizmoDescriptor? = nil,
                 onGizmoDrag: ((ExtrudeGizmoDragPhase) -> Void)? = nil,
+                translateGizmo: TranslateGizmoDescriptor? = nil,
+                onTranslateGizmoDrag: ((TranslateGizmoDragPhase) -> Void)? = nil,
                 cameraPose: ViewportCameraPose? = nil,
                 liveTransforms: [String: float4x4]? = nil,
                 materialOverrides: [String: MaterialOverride]? = nil,
@@ -127,6 +135,8 @@ public struct ViewportPane: View {
         self.onHoverFace = onHoverFace
         self.extrudeGizmo = extrudeGizmo
         self.onGizmoDrag = onGizmoDrag
+        self.translateGizmo = translateGizmo
+        self.onTranslateGizmoDrag = onTranslateGizmoDrag
         self.cameraPose = cameraPose
         self.liveTransforms = liveTransforms
         self.materialOverrides = materialOverrides
@@ -140,12 +150,20 @@ public struct ViewportPane: View {
                                   editedMesh: editedMesh, onPickFace: onPickFace,
                                   hoverPreview: hoverPreview, onHoverFace: onHoverFace,
                                   extrudeGizmo: extrudeGizmo, onGizmoDrag: onGizmoDrag,
+                                  translateGizmo: translateGizmo,
+                                  onTranslateGizmoDrag: onTranslateGizmoDrag,
                                   cameraLink: cameraLink,
                                   cameraPose: cameraPose, liveTransforms: liveTransforms,
                                   materialOverrides: materialOverrides,
                                   animationTime: animationTime,
+                                  debugMode: debugMode,
                                   stats: $stats, loadError: $loadError)
-            cameraModeControl
+            VStack(alignment: .leading, spacing: 6) {
+                cameraModeControl
+                debugModeControl
+            }
+            .padding(10)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             AxisGizmoView(link: cameraLink)
                 .padding(10)
                 .frame(maxWidth: .infinity, maxHeight: .infinity,
@@ -184,8 +202,22 @@ public struct ViewportPane: View {
         .pickerStyle(.segmented)
         .labelsHidden()
         .fixedSize()
-        .padding(10)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
+    /// Debug view-mode segmented control (specs/viewport.md "Debug View
+    /// Modes"): shaded / wireframe / normals / UV checker / matcap. Swaps the
+    /// projection materials (or adds the wireframe overlay) live.
+    private var debugModeControl: some View {
+        Picker("Debug view mode", selection: $debugMode) {
+            ForEach(DebugViewMode.allCases) { mode in
+                Image(systemName: mode.symbol)
+                    .help(mode.helpText)
+                    .tag(mode)
+            }
+        }
+        .pickerStyle(.segmented)
+        .labelsHidden()
+        .fixedSize()
     }
 }
 
@@ -203,11 +235,14 @@ struct ViewportRepresentable: NSViewRepresentable {
     let onHoverFace: ((Int?) -> Void)?
     let extrudeGizmo: ExtrudeGizmoDescriptor?
     let onGizmoDrag: ((ExtrudeGizmoDragPhase) -> Void)?
+    let translateGizmo: TranslateGizmoDescriptor?
+    let onTranslateGizmoDrag: ((TranslateGizmoDragPhase) -> Void)?
     let cameraLink: ViewportCameraLink
     let cameraPose: ViewportCameraPose?
     let liveTransforms: [String: float4x4]?
     let materialOverrides: [String: MaterialOverride]?
     let animationTime: Double?
+    let debugMode: DebugViewMode
     @Binding var stats: SceneStats?
     @Binding var loadError: String?
 
@@ -233,10 +268,12 @@ struct ViewportRepresentable: NSViewRepresentable {
         context.coordinator.applyEditedMesh(editedMesh, onPickFace: onPickFace,
                                             hoverPreview: hoverPreview, onHoverFace: onHoverFace)
         context.coordinator.applyExtrudeGizmo(extrudeGizmo, onDrag: onGizmoDrag)
+        context.coordinator.applyTranslateGizmo(translateGizmo, onDrag: onTranslateGizmoDrag)
         context.coordinator.applyCameraPose(cameraPose)
         context.coordinator.applyLiveTransforms(liveTransforms)
         context.coordinator.applyMaterialOverrides(materialOverrides)
         context.coordinator.applyAnimationTime(animationTime)
+        context.coordinator.applyDebugMode(debugMode)
     }
 }
 
@@ -293,7 +330,49 @@ final class ViewportCoordinator {
             self?.applyCamera()
         }
         view.onFrame = { [weak self] in self?.frameModel() }
+        // One dispatcher owns the gizmo capture callbacks; whichever gizmo is
+        // active (extrude in mesh-edit, translate in object mode) claims the
+        // drag. A miss on both returns false and the camera takes the gesture.
+        view.onGizmoMouseDown = { [weak self] p in self?.anyGizmoMouseDown(at: p) ?? false }
+        view.onGizmoDragMove = { [weak self] p in self?.anyGizmoDragMoved(to: p) }
+        view.onGizmoDragEnd = { [weak self] in self?.anyGizmoDragEnded() }
     }
+
+    // MARK: Gizmo drag dispatch
+
+    // coverage:disable — mouse-capture routing between RealityKit gizmos; exercised by the editor-harness translate-gizmo scenario, unreachable from unit tests (no NSView/ARView)
+    private enum ActiveGizmoDrag { case extrude, translate }
+    private var activeGizmoDrag: ActiveGizmoDrag?
+
+    private func anyGizmoMouseDown(at point: CGPoint) -> Bool {
+        if gizmoDescriptor != nil, gizmoMouseDown(at: point) {
+            activeGizmoDrag = .extrude
+            return true
+        }
+        if translateDescriptor != nil, translateMouseDown(at: point) {
+            activeGizmoDrag = .translate
+            return true
+        }
+        return false
+    }
+
+    private func anyGizmoDragMoved(to point: CGPoint) {
+        switch activeGizmoDrag {
+        case .extrude: gizmoDragMoved(to: point)
+        case .translate: translateDragMoved(to: point)
+        case nil: break
+        }
+    }
+
+    private func anyGizmoDragEnded() {
+        switch activeGizmoDrag {
+        case .extrude: gizmoDragEnded()
+        case .translate: translateDragEnded()
+        case nil: break
+        }
+        activeGizmoDrag = nil
+    }
+    // coverage:enable
 
     func load(url: URL?) {
         guard url != loadedURL else { return }
@@ -325,7 +404,9 @@ final class ViewportCoordinator {
                 // freshly loaded entities in line with the live stage.
                 self.pruneModelEntities()
                 self.reapplyLiveTransforms()
-                self.reapplyMaterialOverrides()
+                // Re-establishes overrides and the active debug mode together
+                // on the freshly loaded entity tree.
+                self.reapplyDebugMode()
             } catch {
                 guard !Task.isCancelled else { return }
                 self?.onError?("Viewport could not load model: \(error.localizedDescription)")
@@ -448,7 +529,13 @@ final class ViewportCoordinator {
     func applyMaterialOverrides(_ overrides: [String: MaterialOverride]?) {
         guard overrides != appliedMaterialOverrides else { return }
         appliedMaterialOverrides = overrides
-        reapplyMaterialOverrides()
+        if debugMode == .shaded {
+            reapplyMaterialOverrides()
+        } else {
+            // A debug mode owns the materials; fold the new overrides into the
+            // clean base so `shaded` later restores the correct look.
+            reapplyDebugMode()
+        }
     }
 
     private func reapplyMaterialOverrides() {
@@ -492,6 +579,157 @@ final class ViewportCoordinator {
 
     private static func nsColor(_ c: SIMD3<Float>, alpha: Float = 1) -> NSColor {
         NSColor(srgbRed: CGFloat(c.x), green: CGFloat(c.y), blue: CGFloat(c.z), alpha: CGFloat(alpha))
+    }
+
+    // MARK: Debug view modes (wireframe / normals / UV checker / matcap)
+
+    private var debugMode: DebugViewMode = .shaded
+    /// Pristine (or override) materials captured before a material-swap debug
+    /// mode replaced them, keyed by entity identity, so `shaded` restores them.
+    private var savedMaterials: [ObjectIdentifier: [any RealityFoundation.Material]] = [:]
+    private let wireframeAnchor = AnchorEntity(world: .zero)
+    /// Generated debug textures, built once and reused across mode toggles.
+    private var debugTextureCache: [DebugMaterialSpec.Kind: TextureResource] = [:]
+    /// Safety cap: skip wireframe generation for a mesh part above this edge
+    /// count so the debug overlay never tanks a huge scene.
+    private static let maxWireframeEdges = 200_000
+
+    /// Switches the debug shading mode. Cheap when unchanged (mode-gated).
+    func applyDebugMode(_ mode: DebugViewMode) {
+        guard mode != debugMode else { return }
+        debugMode = mode
+        reapplyDebugMode()
+    }
+
+    /// Re-establishes the current debug mode from a clean base. Restores the
+    /// saved materials, re-applies the user's material overrides on top, then
+    /// layers the active debug mode (overlay for wireframe, material swap for
+    /// the rest). Re-run after a model load or an override change.
+    private func reapplyDebugMode() {
+        restoreSavedMaterials()
+        reapplyMaterialOverrides()
+        clearWireframe()
+        switch debugMode {
+        case .shaded:
+            break
+        case .wireframe:
+            buildWireframe()
+        default:
+            if let spec = debugMode.materialSpec { applyDebugMaterial(spec) }
+        }
+    }
+
+    private func forEachModelEntity(_ body: (Entity) -> Void) {
+        for child in modelAnchor.children {
+            child.visit { if $0.components[ModelComponent.self] != nil { body($0) } }
+        }
+    }
+
+    private func restoreSavedMaterials() {
+        for (id, materials) in savedMaterials {
+            forEachModelEntity { entity in
+                guard ObjectIdentifier(entity) == id,
+                      var model = entity.components[ModelComponent.self] else { return }
+                model.materials = materials
+                entity.components.set(model)
+            }
+        }
+        savedMaterials.removeAll()
+    }
+
+    private func applyDebugMaterial(_ spec: DebugMaterialSpec) {
+        guard let material = debugMaterial(spec) else { return }
+        forEachModelEntity { entity in
+            guard var model = entity.components[ModelComponent.self] else { return }
+            let id = ObjectIdentifier(entity)
+            if savedMaterials[id] == nil { savedMaterials[id] = model.materials }
+            model.materials = Array(repeating: material, count: max(1, model.materials.count))
+            entity.components.set(model)
+        }
+    }
+
+    private func debugMaterial(_ spec: DebugMaterialSpec) -> (any RealityFoundation.Material)? {
+        guard let texture = debugTexture(spec.kind) else { return nil }
+        if spec.unlit {
+            var material = UnlitMaterial()
+            material.color = .init(tint: .white, texture: .init(texture))
+            return material
+        }
+        var material = PhysicallyBasedMaterial()
+        material.baseColor = .init(tint: .white, texture: .init(texture))
+        material.roughness = 0.7
+        return material
+    }
+
+    private func debugTexture(_ kind: DebugMaterialSpec.Kind) -> TextureResource? {
+        if let cached = debugTextureCache[kind] { return cached }
+        let source = DebugTextureFactory.texture(for: kind, size: 256)
+        guard let cgImage = Self.cgImage(from: source) else { return nil }
+        // Normals/matcap carry raw colour (no colour-space transform); the UV
+        // checker is a display-space colour texture.
+        let semantic: TextureResource.Semantic = kind == .uvChecker ? .color : .raw
+        guard let resource = try? TextureResource.generate(
+            from: cgImage, options: .init(semantic: semantic)) else { return nil }
+        debugTextureCache[kind] = resource
+        return resource
+    }
+
+    private static func cgImage(from texture: DebugTexture) -> CGImage? {
+        let data = Data(texture.rgba)
+        guard let provider = CGDataProvider(data: data as CFData) else { return nil }
+        return CGImage(
+            width: texture.width, height: texture.height,
+            bitsPerComponent: 8, bitsPerPixel: 32, bytesPerRow: texture.width * 4,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue),
+            provider: provider, decode: nil, shouldInterpolate: false, intent: .defaultIntent)
+    }
+
+    private func clearWireframe() {
+        wireframeAnchor.children.removeAll()
+        if wireframeAnchor.parent != nil { wireframeAnchor.removeFromParent() }
+    }
+
+    /// Builds a thin-box edge overlay for every projection mesh, in world space
+    /// (so it tracks the entities' transforms), from the pure edge extraction.
+    private func buildWireframe() {
+        let material = UnlitMaterial(color: NSColor(white: 0.05, alpha: 0.9))
+        var added = false
+        forEachModelEntity { entity in
+            guard let model = entity.components[ModelComponent.self] else { return }
+            let world = entity.transformMatrix(relativeTo: nil)
+            for part in model.mesh.contents.models.flatMap(\.parts) {
+                guard let indices = part.triangleIndices.map(Array.init) else { continue }
+                let positions = Array(part.positions)
+                let edges = WireframeGeometry.uniqueEdges(triangleIndices: indices)
+                guard edges.count <= Self.maxWireframeEdges else { continue }
+                for edge in edges {
+                    let i0 = Int(edge.x), i1 = Int(edge.y)
+                    guard i0 < positions.count, i1 < positions.count else { continue }
+                    let a = (world * SIMD4<Float>(positions[i0], 1))
+                    let b = (world * SIMD4<Float>(positions[i1], 1))
+                    if let box = Self.edgeBox(SIMD3(a.x, a.y, a.z), SIMD3(b.x, b.y, b.z),
+                                              material: material) {
+                        wireframeAnchor.addChild(box)
+                        added = true
+                    }
+                }
+            }
+        }
+        if added, wireframeAnchor.parent == nil { view?.scene.addAnchor(wireframeAnchor) }
+    }
+
+    private static func edgeBox(_ a: SIMD3<Float>, _ b: SIMD3<Float>,
+                                material: UnlitMaterial) -> ModelEntity? {
+        let dir = b - a
+        let length = simd_length(dir)
+        guard length > 1e-6 else { return nil }
+        let thickness = max(length * 0.02, 1e-4)
+        let box = ModelEntity(mesh: .generateBox(size: SIMD3(thickness, length, thickness)),
+                              materials: [material])
+        box.position = (a + b) / 2
+        box.orientation = simd_quatf(from: SIMD3<Float>(0, 1, 0), to: dir / length)
+        return box
     }
 
     // MARK: Live-stage sync (structural edits)
@@ -714,9 +952,6 @@ final class ViewportCoordinator {
                            onDrag: ((ExtrudeGizmoDragPhase) -> Void)?) {
         onGizmoDrag = onDrag
         let active = descriptor != nil
-        view?.onGizmoMouseDown = active ? { [weak self] p in self?.gizmoMouseDown(at: p) ?? false } : nil
-        view?.onGizmoDragMove = active ? { [weak self] p in self?.gizmoDragMoved(to: p) } : nil
-        view?.onGizmoDragEnd = active ? { [weak self] in self?.gizmoDragEnded() } : nil
         // `applyEditedMesh` clears the edit anchor on every mesh revision, so
         // reattach even when the descriptor itself is unchanged.
         if let current = descriptor ?? gizmoDescriptor, gizmoRoot.parent == nil, active {
@@ -810,6 +1045,148 @@ final class ViewportCoordinator {
         onGizmoDrag?(.ended)
     }
 
+    // MARK: Translate gizmo (object-mode XYZ move arrows)
+
+    // coverage:disable — RealityKit arrow rendering + drag glue; the math is unit-tested (TranslateGizmoMathTests) and the document flow by the editor-harness translate-gizmo scenario
+    /// World-space container for the three arrows; positioned at the
+    /// selection's world pivot and scaled to screen-constant size.
+    private let translateAnchor = AnchorEntity(world: .zero)
+    private let translateRoot = Entity()
+    private var translateDescriptor: TranslateGizmoDescriptor?
+    private var onTranslateGizmoDrag: ((TranslateGizmoDragPhase) -> Void)?
+    /// The shaft+tip models per axis (rawValue-keyed) for drag highlighting.
+    private var translateArrowModels: [Int: [ModelEntity]] = [:]
+    /// Drag reference frozen at mouse-down (same no-feedback-loop idiom as the
+    /// extrude handle): the grabbed axis, the pivot at grab time, and the
+    /// start ray's axis parameter.
+    private var translateDragStart: (axis: GizmoAxis, origin: SIMD3<Double>, param: Double)?
+    private var translateLastDistance = 0.0
+
+    /// DCC-standard axis tints (matching the grid/orientation gizmo):
+    /// X red, Y green, Z blue.
+    private static let axisColors: [NSColor] = [
+        NSColor(srgbRed: 0.91, green: 0.34, blue: 0.30, alpha: 1),
+        NSColor(srgbRed: 0.55, green: 0.83, blue: 0.35, alpha: 1),
+        NSColor(srgbRed: 0.34, green: 0.55, blue: 0.98, alpha: 1),
+    ]
+    private static let activeAxisColor = NSColor(srgbRed: 0.98, green: 0.86, blue: 0.25, alpha: 1)
+
+    /// Shows/hides/re-lays-out the move gizmo (descriptor-gated like the other
+    /// apply* methods; the revision bump on every edit keeps it following the
+    /// object it moves).
+    func applyTranslateGizmo(_ descriptor: TranslateGizmoDescriptor?,
+                             onDrag: ((TranslateGizmoDragPhase) -> Void)?) {
+        onTranslateGizmoDrag = onDrag
+        guard descriptor != translateDescriptor else { return }
+        translateDescriptor = descriptor
+        guard let descriptor else {
+            translateDragStart = nil
+            translateAnchor.removeFromParent()
+            return
+        }
+        if translateRoot.parent == nil { translateAnchor.addChild(translateRoot) }
+        if translateAnchor.parent == nil { view?.scene.addAnchor(translateAnchor) }
+        if translateRoot.children.isEmpty { rebuildTranslateGizmoGeometry() }
+        layoutTranslateGizmo(descriptor)
+    }
+
+    /// Three unit-length arrows (cylinder shaft + cone tip) built along +Y and
+    /// aimed down each axis; `layoutTranslateGizmo` scales the whole root to a
+    /// screen-constant size. Unlit so they read at any angle.
+    private func rebuildTranslateGizmoGeometry() {
+        translateRoot.children.removeAll()
+        translateArrowModels = [:]
+        let shaftRadius = Float(ExtrudeGizmoMath.shaftRadiusFraction)
+        // Cylinder/cone primitives are macOS 15+; box shaft + sphere tip is
+        // the same fallback the extrude handle uses.
+        let shaftMesh: MeshResource
+        let tipMesh: MeshResource
+        if #available(macOS 15.0, *) {
+            shaftMesh = .generateCylinder(height: 0.78, radius: shaftRadius)
+            tipMesh = .generateCone(height: 0.22, radius: 0.06)
+        } else {
+            shaftMesh = .generateBox(size: SIMD3<Float>(shaftRadius * 2, 0.78, shaftRadius * 2))
+            tipMesh = .generateSphere(radius: 0.07)
+        }
+        for axis in GizmoAxis.allCases {
+            let material = UnlitMaterial(color: Self.axisColors[axis.rawValue])
+            let shaft = ModelEntity(mesh: shaftMesh, materials: [material])
+            shaft.position = SIMD3<Float>(0, 0.39, 0)
+            let tip = ModelEntity(mesh: tipMesh, materials: [material])
+            tip.position = SIMD3<Float>(0, 0.89, 0)
+            let arrow = Entity()
+            arrow.addChild(shaft)
+            arrow.addChild(tip)
+            arrow.orientation = simd_quatf(from: SIMD3<Float>(0, 1, 0),
+                                           to: SIMD3<Float>(axis.direction))
+            translateRoot.addChild(arrow)
+            translateArrowModels[axis.rawValue] = [shaft, tip]
+        }
+    }
+
+    /// Anchors the arrows at the selection pivot and scales them to a constant
+    /// apparent size for the current camera distance (re-run on every camera
+    /// change, like the extrude handle).
+    private func layoutTranslateGizmo(_ descriptor: TranslateGizmoDescriptor) {
+        translateRoot.position = SIMD3<Float>(descriptor.origin)
+        let length = ExtrudeGizmoMath.handleLength(cameraDistance: camera.distance)
+        translateRoot.scale = SIMD3<Float>(repeating: Float(length))
+    }
+
+    /// Tints the dragged axis's arrow the active (yellow) colour; `nil`
+    /// restores all three to their axis tints.
+    private func setTranslateHighlight(_ axis: GizmoAxis?) {
+        for a in GizmoAxis.allCases {
+            let color = a == axis ? Self.activeAxisColor : Self.axisColors[a.rawValue]
+            for model in translateArrowModels[a.rawValue] ?? [] {
+                model.model?.materials = [UnlitMaterial(color: color)]
+            }
+        }
+    }
+
+    /// The click's pick ray in world space (the move gizmo lives in world
+    /// space, unlike the prim-local extrude handle).
+    private func worldRay(at point: CGPoint) -> CameraRay.Ray? {
+        guard let view else { return nil }
+        return CameraRay.make(camera: camera, viewSize: view.bounds.size, point: point)
+    }
+
+    /// Mouse-down over an arrow? Then capture the drag (camera stays put).
+    private func translateMouseDown(at point: CGPoint) -> Bool {
+        guard let descriptor = translateDescriptor, let ray = worldRay(at: point) else { return false }
+        let length = ExtrudeGizmoMath.handleLength(cameraDistance: camera.distance)
+        guard let axis = TranslateGizmoMath.hitAxis(ray: ray, origin: descriptor.origin,
+                                                    length: length),
+              let param = ExtrudeGizmoMath.axisParameter(ray: ray, origin: descriptor.origin,
+                                                         axis: axis.direction)
+        else { return false }
+        translateDragStart = (axis, descriptor.origin, param)
+        translateLastDistance = 0
+        setTranslateHighlight(axis)
+        onTranslateGizmoDrag?(.began(axis))
+        return true
+    }
+
+    private func translateDragMoved(to point: CGPoint) {
+        guard let start = translateDragStart else { return }
+        // A ray gone parallel to the axis keeps the last stable distance
+        // instead of jumping — the drag freezes, never glitches.
+        if let ray = worldRay(at: point),
+           let param = ExtrudeGizmoMath.axisParameter(ray: ray, origin: start.origin,
+                                                      axis: start.axis.direction) {
+            translateLastDistance = param - start.param
+        }
+        onTranslateGizmoDrag?(.changed(start.axis, translateLastDistance))
+    }
+
+    private func translateDragEnded() {
+        guard translateDragStart != nil else { return }
+        translateDragStart = nil
+        setTranslateHighlight(nil)
+        onTranslateGizmoDrag?(.ended)
+    }
+    // coverage:enable
+
     private func frameModel() {
         // A scripted pose owns the camera; auto-framing would fight it.
         guard appliedPose == nil, let modelBounds else { return }
@@ -823,8 +1200,9 @@ final class ViewportCoordinator {
         cameraEntity.transform = Transform(matrix: float4x4(lookAtFrom: SIMD3<Float>(camera.position),
                                                             target: SIMD3<Float>(camera.target)))
         cameraLink?.publish(camera)
-        // Keep the extrude handle a constant apparent size as the camera moves.
+        // Keep the gizmo handles a constant apparent size as the camera moves.
         if let descriptor = gizmoDescriptor { layoutGizmo(descriptor) }
+        if let descriptor = translateDescriptor { layoutTranslateGizmo(descriptor) }
     }
 
     private func rebuildGrid(halfExtent: Float) {

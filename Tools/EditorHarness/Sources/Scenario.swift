@@ -42,7 +42,18 @@ struct Scenario: Decodable {
         /// For `mesh.exit`: commit the session to the stage (default true).
         var commit: Bool?
 
+        // Translate gizmo operands.
+        /// Axis for `gizmo.drag` ("x" | "y" | "z"); drag distance rides in
+        /// `number` (world units).
+        var axis: String?
+
         // Expectations.
+        /// Assert the step's path/selection prim's local translation.
+        var translation: [Double]?
+        /// Assert whether the object-mode move gizmo is showing.
+        var gizmoVisible: Bool?
+        /// Assert the move gizmo's world-space origin.
+        var gizmoOrigin: [Double]?
         /// Assert the named input's value (with `number`/`color`, or `isNull`).
         var materialInput: String?
         /// Assert the input carries no authored opinion.
