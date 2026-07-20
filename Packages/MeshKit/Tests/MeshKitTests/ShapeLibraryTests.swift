@@ -64,6 +64,14 @@ struct ShapeLibraryTests {
         #expect(ShapeLibrary.entry(id: "prefab.tree")?.group == .prefabs)
         #expect(ShapeLibrary.entry(id: "nope") == nil)
     }
+
+    @Test func groupTitlesAreDistinctAndNonEmpty() {
+        #expect(LibraryGroup.primitives.title == "Primitive Shapes")
+        #expect(LibraryGroup.prefabs.title == "Low-Poly Objects")
+        let titles = LibraryGroup.allCases.map(\.title)
+        #expect(Set(titles).count == titles.count)
+        #expect(titles.allSatisfy { !$0.isEmpty })
+    }
 }
 
 /// Compositing helpers preserve the Primitives contract.
@@ -89,6 +97,22 @@ struct MeshCompositingTests {
         let box = try Primitives.box(width: 2, height: 1, depth: 3)
         let rotated = box.rotatedY(.pi / 3)
         #expect(abs(rotated.signedVolume - box.signedVolume) < 1e-9)
+    }
+
+    @Test func rotationAboutXPreservesVolume() throws {
+        let box = try Primitives.box(width: 2, height: 1, depth: 3)
+        let rotated = box.rotatedX(.pi / 4)
+        #expect(rotated.faceCount == box.faceCount)
+        #expect(abs(rotated.signedVolume - box.signedVolume) < 1e-9)
+        #expect(MeshInvariants.violations(in: rotated, allowBoundaries: false).isEmpty)
+    }
+
+    @Test func uniformScaleCubesVolume() throws {
+        let box = try Primitives.box()
+        let big = box.scaled(by: 2.0)
+        // Uniform scale by 2 multiplies volume by 2³ = 8.
+        #expect(abs(big.signedVolume - 8 * box.signedVolume) < 1e-9)
+        #expect(big.signedVolume > 0)
     }
 
     @Test func mergeIsDisjointUnion() throws {
