@@ -1,7 +1,6 @@
 import AgentMCP
 import EditorUI
 import Foundation
-import Network
 import USDCore
 
 /// App-side mirror of the NDJSON activity protocol pushed by `openusdz mcp`.
@@ -41,9 +40,11 @@ struct RpcResponseFrame: Encodable {
 }
 
 /// The editor's discovery record, written while the app runs so an
-/// independently-spawned `openusdz mcp` can find the localhost activity port.
+/// independently-spawned `openusdz mcp` can find the editor's UNIX-domain
+/// socket. The transport is AF_UNIX (a file path), not loopback TCP: `port` is
+/// replaced by `socketPath`; `pid`/`token` (liveness) are unchanged.
 struct EndpointRecord: Codable {
-    var port: Int
+    var socketPath: String
     var pid: Int
     var token: String
 }
@@ -59,19 +60,26 @@ final class MCPActivityListener: ObservableObject {
 
     /// Most recent tool calls kept in the panel.
     private let maxRows = 200
-    private var listener: NWListener?
-    private var buffers: [ObjectIdentifier: Data] = [:]
+    private var server: UnixSocketServer?
     private let token = UUID().uuidString
 
-    /// Discovery-file location (mirrors the CLI sink's path).
-    static func endpointURL() -> URL {
+    private static func mcpDirectory() -> URL {
         let base = FileManager.default
             .urls(for: .applicationSupportDirectory, in: .userDomainMask).first
             ?? FileManager.default.temporaryDirectory
         return base
             .appendingPathComponent("OpenUSDZEditor", isDirectory: true)
             .appendingPathComponent("mcp", isDirectory: true)
-            .appendingPathComponent("endpoint.json", isDirectory: false)
+    }
+
+    /// Discovery-file location (mirrors the CLI sink's path).
+    static func endpointURL() -> URL {
+        mcpDirectory().appendingPathComponent("endpoint.json", isDirectory: false)
+    }
+
+    /// The AF_UNIX socket path the pump connects to.
+    static func socketURL() -> URL {
+        mcpDirectory().appendingPathComponent("agent.sock", isDirectory: false)
     }
 
     // MARK: Lifecycle
@@ -80,41 +88,53 @@ final class MCPActivityListener: ObservableObject {
     private let maxListenerRetries = 6
 
     func start() {
-        guard listener == nil else { return }
-        do {
-            let listener = try NWListener(using: .tcp)
-            listener.stateUpdateHandler = { [weak self] state in
-                Task { @MainActor in
-                    guard let self else { return }
-                    switch state {
-                    case .ready:
-                        self.listenerRetries = 0
-                        self.writeEndpoint()
-                    case .failed, .cancelled:
-                        // A transient bind/ready failure must not leave the
-                        // feature permanently inert — restart with backoff.
-                        self.restartListener()
-                    default:
-                        break
-                    }
-                }
-            }
-            listener.newConnectionHandler = { [weak self] conn in
-                Task { @MainActor in self?.accept(conn) }
-            }
-            listener.start(queue: .global(qos: .utility))
-            self.listener = listener
-        } catch {
-            NSLog("MCPActivityListener: failed to start: \(error)")
+        guard server == nil else { return }
+        let socketPath = Self.socketURL().path
+        try? FileManager.default.createDirectory(
+            at: Self.mcpDirectory(), withIntermediateDirectories: true)
+        // Remove a stale socket file left by a dead (or our own prior) instance,
+        // but never steal one a different live instance still owns.
+        cleanupStaleSocket(at: socketPath)
+
+        let server = UnixSocketServer()
+        let ok = server.start(
+            path: socketPath,
+            onLine: { [weak self] line, fd in
+                Task { @MainActor in self?.ingest(line, from: fd) }
+            },
+            onDisconnect: { [weak self] _ in
+                Task { @MainActor in self?.markDisconnected() }
+            })
+        guard ok else {
+            NSLog("MCPActivityListener: failed to bind \(socketPath)")
             restartListener()
+            return
         }
+        self.server = server
+        listenerRetries = 0
+        writeEndpoint(socketPath: socketPath)
     }
 
-    /// Bounded-backoff restart so a slow/failed `NWListener` recovers instead of
+    /// Unlink a leftover socket file whose owning pid is dead (or is us). Leaves
+    /// a socket a *different* live instance owns untouched — that instance is the
+    /// authority, and our bind will simply fail and back off.
+    private func cleanupStaleSocket(at path: String) {
+        guard FileManager.default.fileExists(atPath: path) else { return }
+        let selfPID = Int(ProcessInfo.processInfo.processIdentifier)
+        if let data = try? Data(contentsOf: Self.endpointURL()),
+           let record = try? JSONDecoder().decode(EndpointRecord.self, from: data),
+           record.pid != selfPID,
+           kill(pid_t(record.pid), 0) == 0 || errno == EPERM {
+            return   // a different live instance owns it
+        }
+        try? FileManager.default.removeItem(atPath: path)
+    }
+
+    /// Bounded-backoff restart so a transient bind failure recovers instead of
     /// silently disabling agent connectivity.
     private func restartListener() {
-        listener?.cancel()
-        listener = nil
+        server?.stop()
+        server = nil
         guard listenerRetries < maxListenerRetries else {
             NSLog("MCPActivityListener: giving up after \(maxListenerRetries) retries")
             return
@@ -127,22 +147,27 @@ final class MCPActivityListener: ObservableObject {
     }
 
     func stop() {
-        listener?.cancel()
-        listener = nil
-        // Only remove the discovery file if it's still ours — otherwise a
-        // second instance that has since taken over would be orphaned.
-        let url = Self.endpointURL()
-        if let data = try? Data(contentsOf: url),
-           let record = try? JSONDecoder().decode(EndpointRecord.self, from: data),
-           record.pid == Int(ProcessInfo.processInfo.processIdentifier) {
-            try? FileManager.default.removeItem(at: url)
-        }
+        server?.stop()
+        server = nil
+        Self.removeEndpointIfOwned()
     }
 
-    private func writeEndpoint() {
-        guard let port = listener?.port?.rawValue else { return }
+    /// Remove the discovery file + socket only if this process still owns them.
+    /// A second instance that never became the endpoint owner (its bind lost the
+    /// race and backed off) must not delete the first instance's endpoint on quit.
+    static func removeEndpointIfOwned() {
+        let url = endpointURL()
+        guard let data = try? Data(contentsOf: url),
+              let record = try? JSONDecoder().decode(EndpointRecord.self, from: data),
+              record.pid == Int(ProcessInfo.processInfo.processIdentifier)
+        else { return }
+        try? FileManager.default.removeItem(at: url)
+        try? FileManager.default.removeItem(atPath: socketURL().path)
+    }
+
+    private func writeEndpoint(socketPath: String) {
         let record = EndpointRecord(
-            port: Int(port),
+            socketPath: socketPath,
             pid: Int(ProcessInfo.processInfo.processIdentifier),
             token: token)
         let url = Self.endpointURL()
@@ -155,61 +180,15 @@ final class MCPActivityListener: ObservableObject {
 
     // MARK: Connection handling
 
-    nonisolated private func accept(_ conn: NWConnection) {
-        conn.stateUpdateHandler = { [weak self] state in
-            switch state {
-            case .failed, .cancelled:
-                Task { @MainActor in self?.connectionClosed(conn) }
-            default:
-                break
-            }
+    private func ingest(_ line: Data, from fd: Int32) {
+        // A relay request (editor hosts the server) takes priority; anything
+        // else is legacy activity from an in-process CLI server.
+        if let frame = try? JSONDecoder().decode(RpcRequestFrame.self, from: line),
+           frame.type == "rpc_request" {
+            handleRpc(frame, on: fd)
+        } else if let event = try? JSONDecoder().decode(InboundEvent.self, from: line) {
+            apply(event)
         }
-        conn.start(queue: .global(qos: .utility))
-        receive(on: conn)
-    }
-
-    nonisolated private func receive(on conn: NWConnection) {
-        conn.receive(minimumIncompleteLength: 1, maximumLength: 64 * 1024) {
-            [weak self] data, _, isComplete, error in
-            // Hop to the main actor exactly once: consolidating the ingest,
-            // close, and re-arm into a single @MainActor task keeps `self`'s
-            // isolated state from being touched across concurrent hops (Swift 6
-            // strict-concurrency: "sending 'self' risks data races").
-            let closed = isComplete || error != nil
-            Task { @MainActor [weak self] in
-                guard let self else { return }
-                if let data, !data.isEmpty { self.ingest(data, from: conn) }
-                if closed {
-                    self.connectionClosed(conn)
-                } else {
-                    self.receive(on: conn)
-                }
-            }
-        }
-    }
-
-    private func ingest(_ data: Data, from conn: NWConnection) {
-        let key = ObjectIdentifier(conn)
-        var buffer = buffers[key] ?? Data()
-        buffer.append(data)
-        while let newline = buffer.firstIndex(of: 0x0A) {
-            let line = Data(buffer[buffer.startIndex..<newline])
-            buffer.removeSubrange(buffer.startIndex...newline)
-            // A relay request (editor hosts the server) takes priority; anything
-            // else is legacy activity from an in-process CLI server.
-            if let frame = try? JSONDecoder().decode(RpcRequestFrame.self, from: line),
-               frame.type == "rpc_request" {
-                handleRpc(frame, on: conn)
-            } else if let event = try? JSONDecoder().decode(InboundEvent.self, from: line) {
-                apply(event)
-            }
-        }
-        buffers[key] = buffer
-    }
-
-    private func connectionClosed(_ conn: NWConnection) {
-        buffers[ObjectIdentifier(conn)] = nil
-        markDisconnected()
     }
 
     // MARK: In-app MCP host (specs/agent-live-editing.md)
@@ -238,24 +217,24 @@ final class MCPActivityListener: ObservableObject {
 
     /// Run one relayed JSON-RPC request against the hosted server, mirror the
     /// resulting stage into the live document, and reply on the same socket.
-    private func handleRpc(_ frame: RpcRequestFrame, on conn: NWConnection) {
-        guard let server = hostServer, let session = hostSession else {
-            send(RpcResponseFrame(id: frame.id, line: ""), on: conn)
+    private func handleRpc(_ frame: RpcRequestFrame, on fd: Int32) {
+        guard let hostServer, let session = hostSession else {
+            send(RpcResponseFrame(id: frame.id, line: ""), on: fd)
             return
         }
         Task { @MainActor in
-            let response = await server.handle(data: Data(frame.line.utf8))
+            let response = await hostServer.handle(data: Data(frame.line.utf8))
             // Mirror agent edits into the open document → viewport refresh.
             boundDocument?.applyConsoleEdit(
                 after: session.stage.currentSnapshot, label: "Agent Edit")
-            send(RpcResponseFrame(id: frame.id, line: response?.serializedString ?? ""), on: conn)
+            send(RpcResponseFrame(id: frame.id, line: response?.serializedString ?? ""), on: fd)
         }
     }
 
-    private func send(_ frame: RpcResponseFrame, on conn: NWConnection) {
+    private func send(_ frame: RpcResponseFrame, on fd: Int32) {
         guard var data = try? JSONEncoder().encode(frame) else { return }
         data.append(0x0A)
-        conn.send(content: data, completion: .contentProcessed { _ in })
+        server?.send(data, to: fd)
     }
 
     // MARK: Pure reducer (unit-tested)
