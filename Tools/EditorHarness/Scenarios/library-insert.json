@@ -4,7 +4,8 @@
     { "do": "expect", "rendered": false, "path": "/Cube" },
 
     { "do": "library.add", "shape": "prim.cube" },
-    { "do": "expect", "selection": "" },
+    { "comment": "A library insert moves the selection to the new prim (so Tab enters mesh-edit on it) — see LibraryInsertion.",
+      "do": "expect", "selection": "/Cube" },
 
     { "comment": "The regression: the prim used to reach the outliner but carry no viewport geometry, so it rendered as an invisible layer.",
       "do": "expect", "rendered": true, "path": "/Cube/Geo" },
