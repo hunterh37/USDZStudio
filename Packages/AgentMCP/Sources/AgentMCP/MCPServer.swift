@@ -4,7 +4,7 @@ import Foundation
 /// "Tool groups, activated per session": a client can request a lean
 /// profile, e.g. read+verify only for an audit agent).
 public enum ToolGroup: String, Sendable, CaseIterable {
-    case read, mutate, verify, render, asset, script, transaction, sculpt
+    case read, mutate, verify, render, asset, script, transaction, sculpt, rig
 }
 
 /// One typed MCP tool: name, JSON-Schema input contract, and handler.

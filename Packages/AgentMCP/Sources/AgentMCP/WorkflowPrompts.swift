@@ -150,5 +150,48 @@ public enum WorkflowPrompts {
             new errors, `undo` immediately.
             4. Finish with `check_compliance { profile: "arkit" }` — `isExportAllowed` must be true.
             """))
+
+        server.register(MCPPrompt(
+            name: "identify-and-animate",
+            description: "Animate a rigged skeleton without guessing joint paths, self-validating each step.",
+            text: """
+            Author skeletal animation with verification in the loop:
+            1. `list_joints { prim }` — see the real joint hierarchy (never guess paths).
+            2. `identify_skeleton { prim }` — review the canonical map. If a required bone is \
+            unmatched or its confidence is low, inspect further with `list_joints` or ask the user \
+            BEFORE authoring. Guessing is designed out of the loop.
+            3. Author: `solve_ik { chain, target }` (handle a non-converged SolveResult), \
+            `set_joint_pose`, and `set_keyframe { timeCode }` / `create_clip` on the timeline.
+            4. `render_pose` then `assess_motion` — the deterministic measuredMotionQuality.
+            5. `rig_review { decision: "continue", subjectiveScore }` — the continue-gate requires a \
+            render, a measurement ≥ the floor, AND a subjective score ≥ threshold. If rejected, \
+            `refinePose`/`resolve` (re-solve or re-key) and loop.
+            6. `check_compliance { profile: "arkit" }`, then `save`.
+            """))
+
+        server.register(MCPPrompt(
+            name: "retarget-motion",
+            description: "Retarget a clip onto a canonical-mapped humanoid, minimizing foot-slide.",
+            text: """
+            Retarget motion between humanoids:
+            1. `identify_skeleton` on BOTH the source and target rigs; resolve low-confidence bones first.
+            2. `retarget_clip { sourcePrim, targetPrim, sampleTimes }` — rest-pose reconciliation + \
+            hip-height/scale normalization are applied automatically.
+            3. `render_pose` → `assess_motion` with `footJoints` set, watching foot-slide and \
+            seam-continuity especially.
+            4. `rig_review` loop until the continue-gate passes, then `check_compliance` and `save`.
+            """))
+
+        server.register(MCPPrompt(
+            name: "auto-rig-mesh",
+            description: "Fit a skeleton to an unrigged mesh, bind weights, and test-pose it.",
+            text: """
+            Auto-rig an unrigged mesh:
+            1. `auto_rig { mesh, kind: "humanoid" }` — review the proposed skeleton (`list_joints`); \
+            nudge/confirm the fit.
+            2. `solve_weights { mesh }` — heat/bone-glow binding, clamped to the export influence cap.
+            3. A test `solve_ik` pose to sanity-check the bind, then `render_pose` → `assess_motion` \
+            → `rig_review`.
+            """))
     }
 }
