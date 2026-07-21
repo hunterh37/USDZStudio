@@ -41,60 +41,91 @@ import Testing
         #expect(orch.current == .blockout)
     }
 
-    @Test func blockoutExemptFromFidelityGate() throws {
+    /// Advance an orchestrator to `target` by continuing through each prior
+    /// pass with an evidence bundle that clears both gates (score 0.9, ample
+    /// similarity), so a test can start at the pass it actually wants to probe.
+    func orchestrator(at target: SculptPass, threshold: Double = 0.8,
+                      similarityFloor: Double = 0.55) throws -> PassOrchestrator {
+        var orch = PassOrchestrator()
+        while orch.current != target {
+            let r = PassReview(pass: orch.current, decision: .continue, score: 0.9,
+                               renderPath: "/tmp/r.png", comparisonSheetPath: "/tmp/c.png",
+                               measuredSimilarity: 0.9)
+            _ = try orch.advance(after: r, threshold: threshold, similarityFloor: similarityFloor)
+        }
+        return orch
+    }
+
+    @Test func blockoutExemptFromBothGates() throws {
         // blockout authors geometry at the origin (placement is structural's
         // job), so it is exempt from the score threshold and the similarity
         // floor: a low subjective score and a missing measured similarity still
         // advance, as long as the evidence bundle is present.
         var orch = PassOrchestrator()
-        #expect(!SculptPass.blockout.enforcesFidelityGate)
+        #expect(!SculptPass.blockout.enforcesScoreGate)
+        #expect(!SculptPass.blockout.enforcesSimilarityFloor)
         let result = try orch.advance(
             after: passingReview(.blockout, score: 0.2), threshold: 0.8, similarityFloor: 0.55)
         #expect(result == .advanced(to: .structural))
         #expect(orch.current == .structural)
     }
 
-    @Test func fidelityGateEnforcedFromStructural() throws {
-        // Advance past the exempt blockout, then confirm both fidelity gates
-        // bite at structural — the first pass with a placed, comparable render.
-        var orch = PassOrchestrator()
-        _ = try orch.advance(after: passingReview(.blockout, score: 0.2),
-                             threshold: 0.8, similarityFloor: 0.55)
-        #expect(orch.current == .structural)
-        #expect(SculptPass.structural.enforcesFidelityGate)
+    @Test func scoreGateEnforcedFromStructuralButFloorDeferred() throws {
+        // structural is placed but untextured: the subjective score gate bites,
+        // yet the colour-dependent similarity floor is deferred to `material`.
+        var orch = try orchestrator(at: .structural)
+        #expect(SculptPass.structural.enforcesScoreGate)
+        #expect(!SculptPass.structural.enforcesSimilarityFloor)
 
-        // Score threshold bites.
+        // Score threshold bites at structural.
         #expect(throws: AdvanceError.scoreBelowThreshold(score: 0.5, threshold: 0.8)) {
             try orch.advance(after: passingReview(.structural, score: 0.5),
                              threshold: 0.8, similarityFloor: 0.55)
         }
+        // A low measured similarity does NOT block a geometry pass (floor deferred)
+        // — a passing score with no measured similarity still advances.
+        let result = try orch.advance(after: passingReview(.structural, score: 0.9),
+                                      threshold: 0.8, similarityFloor: 0.55)
+        #expect(result == .advanced(to: .formRefinement))
+    }
+
+    @Test func similarityFloorEnforcedFromMaterial() throws {
+        // material is the first textured pass — the deterministic floor bites here.
+        var orch = try orchestrator(at: .material)
+        #expect(SculptPass.material.enforcesSimilarityFloor)
+
         // Floor requires a measured similarity.
         #expect(throws: AdvanceError.continueRequiresMeasuredSimilarity) {
-            try orch.advance(after: passingReview(.structural, score: 0.9),
+            try orch.advance(after: passingReview(.material, score: 0.9),
                              threshold: 0.8, similarityFloor: 0.55)
         }
         // Floor rejects a low measured similarity.
-        let lowSim = PassReview(pass: .structural, decision: .continue, score: 0.9,
+        let lowSim = PassReview(pass: .material, decision: .continue, score: 0.9,
                                 renderPath: "/tmp/r.png", comparisonSheetPath: "/tmp/c.png",
                                 measuredSimilarity: 0.3)
         #expect(throws: AdvanceError.similarityBelowFloor(measured: 0.3, floor: 0.55)) {
             try orch.advance(after: lowSim, threshold: 0.8, similarityFloor: 0.55)
         }
-        // Still on structural after every rejected attempt.
-        #expect(orch.current == .structural)
+        #expect(orch.current == .material)
 
-        // A sufficient render clears the gate.
-        let ok = PassReview(pass: .structural, decision: .continue, score: 0.9,
+        // A sufficient render clears both gates.
+        let ok = PassReview(pass: .material, decision: .continue, score: 0.9,
                             renderPath: "/tmp/r.png", comparisonSheetPath: "/tmp/c.png",
                             measuredSimilarity: 0.6)
         let result = try orch.advance(after: ok, threshold: 0.8, similarityFloor: 0.55)
-        #expect(result == .advanced(to: .formRefinement))
+        #expect(result == .advanced(to: .surface))
     }
 
-    @Test func enforcesFidelityGateProperty() {
-        #expect(!SculptPass.blockout.enforcesFidelityGate)
+    @Test func gateProperties() {
+        // Score gate: exempt only for blockout.
+        #expect(!SculptPass.blockout.enforcesScoreGate)
         for pass in SculptPass.allCases where pass != .blockout {
-            #expect(pass.enforcesFidelityGate)
+            #expect(pass.enforcesScoreGate)
+        }
+        // Similarity floor: only the textured passes (material onward).
+        let textured: Set<SculptPass> = [.material, .surface, .lighting, .interaction, .optimization]
+        for pass in SculptPass.allCases {
+            #expect(pass.enforcesSimilarityFloor == textured.contains(pass))
         }
     }
 
