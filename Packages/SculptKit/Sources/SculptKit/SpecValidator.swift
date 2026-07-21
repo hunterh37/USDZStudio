@@ -84,6 +84,10 @@ public enum SpecValidator {
         issues.append(contentsOf: surfaceSchemaIssues(spec, componentNames: seenNames))
         issues.append(contentsOf: landmarkSchemaIssues(spec, componentNames: seenNames))
 
+        // Lighting + LOD schema (always).
+        issues.append(contentsOf: lightSchemaIssues(spec))
+        issues.append(contentsOf: lodSchemaIssues(spec))
+
         // ── Strict-quality gate (opt-in) ──────────────────────────────────
         if strictQuality {
             issues.append(contentsOf: strictQualityIssues(spec, assessment: assessment))
@@ -231,6 +235,71 @@ public enum SpecValidator {
         return issues
     }
 
+    // MARK: - Lighting schema
+
+    /// Validate authored lights: unique USD-valid names, finite non-negative
+    /// intensity, an RGB colour in 0...1, and [x,y,z] transform vectors.
+    static func lightSchemaIssues(_ spec: ObjectSculptSpec) -> [SpecIssue] {
+        var issues: [SpecIssue] = []
+        var seen = Set<String>()
+        for light in spec.lights {
+            if !PrimName.isValid(light.name) {
+                issues.append(.init(.error, "light name '\(light.name)' is not a valid USD identifier"))
+            }
+            if !seen.insert(light.name).inserted {
+                issues.append(.init(.error, "duplicate light name '\(light.name)'"))
+            }
+            if !light.intensity.isFinite || light.intensity < 0 {
+                issues.append(.init(.error, "light '\(light.name)' intensity must be finite and >= 0"))
+            }
+            issues.append(contentsOf: colorIssues(light.color, label: "light '\(light.name)' color"))
+            for (vec, label) in [(light.translation, "translation"), (light.rotationEulerDegrees, "rotation")] {
+                if vec.count != 3 {
+                    issues.append(.init(.error, "light '\(light.name)' \(label) must be [x, y, z]"))
+                } else if vec.contains(where: { !$0.isFinite }) {
+                    issues.append(.init(.error, "light '\(light.name)' \(label) must be finite"))
+                }
+            }
+        }
+        return issues
+    }
+
+    // MARK: - LOD schema
+
+    /// Validate LOD tiers: non-empty names, a screen-coverage threshold in
+    /// 0...1, and a decimation fraction in (0, 1].
+    static func lodSchemaIssues(_ spec: ObjectSculptSpec) -> [SpecIssue] {
+        var issues: [SpecIssue] = []
+        for tier in spec.lodTiers {
+            if tier.name.isEmpty {
+                issues.append(.init(.error, "LOD tier name must not be empty"))
+            }
+            if !tier.screenCoverage.isFinite || tier.screenCoverage < 0 || tier.screenCoverage > 1 {
+                issues.append(.init(.error, "LOD tier '\(tier.name)' screenCoverage must be in 0...1"))
+            }
+            if !tier.decimation.isFinite || tier.decimation <= 0 || tier.decimation > 1 {
+                issues.append(.init(.error, "LOD tier '\(tier.name)' decimation must be in (0, 1]"))
+            }
+        }
+        return issues
+    }
+
+    // MARK: - Feature-acceptance gate
+
+    /// img2threejs's per-feature acceptance policy: every detail item that
+    /// declares a `minScore` must carry a recorded score that meets it. Used as
+    /// a completion gate (checked on `continue` in the final pass), so a
+    /// high-value feature can't slip through underscored.
+    public static func featureAcceptance(_ spec: ObjectSculptSpec) -> SpecValidationResult {
+        var issues: [SpecIssue] = []
+        for item in spec.detailInventory.unaccepted {
+            let recorded = item.score.map { "\($0)" } ?? "no score"
+            issues.append(.init(.error,
+                "feature '\(item.id)' below acceptance threshold (\(recorded) < \(item.minScore!))"))
+        }
+        return SpecValidationResult(issues: issues)
+    }
+
     // MARK: - Action-ready gate
 
     /// img2threejs's "Action-Ready Gate": confirms the object exposes a usable
@@ -262,6 +331,11 @@ public enum SpecValidator {
             issues.append(.init(.error, "strict-quality: character spec declares no proportion-lock landmarks"))
         }
 
+        // Attachment correctness ("nothing floats mid-air"): every geometry
+        // component other than the root must declare how it joins its parent,
+        // and none may be explicitly `.free`.
+        issues.append(contentsOf: attachmentIssues(spec))
+
         guard let policy = assessment?.policy else {
             // Without an assessment we can only enforce mapping; note it.
             issues.append(.init(.warning, "strict-quality: no assessment supplied — only detail-mapping enforced"))
@@ -282,6 +356,27 @@ public enum SpecValidator {
             if !unpainted.isEmpty {
                 let names = unpainted.map(\.name).joined(separator: ", ")
                 issues.append(.init(.error, "strict-quality: geometry leaves without a material: \(names)"))
+            }
+        }
+        return issues
+    }
+
+    // MARK: - Attachment correctness
+
+    /// Every geometry component other than the root must declare a join method
+    /// (`attachment`) and it must not be `.free`. Groups are structural and
+    /// exempt; the root grounds the object and needs no parent join.
+    static func attachmentIssues(_ spec: ObjectSculptSpec) -> [SpecIssue] {
+        var issues: [SpecIssue] = []
+        let rootName = spec.root.name
+        for node in spec.allNodes where node.name != rootName && node.shape.authorsGeometry {
+            switch node.attachment {
+            case .none:
+                issues.append(.init(.error, "strict-quality: component '\(node.name)' floats — declare an attachment (weld/socket/pin/root)"))
+            case .free:
+                issues.append(.init(.error, "strict-quality: component '\(node.name)' is attachment '.free' — it floats mid-air"))
+            default:
+                break
             }
         }
         return issues
