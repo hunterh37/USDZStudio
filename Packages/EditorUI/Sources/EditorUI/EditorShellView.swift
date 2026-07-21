@@ -81,6 +81,8 @@ public struct EditorShellView: View {
 
     @State private var showValidation = false
     @State private var showMCPActivity = false
+    /// Before/after diff drawer (changes since open / last save).
+    @State private var showDiff = false
     /// Viewport image-based-lighting + background state (specs/viewport.md
     /// "Environment & Lighting"); edited via the popover control strip.
     @State private var environment = EnvironmentSettings()
@@ -134,7 +136,7 @@ public struct EditorShellView: View {
     /// menu shortcuts and toolbar buttons drive the same state.
     public enum MenuCommand: String {
         case convert, batch, scripts, library, console, validate, mcpActivity, export, sculptDemo
-        case commandPalette
+        case commandPalette, diff
         public static let notification = Notification.Name("EditorUI.MenuCommand")
     }
 
@@ -231,6 +233,7 @@ public struct EditorShellView: View {
                     Task { await SculptBuildRunner.playLive(SculptDemos.lowPolyHouse(), into: document) }
                 }
             case .commandPalette: openCommandPalette()
+            case .diff: if document != nil { showDiff.toggle() }
             }
         }
         .overlay {
@@ -312,6 +315,9 @@ public struct EditorShellView: View {
                    keywords: ["mcp"], enabled: mcpActivity != nil) {
                 if mcpActivity != nil { showMCPActivity.toggle() }
             },
+            action("view.diff", showDiff ? "Hide Changes" : "Show Changes", "View",
+                   shortcut: "⇧⌘D", keywords: ["diff", "compare", "changes"],
+                   enabled: hasDocument) { if document != nil { showDiff.toggle() } },
         ]
     }
 
@@ -471,6 +477,12 @@ public struct EditorShellView: View {
             if showMCPActivity, let mcpActivity {
                 MCPActivityPanel(model: mcpActivity, onClose: { showMCPActivity = false })
                     .frame(minHeight: 140, idealHeight: 220, maxHeight: 360)
+            }
+            if showDiff, document != nil {
+                StageDiffPanel(document: document,
+                               onSelectPrim: { select($0) },
+                               onClose: { showDiff = false })
+                    .frame(minHeight: 140, idealHeight: 200, maxHeight: 320)
             }
         }
     }

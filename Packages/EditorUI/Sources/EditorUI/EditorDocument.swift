@@ -34,6 +34,19 @@ public final class EditorDocument {
     /// The current composed state, refreshed after every command. Views read this.
     public private(set) var snapshot: StageSnapshot
 
+    /// The stage as last opened or saved — the reference the diff panel compares
+    /// the live snapshot against ("what have I changed since I opened this?").
+    /// Refreshed on every successful save so the diff always reads against the
+    /// on-disk state.
+    public private(set) var baselineSnapshot: StageSnapshot
+
+    /// A structured diff of the live edits made since the file was opened or last
+    /// saved. Empty when nothing has changed. Consumes the pure ``StageDiff``
+    /// engine (also behind the CLI `diff` subcommand).
+    public var diffFromBaseline: StageDiff {
+        StageDiff.between(baselineSnapshot, snapshot)
+    }
+
     /// The active selection (multi-select; part-level semantics per PRD §5.3).
     public var selection: Selection = .empty
 
@@ -120,6 +133,7 @@ public final class EditorDocument {
     public init(snapshot: StageSnapshot = StageSnapshot(), modelURL: URL? = nil) {
         self.modelURL = modelURL
         self.snapshot = snapshot
+        self.baselineSnapshot = snapshot
         let stage = InMemoryStage(snapshot)
         self.stage = stage
         self.stack = CommandStack(stage: stage)
@@ -836,6 +850,8 @@ public final class EditorDocument {
         if meshEdit != nil { exitMeshEditMode(commit: true) }
         try await StageSaver.save(snapshot, to: url, executor: executor)
         savedRevision = revision
+        // The freshly written state is the new diff baseline.
+        baselineSnapshot = snapshot
     }
 
     // MARK: Console (REPL) edits

@@ -156,6 +156,9 @@ struct OpenUSDZEditorApp: App {
                 Button("Validate Stage") { postMenu(.validate) }
                     .keyboardShortcut("u")
                     .disabled(document == nil)
+                Button("Show Changes…") { postMenu(.diff) }
+                    .keyboardShortcut("d", modifiers: [.command, .shift])
+                    .disabled(document == nil)
                 Divider()
                 Button("Sculpt Demo House") { postMenu(.sculptDemo) }
                     .keyboardShortcut("h", modifiers: [.command, .shift])
