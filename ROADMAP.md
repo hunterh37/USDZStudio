@@ -308,7 +308,7 @@ Typed, transactional, verification-gated MCP editing API over the kits
 
 - [ ] Python console REPL + `app.*` scripting parity for every command above (single-undo script runs).
 - [ ] Command palette (⌘K) coverage for all authoring actions via ActionRegistry.
-- [ ] USD stage **diff view** (compare two files / before-after an edit batch).
+- [x] USD stage **diff view** (compare two files / before-after an edit batch) — `StageDiff` (USDCore, pure): `StageDiff.between(before, after)` computes a structured, value-typed diff — root-metadata field changes, added/removed prims (matched by absolute path across the flattened stage, so a rename reads as remove+add like `usddiff`), and shallow per-prim field edits (type/active/visibility plus keyed attribute/relationship/metadata/variant-set changes, each captured uniformly as a before→after `ValueChange`). `render()` gives a deterministic text report and the whole diff is `Codable`. Surfaced as `openusdz diff <before> <after> [--json]`, whose exit code follows `diff(1)` (0 identical, 1 differing, 2 usage/open error). 100% USDCore + CLI `DiffCommand` coverage. A before/after diff *panel* in EditorUI can consume the same engine (tracked with the snapshot-UI harness in Phase T1).
 - [ ] Plugin API v2: native Swift plugin bundles for importers/panels/tools.
 - [ ] visionOS companion viewer (edit on Mac, view synced over network).
 - [x] First-launch Welcome Tour, re-triggerable from the Help menu (onboarding).
