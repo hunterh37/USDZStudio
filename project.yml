@@ -15,7 +15,7 @@ name: OpenUSDZEditor
 options:
   bundleIdPrefix: com.dicyanin
   deploymentTarget:
-    macOS: "14.0"
+    macOS: "15.0"
   generateEmptyDirectories: true
 
 settings:
