@@ -98,3 +98,73 @@ struct PickingTests {
 private func simd_distance(_ a: SIMD3<Float>, _ b: SIMD3<Float>) -> Float {
     ((a - b) * (a - b)).sum().squareRoot()
 }
+
+/// `EditedMeshData.update(from:)` classifies each drag frame so the viewport can
+/// take the cheap in-place path for a position-only move and only pay for a full
+/// rebuild (mesh regen + BVH) when topology actually changes — the core of
+/// issue #1's extrude-drag fix.
+@Suite("EditedMeshData.update(from:) classification")
+struct EditedMeshUpdateTests {
+
+    @Test("No previous data always requires a full rebuild")
+    func noPreviousIsRebuild() {
+        #expect(unitQuad().update(from: nil) == .rebuild)
+    }
+
+    @Test("Identical data (only the revision bumped) needs no redraw")
+    func revisionOnlyIsNone() {
+        let a = unitQuad()
+        var b = unitQuad()
+        b.revision = a.revision + 1
+        #expect(b.update(from: a) == .none)
+    }
+
+    @Test("Moving a vertex, same topology, is a position-only update")
+    func movedVertexIsPositions() {
+        let a = unitQuad()
+        var b = unitQuad()
+        b.positions[2] = SIMD3(1, 1, 0.5) // extrude one corner in Z
+        b.revision = a.revision + 1
+        #expect(b.update(from: a) == .positions)
+    }
+
+    @Test("A changed selection forces a full rebuild")
+    func changedSelectionIsRebuild() {
+        let a = unitQuad()
+        var b = unitQuad()
+        b.selectedFaces = [0]
+        #expect(b.update(from: a) == .rebuild)
+    }
+
+    @Test("A changed face topology forces a full rebuild")
+    func changedTopologyIsRebuild() {
+        let a = unitQuad()
+        var b = unitQuad()
+        b.faceLoops = [[0, 1, 2], [0, 2, 3]] // same verts, different faces
+        #expect(b.update(from: a) == .rebuild)
+    }
+
+    @Test("A changed vertex count forces a full rebuild")
+    func changedVertexCountIsRebuild() {
+        let a = unitQuad()
+        var b = unitQuad()
+        b.positions.append(SIMD3(2, 2, 2)) // extrude added geometry
+        #expect(b.update(from: a) == .rebuild)
+    }
+
+    @Test("A different prim forces a full rebuild")
+    func differentPrimIsRebuild() {
+        let a = unitQuad()
+        var b = unitQuad()
+        b.primName = "OtherPanel"
+        #expect(b.update(from: a) == .rebuild)
+    }
+
+    @Test("Position-only classification holds with a stable non-empty selection")
+    func positionsWithStableSelection() {
+        var a = unitQuad(); a.selectedFaces = [0]
+        var b = unitQuad(); b.selectedFaces = [0]
+        b.positions[0] = SIMD3(0, 0, 0.25)
+        #expect(b.update(from: a) == .positions)
+    }
+}

@@ -85,9 +85,18 @@ final class MCPActivityListener: ObservableObject {
     // MARK: Lifecycle
 
     private var listenerRetries = 0
-    private let maxListenerRetries = 6
+    /// Steady reclaim cadence once backoff has ramped up. We never *give up*:
+    /// a stale instance (e.g. a leftover build from another window/worktree)
+    /// can own the socket for a long time, and the moment it dies the surviving
+    /// instance must take over so the user's live window actually serves MCP.
+    /// Previously we stopped after a handful of tries, so a survivor never
+    /// reclaimed and `openusdz mcp` kept relaying to a zombie with no document.
+    private let reclaimIntervalSeconds = 2.0
+    /// False once `stop()` runs, so a scheduled retry can't rebind after teardown.
+    private var wantsListening = false
 
     func start() {
+        wantsListening = true
         guard server == nil else { return }
         let socketPath = Self.socketURL().path
         try? FileManager.default.createDirectory(
@@ -117,36 +126,50 @@ final class MCPActivityListener: ObservableObject {
 
     /// Unlink a leftover socket file whose owning pid is dead (or is us). Leaves
     /// a socket a *different* live instance owns untouched — that instance is the
-    /// authority, and our bind will simply fail and back off.
+    /// authority, and our bind will simply fail and be retried.
     private func cleanupStaleSocket(at path: String) {
         guard FileManager.default.fileExists(atPath: path) else { return }
         let selfPID = Int(ProcessInfo.processInfo.processIdentifier)
-        if let data = try? Data(contentsOf: Self.endpointURL()),
-           let record = try? JSONDecoder().decode(EndpointRecord.self, from: data),
-           record.pid != selfPID,
-           kill(pid_t(record.pid), 0) == 0 || errno == EPERM {
-            return   // a different live instance owns it
+        let recordPID = (try? Data(contentsOf: Self.endpointURL()))
+            .flatMap { try? JSONDecoder().decode(EndpointRecord.self, from: $0) }
+            .map(\.pid)
+        if Self.isSocketReclaimable(recordPID: recordPID, selfPID: selfPID,
+                                    isAlive: { kill(pid_t($0), 0) == 0 || errno == EPERM }) {
+            try? FileManager.default.removeItem(atPath: path)
         }
-        try? FileManager.default.removeItem(atPath: path)
     }
 
-    /// Bounded-backoff restart so a transient bind failure recovers instead of
-    /// silently disabling agent connectivity.
+    /// Pure ownership decision: may we unlink the existing socket and claim it?
+    /// Reclaimable when there is no usable endpoint record, the record is our
+    /// own leftover, or the recorded owner pid is no longer alive. A *different,
+    /// live* owner is never reclaimed — it stays the authority. Mirrors the
+    /// liveness test in the CLI's `RelayPump.liveEndpoint`.
+    static func isSocketReclaimable(recordPID: Int?, selfPID: Int,
+                                    isAlive: (Int) -> Bool) -> Bool {
+        guard let recordPID else { return true }   // no/garbage record → stale
+        if recordPID == selfPID { return true }    // our own prior socket
+        return !isAlive(recordPID)                 // dead owner → reclaim
+    }
+
+    /// Retry binding at a steady cadence for the app's lifetime (never giving
+    /// up): a transient failure recovers, and — crucially — when a stale owner
+    /// finally dies, `cleanupStaleSocket` unlinks its socket and the next tick
+    /// binds. The `wantsListening`/`server == nil` guards keep the timer a no-op
+    /// once we are serving or have been stopped.
     private func restartListener() {
         server?.stop()
         server = nil
-        guard listenerRetries < maxListenerRetries else {
-            NSLog("MCPActivityListener: giving up after \(maxListenerRetries) retries")
-            return
-        }
         listenerRetries += 1
-        let delay = Double(listenerRetries) * 0.5   // 0.5s, 1.0s, … 3.0s
+        // Ramp 0.5s, 1.0s, 1.5s … up to the steady reclaim cadence, then hold.
+        let delay = min(Double(listenerRetries) * 0.5, reclaimIntervalSeconds)
         DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
-            self?.start()
+            guard let self, self.wantsListening, self.server == nil else { return }
+            self.start()
         }
     }
 
     func stop() {
+        wantsListening = false
         server?.stop()
         server = nil
         Self.removeEndpointIfOwned()
@@ -201,10 +224,31 @@ final class MCPActivityListener: ObservableObject {
     /// session runs on its own stage seeded from the document; after each agent
     /// request its result is mirrored into the live document (which refreshes
     /// the viewport). Rebinding starts a fresh agent session.
+    ///
+    /// A host is created **even when no document is open** (`document == nil`),
+    /// seeded from an empty stage. Otherwise the relay had nothing to answer
+    /// with: `initialize`/`tools/list` — which need no document — failed, and
+    /// `handleRpc` returned an empty line that the pump read as a dropped
+    /// connection, so `openusdz mcp` reported "Failed to connect" whenever the
+    /// app was open on an empty window. Edits made against a document-less host
+    /// simply don't mirror anywhere until a document opens (then we rebind).
     func bindDocument(_ document: EditorDocument?) {
         boundDocument = document
-        guard let document else { hostSession = nil; hostServer = nil; return }
-        let session = EditSession(snapshot: document.snapshot, strictness: .warn)
+        makeHost(seededFrom: document?.snapshot)
+    }
+
+    /// Ensure a host exists before answering a request, so a relay call that
+    /// races ahead of `bindDocument` still gets a real response rather than a
+    /// silent empty line. No-op once a host is present.
+    private func ensureHost() {
+        guard hostServer == nil || hostSession == nil else { return }
+        makeHost(seededFrom: boundDocument?.snapshot)
+    }
+
+    /// (Re)create the hosted `AgentMCPServer` on a fresh session seeded from
+    /// `snapshot` (an empty stage when nil).
+    private func makeHost(seededFrom snapshot: StageSnapshot?) {
+        let session = EditSession(snapshot: snapshot ?? StageSnapshot(), strictness: .warn)
         let hostPID = Int(ProcessInfo.processInfo.processIdentifier)
         let sink = HostActivitySink(pid: hostPID) { [weak self] event in
             Task { @MainActor in self?.apply(event) }
@@ -218,8 +262,15 @@ final class MCPActivityListener: ObservableObject {
     /// Run one relayed JSON-RPC request against the hosted server, mirror the
     /// resulting stage into the live document, and reply on the same socket.
     private func handleRpc(_ frame: RpcRequestFrame, on fd: Int32) {
+        ensureHost()   // lazily host a scratch session if nothing is bound yet
         guard let hostServer, let session = hostSession else {
-            send(RpcResponseFrame(id: frame.id, line: ""), on: fd)
+            // Unreachable after ensureHost, but never answer with an empty line:
+            // the pump treats empty as a dropped connection (prints nothing), so
+            // the JSON-RPC handshake stalls and the client reports a connection
+            // failure with no diagnostic. Send a real JSON-RPC error instead
+            // (empty only for notifications, which owe no response).
+            send(RpcResponseFrame(id: frame.id, line: Self.jsonrpcError(
+                for: frame.line, message: "editor host unavailable")), on: fd)
             return
         }
         Task { @MainActor in
@@ -235,6 +286,24 @@ final class MCPActivityListener: ObservableObject {
         guard var data = try? JSONEncoder().encode(frame) else { return }
         data.append(0x0A)
         server?.send(data, to: fd)
+    }
+
+    /// A JSON-RPC error `line` addressed to the request's own id, or an empty
+    /// line when the request is a notification (no id — owes no response). Keeps
+    /// a failed relay call from surfacing as a silent hang.
+    static func jsonrpcError(for requestLine: String, code: Int = -32001,
+                             message: String) -> String {
+        var idFragment = "null"
+        if let data = requestLine.data(using: .utf8),
+           let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+           let id = obj["id"] {
+            if let string = id as? String { idFragment = "\"\(string)\"" }
+            else if let number = id as? NSNumber { idFragment = "\(number)" }
+        }
+        guard idFragment != "null" else { return "" }   // notification: no reply
+        let escaped = message.replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+        return "{\"jsonrpc\":\"2.0\",\"id\":\(idFragment),\"error\":{\"code\":\(code),\"message\":\"\(escaped)\"}}"
     }
 
     // MARK: Pure reducer (unit-tested)

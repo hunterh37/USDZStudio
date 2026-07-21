@@ -8,7 +8,7 @@ Agent MCP edits (`create_mesh`, `set_transform`, the `sculpt_*` pipeline, …) r
 
 ## Design: host the session in the app, relay stdio to it
 
-- **App is the editing authority.** When the editor is running it hosts an `AgentMCPServer` (`MCPActivityListener.bindDocument`) bound to a fresh `EditSession` **seeded from the front `EditorDocument`'s snapshot**. After each request the session's stage is mirrored into the live document via `EditorDocument.applyConsoleEdit(after:label:)` (a `ReplaceStageCommand`), which bumps `revision` → the existing viewport refresh path (`ViewportPane.updateNSView` → `applyScene`/`applyLivePrimPaths`/`applyLiveTransforms`). Agent edits are undoable (`⌘Z`) and the activity panel still works (the hosted server's `MCPEventSink` folds into `MCPActivityModel` via `HostActivitySink`).
+- **App is the editing authority.** When the editor is running it hosts an `AgentMCPServer` (`MCPActivityListener.bindDocument`) bound to a fresh `EditSession` **seeded from the front `EditorDocument`'s snapshot** — or from an **empty stage when no document is open**, so the host is *always* present. Document-independent methods (`initialize`, `tools/list`) therefore succeed the moment the app is running, and a document-less tool call runs against the scratch stage (its edits mirror nowhere until a document opens, at which point we rebind). `handleRpc` never answers a real request with an empty `line` (which the pump reads as a dropped connection); a missing host yields a JSON-RPC error addressed to the request id. After each request the session's stage is mirrored into the live document via `EditorDocument.applyConsoleEdit(after:label:)` (a `ReplaceStageCommand`), which bumps `revision` → the existing viewport refresh path (`ViewportPane.updateNSView` → `applyScene`/`applyLivePrimPaths`/`applyLiveTransforms`). Agent edits are undoable (`⌘Z`) and the activity panel still works (the hosted server's `MCPEventSink` folds into `MCPActivityModel` via `HostActivitySink`).
 - **CLI becomes a pump when the editor is live.** `McpCommand.run` checks for a live endpoint (`RelayPump.liveEndpoint`); if present it runs `RelayPump`: each stdin JSON-RPC line → `rpc_request` frame over the UNIX-domain socket → the app runs it and returns an `rpc_response` frame → written to stdout. When the editor is **not** running, the CLI falls back to today's in-process, file-backed server (unchanged).
 - **Concurrency:** the hosted session runs on its own stage (its `CommandStack.onChange` is unset), so `server.handle` executes safely off the main actor; only the mirror (`applyConsoleEdit`) runs on `@MainActor`, where the document is isolated.
 
@@ -31,8 +31,17 @@ is removed from `App/Info.plist`).
   below is identical.
 - **Stale sockets:** on bind the app unlinks a leftover `agent.sock` whose owning
   pid (from `endpoint.json`) is dead or is itself, but never one a *different* live
-  instance owns. On quit it removes the endpoint file + socket only if still ours,
-  so a quitting second instance can't orphan the first's endpoint.
+  instance owns (pure decision: `MCPActivityListener.isSocketReclaimable`). On quit it
+  removes the endpoint file + socket only if still ours, so a quitting second instance
+  can't orphan the first's endpoint.
+- **Reclaim, never give up:** if bind fails because a *different live* instance owns the
+  socket, the app keeps retrying at a steady cadence (~2 s) for its lifetime rather than
+  giving up after a fixed number of tries. When that owner dies (quit **or** crash/kill,
+  which skips the on-quit cleanup), the next tick unlinks the dead socket and binds — the
+  surviving window takes over serving MCP. Without this, a leftover instance (e.g. a build
+  from another window or a `.claude/worktrees/*` checkout) could hold the socket with **no
+  document bound**, and the pump would relay `initialize` to it forever and get an empty
+  reply → `openusdz: ✘ Failed to connect`.
 - **Resilience is preserved:** bounded wait for the endpoint (`awaitEndpoint`),
   per-request reconnect-on-drop with endpoint re-resolution (survives an app
   restart onto a new socket), response timeout, and a spec-shaped JSON-RPC error
