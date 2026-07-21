@@ -246,11 +246,17 @@ public struct EditorShellView: View {
             Divider().overlay(Palette.panelBorder.color)
             HSplitView {
                 outliner
-                    .frame(minWidth: 180, idealWidth: 210, maxWidth: 320)
+                    // maxHeight: .infinity keeps this column greedy on the
+                    // vertical axis. Without it the embedded List reports a
+                    // content-driven ideal height that grows per row and
+                    // propagates up through the HSplitView to the window root.
+                    .frame(minWidth: 180, idealWidth: 210, maxWidth: 320, maxHeight: .infinity)
                 centerColumn
                     .frame(minWidth: 480, maxWidth: .infinity, maxHeight: .infinity)
                 InspectorView(document: document)
-                    .frame(minWidth: 200, idealWidth: 230, maxWidth: 360)
+                    // Same rationale as the outliner: cap vertical growth so
+                    // the inspector's content height can't drive the window.
+                    .frame(minWidth: 200, idealWidth: 230, maxWidth: 360, maxHeight: .infinity)
             }
         }
         .background(Palette.windowBackground.color)
