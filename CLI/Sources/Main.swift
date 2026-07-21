@@ -61,6 +61,12 @@ enum CLIRunner {
                                diffs the flattened USD text against the original
                                (only lossless-modelled files pass). Exits 1 when
                                any invariant fails.
+      diff <before.usd[z|a|c]> <after.usd[z|a|c]> [--json]
+                               Compare two stages and print what changed
+                               (metadata, added/removed prims, per-prim field
+                               edits). --json prints the structured diff. Exit
+                               code follows diff(1): 0 identical, 1 differing,
+                               2 usage/open error.
       validate <file.usd[z|a|c]> [--profile NAME] [--strict] [--json]
                                Run a compliance profile's rule catalog and print
                                diagnostics (most-severe first) with an export
@@ -123,6 +129,10 @@ enum CLIRunner {
                 arguments: Array(arguments.dropFirst()),
                 environment: defaultRoundTripEnvironment(),
                 print: output, printError: printError)
+        case "diff":
+            return await DiffCommand.run(
+                arguments: Array(arguments.dropFirst()),
+                openStage: openStage, print: output, printError: printError)
         case "validate":
             return await validate(
                 arguments: Array(arguments.dropFirst()),
