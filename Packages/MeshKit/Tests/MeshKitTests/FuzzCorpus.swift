@@ -19,6 +19,8 @@ enum FuzzCorpus {
         0xC0FFEE + 31,     // delete → bevel on the surviving region
         0xC0FFEE + 42,     // loop cut on a jittered grid strip (LoopCut bring-up)
         0xC0FFEE + 44,     // SetVertexPositions jitter collapsing a face (live vertex edit)
+        0xC0FFEE + 51,     // mirror whole-mesh doubling on a jittered grid (Mirror bring-up)
+        0xC0FFEE + 58,     // solidify shelling a jittered grid; closed input refused (Solidify bring-up)
     ]
 
     /// `MESHKIT_FUZZ_ITERATIONS` (CI knob) > default 40.
