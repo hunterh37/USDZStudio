@@ -234,9 +234,9 @@ Close the material story the inspector already half-owns. Highest-demand editing
 
 Repair ops + primitives + build-recipes already ship. Grow into real modeling.
 
-- [ ] LoopCut (quad-strip traversal); multi-segment bevel; edge slide; knife; solidify.
+- [~] LoopCut (quad-strip traversal — shipped in v1.15); multi-segment bevel; edge slide; knife; **`Solidify`** (shipped) — shells an open manifold surface: offset inner shell along −vertex-normal + reversed winding, bridged boundary edge-by-edge into a closed manifold (open disk χ = 1 → closed shell χ = 2). Whole-mesh v1; loud refusals for closed/non-manifold/non-positive-thickness. Analytic volume (footprint × thickness) + Euler/manifold/winding harness, in the fuzz rotation, 100%-gated.
 - [ ] Boolean ops (union/difference/intersect) with manifold-preserving invariant checks.
-- [ ] Mirror, radial/grid array (as instanceable references where possible), duplicate-along-path.
+- [~] **`Mirror`** (shipped): reflect the whole mesh across an axis-aligned plane, welding on-plane vertices (shared seam) and reversing mirrored winding so normals stay outward. A missing plane doubles the mesh into two shells; a plane on the open boundary welds it closed (χ delta = χ_before). Loud refusals for partial selection / plane-through-mesh / face-on-plane. Analytic volume + Euler/manifold/winding harness, in the fuzz rotation, 100%-gated. Radial/grid array (as instanceable references where possible), duplicate-along-path remain.
 - [ ] Subdivision-surface **preview** + bake-to-mesh (Catmull-Clark), decimation UI (pymeshlab-backed).
 - [ ] Bridge/loft between edge loops; symmetry-aware editing.
 - **Harness:** Euler/manifold/winding invariants per op; analytic-volume checks; deepened fuzz corpus; golden `.usda` per op.

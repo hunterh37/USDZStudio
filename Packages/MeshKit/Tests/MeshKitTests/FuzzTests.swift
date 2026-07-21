@@ -50,7 +50,7 @@ struct FuzzTests {
         for opIndex in 0..<3 {
             let result: MeshOpResult?
             do {
-                switch (Int(seed % 7) + opIndex) % 7 {
+                switch (Int(seed % 9) + opIndex) % 9 {
                 case 0:
                     result = try ExtrudeFaces.apply(mesh, selection: .faces(randomFaces(mesh, &rng)),
                                                     params: .init(distance: Double.random(in: 0.1...2, using: &rng)))
@@ -74,6 +74,21 @@ struct FuzzTests {
                     let edges = Array(mesh.edgeFaceMap.keys).sorted(by: <)
                     let seedEdge = edges[Int.random(in: 0..<edges.count, using: &rng)]
                     result = try LoopCut.apply(mesh, selection: .edges([seedEdge]), params: .init())
+                case 6:
+                    // Mirror the whole mesh across a plane just below it on a
+                    // random axis: no crossing, no on-plane welds → clean doubling
+                    // (closed meshes double into two shells, open ones into two).
+                    let axis = Mirror.Axis.allCases.randomElement(using: &rng)!
+                    let k = Mirror.axisIndex(axis)
+                    let minCoord = mesh.positions.values.map { $0[k] }.min()!
+                    result = try Mirror.apply(mesh, selection: .faces(Set(mesh.faceOrder)),
+                                              params: .init(axis: axis, coordinate: minCoord - 1))
+                case 7:
+                    // Solidify the whole mesh — refused loudly on closed input
+                    // (no boundary), shells the open grids. Thin shell avoids
+                    // self-intersection on the jittered surface.
+                    result = try Solidify.apply(mesh, selection: .faces(Set(mesh.faceOrder)),
+                                                params: .init(thickness: 0.05))
                 default:
                     // Live-vertex-edit path: proportional-falloff-weighted nudge
                     // of a random seed's neighborhood, exactly as the drag layer
