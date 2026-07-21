@@ -43,7 +43,7 @@ policy_for() {
     SessionKit)           echo "USDCore ViewportKit EditingKit" ;;  # cross-launch session envelope + restore; reuses ViewportKit value types + EditingKit WAL (specs/session-restoration.md)
     AgentMCP)             echo "USDCore USDBridge EditingKit ValidationKit ConversionKit ScriptingKit MeshKit MechanismKit SculptKit" ;;  # MCP adapter over the kits (docs/AGENT_MCP_PLAN.md); never EditorUI
     EditorUI)             echo "USDCore USDBridge ConversionKit ViewportKit EditingKit ValidationKit ScriptingKit DicyaninDesignSystem MeshKit SculptKit SessionKit" ;;  # SculptKit: in-app staged-sculpt runner; SessionKit: cross-launch session restore (specs/session-restoration.md)
-    App)                  echo "USDCore USDBridge ConversionKit ViewportKit EditingKit ValidationKit ScriptingKit EditorUI DicyaninDesignSystem MeshKit AgentMCP" ;;  # App hosts the in-app MCP editing session (specs/agent-live-editing.md); composition root, like CLI
+    App)                  echo "USDCore USDBridge ConversionKit ViewportKit EditingKit ValidationKit ScriptingKit EditorUI DicyaninDesignSystem MeshKit AgentMCP SessionKit" ;;  # App hosts the in-app MCP editing session (specs/agent-live-editing.md); composition root, like CLI. SessionKit: names ViewState for the restore hand-off
     CLI)                  echo "USDCore USDBridge ConversionKit ValidationKit ScriptingKit EditingKit MeshKit AgentMCP" ;;  # never EditorUI/DesignSystem
     EditorHarness)        echo "USDCore USDBridge EditingKit MeshKit EditorUI" ;;  # dev tool: drives the real UI
     *)                    return 1 ;;

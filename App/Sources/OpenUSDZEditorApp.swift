@@ -3,6 +3,7 @@ import EditorUI
 import USDBridge
 import USDCore
 import ScriptingKit
+import SessionKit
 
 /// Thin app target: SwiftUI lifecycle + DI wiring only (<200 lines by design,
 /// specs/testing.md). The real document-based architecture arrives with the
@@ -44,10 +45,10 @@ struct OpenUSDZEditorApp: App {
     @State private var restoredDocument: EditorDocument?
     @State private var showRestorePrompt = false
 
-    /// Observed so we can flush the session envelope when the app is backgrounded
-    /// or about to quit (the WAL already appends per edit; this captures the
-    /// latest view state).
-    @Environment(\.scenePhase) private var scenePhase
+    /// The shell-owned view state to reapply after accepting a restore (camera,
+    /// outliner expansion, panels, playback); `nil` for a normal open, so a
+    /// later open never re-applies a stale restore.
+    @State private var restoredViewStateToApply: ViewState?
 
     /// App-wide persisted preferences, shared by the editor shell and the
     /// Settings (⌘,) window.
@@ -88,6 +89,7 @@ struct OpenUSDZEditorApp: App {
                                 // file) so the library can add primitives without
                                 // opening a file first. A journaled session is
                                 // started so its edits survive a relaunch.
+                                restoredViewStateToApply = nil
                                 let journal = session.begin(for: nil)
                                 let doc = EditorDocument(journal: journal)
                                 session.attach(doc)
@@ -98,7 +100,9 @@ struct OpenUSDZEditorApp: App {
                             onExport: { url in try await export(to: url) },
                             onOpenFile: { presentOpenPanel() },
                             onSave: { save(to: document?.modelURL) },
-                            onSaveAs: { save(to: nil) })
+                            onSaveAs: { save(to: nil) },
+                            session: session,
+                            restoredViewState: restoredViewStateToApply)
                 .frame(minWidth: 1000, minHeight: 620)
                 .alert("Could Not Open File", isPresented: .constant(openError != nil)) {
                     Button("OK") { openError = nil }
@@ -106,16 +110,18 @@ struct OpenUSDZEditorApp: App {
                     Text(openError ?? "")
                 }
                 .onOpenURL(perform: open)
-                // Capture the session envelope when leaving the foreground or
-                // quitting; the WAL itself is already durable per edit.
-                .onChange(of: scenePhase) { _, phase in
-                    if phase != .active, let document { session.capture(document) }
-                }
+                // Scene-phase capture (including shell-owned camera/panels/
+                // outliner state) is owned by EditorShellView, which holds that
+                // @State; the App only kicks off the initial envelope on open.
                 // Restore-but-prompt: the document is already rebuilt, so this is
                 // a pure yes/no (specs/session-restoration.md).
                 .confirmationDialog("Restore your previous session?",
                                     isPresented: $showRestorePrompt, titleVisibility: .visible) {
                     Button("Restore") {
+                        // Hand the shell-owned view state to EditorShellView to
+                        // reapply (camera, outliner, panels); document-owned
+                        // state was already applied by SessionController.restore.
+                        restoredViewStateToApply = restoreCandidate?.document.viewState
                         if let restoredDocument { document = restoredDocument }
                         restoreCandidate = nil
                         restoredDocument = nil
@@ -410,6 +416,9 @@ struct OpenUSDZEditorApp: App {
     /// relaunch) and captures the initial envelope. Used by every open/import.
     @MainActor
     private func makeSessionedDocument(snapshot: StageSnapshot, modelURL: URL?) -> EditorDocument {
+        // A normal open supersedes any pending restore hand-off, so stale
+        // shell-owned state is never reapplied to a different document.
+        restoredViewStateToApply = nil
         let journal = session.begin(for: modelURL)
         let doc = EditorDocument(snapshot: snapshot, modelURL: modelURL, journal: journal)
         session.attach(doc)

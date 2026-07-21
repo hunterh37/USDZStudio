@@ -2,6 +2,7 @@ import Testing
 import Foundation
 import USDCore
 import EditingKit
+import ViewportKit
 import SessionKit
 @testable import EditorUI
 
@@ -49,6 +50,38 @@ struct SessionControllerTests {
         #expect(restored.snapshot.prim(at: PrimPath("/Car/Body")!)?.visibility == .invisible)
         #expect(restored.canUndo)
         #expect(relaunch.activeDirectory == recoverable.plan.directory) // adopted
+    }
+
+    @Test func capturesAndRestoresShellOwnedViewState() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("sc-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let envelopes = InMemoryEnvelopeStore()
+
+        let controller = makeController(root: root, envelopes: envelopes)
+        let journal = controller.begin(for: nil)
+        let doc = EditorDocument(snapshot: sampleSnapshot(), journal: journal)
+        controller.attach(doc)
+        doc.setVisibility(PrimPath("/Car/Body")!, .invisible)   // gives the WAL work
+        // Capture with the shell-owned state the shell would supply.
+        let pose = ViewportCameraPose(target: SIMD3(1, 2, 3), distance: 7, azimuth: 0.5, elevation: 0.4)
+        controller.capture(
+            doc,
+            collapsed: [PrimPath("/Car")!],
+            camera: pose,
+            environment: EnvironmentSettings(exposureEV: 3),
+            panelVisibility: ["diff": true, "validation": false],
+            playbackPosition: 4.2)
+
+        // Relaunch: the envelope carries the shell-owned view state.
+        let relaunch = makeController(root: root, envelopes: envelopes)
+        let recoverable = try #require(relaunch.findRecoverable())
+        let view = recoverable.document.viewState
+        #expect(view.collapsedPaths == ["/Car"])
+        #expect(view.restoredCameraPose == pose)
+        #expect(view.environment?.exposureEV == 3)
+        #expect(view.panelVisibility["diff"] == true)
+        #expect(view.playbackPosition == 4.2)
     }
 
     @Test func findRecoverableNilWhenNothingCaptured() {
