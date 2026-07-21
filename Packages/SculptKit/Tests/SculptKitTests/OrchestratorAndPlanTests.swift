@@ -24,6 +24,8 @@ import Testing
     }
 
     @Test func continueRequiresFullEvidence() {
+        // The evidence bundle (render + comparison sheet + score) is required to
+        // continue out of *every* pass, including the fidelity-exempt blockout.
         var orch = PassOrchestrator()
         #expect(throws: AdvanceError.continueRequiresRender) {
             try orch.advance(after: PassReview(pass: .blockout, decision: .continue), threshold: 0.8)
@@ -35,11 +37,96 @@ import Testing
             try orch.advance(after: PassReview(pass: .blockout, decision: .continue,
                                                renderPath: "/r.png", comparisonSheetPath: "/c.png"), threshold: 0.8)
         }
-        #expect(throws: AdvanceError.scoreBelowThreshold(score: 0.5, threshold: 0.8)) {
-            try orch.advance(after: passingReview(.blockout, score: 0.5), threshold: 0.8)
-        }
         // None of the failed attempts advanced the pass.
         #expect(orch.current == .blockout)
+    }
+
+    /// Advance an orchestrator to `target` by continuing through each prior
+    /// pass with an evidence bundle that clears both gates (score 0.9, ample
+    /// similarity), so a test can start at the pass it actually wants to probe.
+    func orchestrator(at target: SculptPass, threshold: Double = 0.8,
+                      similarityFloor: Double = 0.55) throws -> PassOrchestrator {
+        var orch = PassOrchestrator()
+        while orch.current != target {
+            let r = PassReview(pass: orch.current, decision: .continue, score: 0.9,
+                               renderPath: "/tmp/r.png", comparisonSheetPath: "/tmp/c.png",
+                               measuredSimilarity: 0.9)
+            _ = try orch.advance(after: r, threshold: threshold, similarityFloor: similarityFloor)
+        }
+        return orch
+    }
+
+    @Test func blockoutExemptFromBothGates() throws {
+        // blockout authors geometry at the origin (placement is structural's
+        // job), so it is exempt from the score threshold and the similarity
+        // floor: a low subjective score and a missing measured similarity still
+        // advance, as long as the evidence bundle is present.
+        var orch = PassOrchestrator()
+        #expect(!SculptPass.blockout.enforcesScoreGate)
+        #expect(!SculptPass.blockout.enforcesSimilarityFloor)
+        let result = try orch.advance(
+            after: passingReview(.blockout, score: 0.2), threshold: 0.8, similarityFloor: 0.55)
+        #expect(result == .advanced(to: .structural))
+        #expect(orch.current == .structural)
+    }
+
+    @Test func scoreGateEnforcedFromStructuralButFloorDeferred() throws {
+        // structural is placed but untextured: the subjective score gate bites,
+        // yet the colour-dependent similarity floor is deferred to `material`.
+        var orch = try orchestrator(at: .structural)
+        #expect(SculptPass.structural.enforcesScoreGate)
+        #expect(!SculptPass.structural.enforcesSimilarityFloor)
+
+        // Score threshold bites at structural.
+        #expect(throws: AdvanceError.scoreBelowThreshold(score: 0.5, threshold: 0.8)) {
+            try orch.advance(after: passingReview(.structural, score: 0.5),
+                             threshold: 0.8, similarityFloor: 0.55)
+        }
+        // A low measured similarity does NOT block a geometry pass (floor deferred)
+        // — a passing score with no measured similarity still advances.
+        let result = try orch.advance(after: passingReview(.structural, score: 0.9),
+                                      threshold: 0.8, similarityFloor: 0.55)
+        #expect(result == .advanced(to: .formRefinement))
+    }
+
+    @Test func similarityFloorEnforcedFromMaterial() throws {
+        // material is the first textured pass — the deterministic floor bites here.
+        var orch = try orchestrator(at: .material)
+        #expect(SculptPass.material.enforcesSimilarityFloor)
+
+        // Floor requires a measured similarity.
+        #expect(throws: AdvanceError.continueRequiresMeasuredSimilarity) {
+            try orch.advance(after: passingReview(.material, score: 0.9),
+                             threshold: 0.8, similarityFloor: 0.55)
+        }
+        // Floor rejects a low measured similarity.
+        let lowSim = PassReview(pass: .material, decision: .continue, score: 0.9,
+                                renderPath: "/tmp/r.png", comparisonSheetPath: "/tmp/c.png",
+                                measuredSimilarity: 0.3)
+        #expect(throws: AdvanceError.similarityBelowFloor(measured: 0.3, floor: 0.55)) {
+            try orch.advance(after: lowSim, threshold: 0.8, similarityFloor: 0.55)
+        }
+        #expect(orch.current == .material)
+
+        // A sufficient render clears both gates.
+        let ok = PassReview(pass: .material, decision: .continue, score: 0.9,
+                            renderPath: "/tmp/r.png", comparisonSheetPath: "/tmp/c.png",
+                            measuredSimilarity: 0.6)
+        let result = try orch.advance(after: ok, threshold: 0.8, similarityFloor: 0.55)
+        #expect(result == .advanced(to: .surface))
+    }
+
+    @Test func gateProperties() {
+        // Score gate: exempt only for blockout.
+        #expect(!SculptPass.blockout.enforcesScoreGate)
+        for pass in SculptPass.allCases where pass != .blockout {
+            #expect(pass.enforcesScoreGate)
+        }
+        // Similarity floor: only the textured passes (material onward).
+        let textured: Set<SculptPass> = [.material, .surface, .lighting, .interaction, .optimization]
+        for pass in SculptPass.allCases {
+            #expect(pass.enforcesSimilarityFloor == textured.contains(pass))
+        }
     }
 
     @Test func refineStaysOnCurrentPass() throws {

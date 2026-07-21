@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+import MechanismKit
 @testable import SculptKit
 
 @Suite struct SuitabilityTests {
@@ -40,13 +41,21 @@ import Testing
 
 @Suite struct RuntimeLayerTests {
 
-    static func spec(sockets: [Socket] = [], colliders: [Collider] = [],
+    static func spec(sockets: [Socket] = [], joints: [Joint] = [],
+                     colliders: [Collider] = [],
                      groups: [DestructionGroup] = []) -> ObjectSculptSpec {
         let body = ComponentNode(name: "Body", shape: .primitive(.box))
-        let root = ComponentNode(name: "Root", shape: .group, children: [body])
+        let lid = ComponentNode(name: "Lid", shape: .primitive(.box))
+        let root = ComponentNode(name: "Root", shape: .group, children: [body, lid])
         return ObjectSculptSpec(
             name: "R", objectClass: .object, root: root,
-            sockets: sockets, colliders: colliders, destructionGroups: groups)
+            sockets: sockets, joints: joints,
+            colliders: colliders, destructionGroups: groups)
+    }
+
+    static func lidHinge(target: String = "Lid") -> Joint {
+        Joint.openable(name: "lidHinge", kind: .revolute, target: target,
+                       axis: [1, 0, 0], pivot: [0, 0.5, -0.5], openValue: 105)
     }
 
     @Test func manifestDerivesFromSpec() throws {
@@ -55,7 +64,7 @@ import Testing
             colliders: [Collider(name: "hull", kind: .box, component: "Body")],
             groups: [DestructionGroup(name: "shatter", members: ["Body"])])
         let manifest = RuntimeManifest(spec: s)
-        #expect(manifest.nodes == ["Root", "Body"])
+        #expect(manifest.nodes == ["Root", "Body", "Lid"])
         #expect(manifest.isActionable)
         let json = try manifest.json()
         #expect(json.contains("grip"))
@@ -74,6 +83,33 @@ import Testing
         #expect(!SpecValidator.actionReady(Self.spec()).isValid)
         let ready = Self.spec(colliders: [Collider(name: "c", kind: .capsule, component: "Body")])
         #expect(SpecValidator.actionReady(ready).isValid)
+        // A joint alone also makes the object action-ready.
+        #expect(SpecValidator.actionReady(Self.spec(joints: [Self.lidHinge()])).isValid)
+    }
+
+    @Test func jointManifestAndActionable() throws {
+        let s = Self.spec(joints: [Self.lidHinge()])
+        let manifest = RuntimeManifest(spec: s)
+        #expect(manifest.joints.map(\.name) == ["lidHinge"])
+        #expect(manifest.isActionable)
+        #expect(try manifest.json().contains("lidHinge"))
+    }
+
+    @Test func jointSchemaValidation() {
+        // Joint targeting a component that doesn't exist.
+        let badTarget = Self.spec(joints: [Self.lidHinge(target: "Ghost")])
+        #expect(SpecValidator.validate(badTarget).errors.contains { $0.message.contains("unknown component 'Ghost'") })
+
+        // Duplicate joint names.
+        let dupes = Self.spec(joints: [Self.lidHinge(), Self.lidHinge()])
+        #expect(SpecValidator.validate(dupes).errors.contains { $0.message.contains("duplicate joint name") })
+
+        // A joint that fails MechanismKit's invariants (degenerate axis).
+        var degenerate = Self.lidHinge(); degenerate.axis = [0, 0, 0]
+        #expect(SpecValidator.validate(Self.spec(joints: [degenerate])).errors.contains { $0.message.contains("degenerate") })
+
+        // A well-formed joint is schema-valid.
+        #expect(SpecValidator.validate(Self.spec(joints: [Self.lidHinge()])).isValid)
     }
 
     @Test func runtimeSchemaValidation() {
@@ -108,9 +144,11 @@ import Testing
     @Test func runtimeSurvivesRoundTripAndLegacyDecode() throws {
         let s = Self.spec(
             sockets: [Socket(name: "g", translation: [0, 0, 0])],
+            joints: [Self.lidHinge()],
             colliders: [Collider(name: "c", kind: .convexHull, component: "Body")])
         let back = try ObjectSculptSpec.decoded(from: s.encoded())
         #expect(back == s)
+        #expect(back.joints == s.joints)
 
         // A legacy spec JSON with no runtime/material keys still decodes.
         let legacy = #"{"name":"L","objectClass":"object","root":{"name":"Root","shape":{"group":{}},"translation":[0,0,0],"rotationEulerDegrees":[0,0,0],"scale":[1,1,1],"width":1,"height":1,"depth":1,"radius":0.5,"segments":16,"children":[]}}"#
@@ -118,6 +156,7 @@ import Testing
         #expect(decoded.colliders.isEmpty)
         #expect(decoded.materials.isEmpty)
         #expect(decoded.destructionGroups.isEmpty)
+        #expect(decoded.joints.isEmpty)
     }
 }
 

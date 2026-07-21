@@ -131,6 +131,15 @@ import USDCore
             #"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}"#.utf8))!
         #expect(initResponse["result"]["protocolVersion"].stringValue == MCPServer.protocolVersion)
         #expect(initResponse["result"]["serverInfo"]["name"].stringValue == "openusdz-agent")
+        // The server advertises capability guidance the client folds into the
+        // system prompt — including proactively hinging objects that open.
+        let instructions = initResponse["result"]["instructions"].stringValue ?? ""
+        #expect(instructions.contains("create_joint"))
+        #expect(instructions == AgentInstructions.text)
+        // A server with no instructions set omits the field entirely.
+        let bare = MCPServer()
+        let bareInit = await bare.handle(request: JSONRPCRequest(id: .number(9), method: "initialize"))!
+        #expect(bareInit["result"]["instructions"] == .null)
 
         let ping = await server.handle(request: JSONRPCRequest(id: .number(2), method: "ping"))!
         #expect(ping["result"] == .object([:]))
@@ -140,6 +149,11 @@ import USDCore
         #expect(tools.count == server.toolNames.count)
         #expect(server.toolNames.contains("query_scene"))
         #expect(server.toolNames.contains("batch"))
+        // Regression guard (#72 gap): the articulation tools ship in AgentMCP but
+        // were never wired into make(), so no served binary exposed them. Assert
+        // make() actually registers every tool group, joints included.
+        #expect(server.toolNames.contains("create_joint"))
+        #expect(server.toolNames.contains("set_joint_state"))
         #expect(tools.allSatisfy { $0["inputSchema"]["type"].stringValue == "object" })
 
         let stats = await callOK(server, "scene_stats")
@@ -211,7 +225,9 @@ import USDCore
         let names = prompts["result"]["prompts"].arrayValue!.compactMap { $0["name"].stringValue }
         #expect(names.contains("build-validate-score-loop"))
         #expect(names.contains("sculpt-from-image"))
-        #expect(names.count == 5)
+        #expect(names.contains("author-hinged-object"))
+        #expect(names.contains("identify-and-animate"))
+        #expect(names.count == 9)
 
         let prompt = await server.handle(request: JSONRPCRequest(
             id: .number(6), method: "prompts/get", params: ["name": "import-and-normalize"]))!

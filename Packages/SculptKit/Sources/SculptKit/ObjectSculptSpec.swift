@@ -1,5 +1,6 @@
 import Foundation
 import MeshKit
+import MechanismKit
 
 /// The kind of geometry a component node realizes. Mirrors img2threejs's
 /// "primitives + procedural, no mesh downloads" default: a node is either a
@@ -350,6 +351,10 @@ public struct ObjectSculptSpec: Codable, Sendable, Equatable {
     public var root: ComponentNode
     public var materials: [MaterialSpec]
     public var sockets: [Socket]
+    /// Rigid articulations — hinges/sliders that make a component open, close,
+    /// or swing (a lid, door, cap, drawer). Authored in the interaction pass;
+    /// each `target` must name a component. See `specs/articulation-mechanisms.md`.
+    public var joints: [Joint]
     /// Runtime collision volumes (authored in the interaction pass).
     public var colliders: [Collider]
     /// Runtime destruction groups (authored in the interaction pass).
@@ -371,6 +376,7 @@ public struct ObjectSculptSpec: Codable, Sendable, Equatable {
     public init(
         name: String, objectClass: ObjectClass, root: ComponentNode,
         materials: [MaterialSpec] = [], sockets: [Socket] = [],
+        joints: [Joint] = [],
         colliders: [Collider] = [], destructionGroups: [DestructionGroup] = [],
         surfaceProjection: SurfaceProjection? = nil, landmarks: [Landmark] = [],
         lights: [LightSpec] = [], lodTiers: [LODTier] = [],
@@ -383,6 +389,7 @@ public struct ObjectSculptSpec: Codable, Sendable, Equatable {
         self.root = root
         self.materials = materials
         self.sockets = sockets
+        self.joints = joints
         self.colliders = colliders
         self.destructionGroups = destructionGroups
         self.surfaceProjection = surfaceProjection
@@ -397,7 +404,7 @@ public struct ObjectSculptSpec: Codable, Sendable, Equatable {
     // Custom decoding so specs authored before the runtime/surface/character
     // layers still decode.
     private enum CodingKeys: String, CodingKey {
-        case name, objectClass, root, materials, sockets
+        case name, objectClass, root, materials, sockets, joints
         case colliders, destructionGroups, surfaceProjection, landmarks
         case lights, lodTiers, optimization, detailInventory, reviewHistory
     }
@@ -409,6 +416,7 @@ public struct ObjectSculptSpec: Codable, Sendable, Equatable {
         root = try c.decode(ComponentNode.self, forKey: .root)
         materials = try c.decodeIfPresent([MaterialSpec].self, forKey: .materials) ?? []
         sockets = try c.decodeIfPresent([Socket].self, forKey: .sockets) ?? []
+        joints = try c.decodeIfPresent([Joint].self, forKey: .joints) ?? []
         colliders = try c.decodeIfPresent([Collider].self, forKey: .colliders) ?? []
         destructionGroups = try c.decodeIfPresent([DestructionGroup].self, forKey: .destructionGroups) ?? []
         surfaceProjection = try c.decodeIfPresent(SurfaceProjection.self, forKey: .surfaceProjection)

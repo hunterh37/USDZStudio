@@ -315,7 +315,18 @@ import UniformTypeIdentifiers
         // Assess → policy carries a 0.5 floor.
         _ = await callOK(server, "sculpt_assess", ["hints": ["barrel"], "width": 512, "height": 512])
         _ = await callOK(server, "sculpt_author_spec", ["spec": Self.specArg(SculptToolTests.richSpec())])
-        // Continue without measuredSimilarity → rejected by the floor.
+        // The untextured passes (blockout, structural, formRefinement) defer the
+        // colour-dependent similarity floor — evidence-only continues advance
+        // through them up to `material`, the first textured pass.
+        for expected in ["structural", "formRefinement", "material"] {
+            let step = await callOK(server, "sculpt_review",
+                ["decision": "continue", "score": 0.9, "renderPath": "/tmp/r.png",
+                 "comparisonSheetPath": "/tmp/c.png"])
+            #expect(step["result"].stringValue == "advanced")
+            #expect(step["currentPass"].stringValue == expected)
+        }
+        // At `material` the floor bites: continue without a measured similarity
+        // → rejected.
         let msg = await callError(server, "sculpt_review",
             ["decision": "continue", "score": 0.95, "renderPath": "/tmp/r.png",
              "comparisonSheetPath": "/tmp/c.png"])

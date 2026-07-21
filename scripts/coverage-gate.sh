@@ -44,19 +44,22 @@ MODULES=(
   # Spec floors — met and enforced.
   "USDCore|Packages/USDCore|Sources/USDCore|100"
   "MeshKit|Packages/MeshKit|Sources/MeshKit|100"
+  "MechanismKit|Packages/MechanismKit|Sources/MechanismKit|100"
+  "RigKit|Packages/RigKit|Sources/RigKit|100"
   "EditingKit|Packages/EditingKit|Sources/EditingKit|100"
   "ValidationKit|Packages/ValidationKit|Sources/ValidationKit|100"
   "ConversionKit|Packages/ConversionKit|Sources/ConversionKit|100"
   "ScriptingKit|Packages/ScriptingKit|Sources/ScriptingKit|100"
   "AgentMCP|Packages/AgentMCP|Sources/AgentMCP|100"
   "SculptKit|Packages/SculptKit|Sources/SculptKit|100"
+  "SessionKit|Packages/SessionKit|Sources/SessionKit|100"
   "DicyaninDesignSystem|Packages/DicyaninDesignSystem|Sources/DicyaninDesignSystem|95"
   "QuickLookKit|Packages/QuickLookKit|Sources/QuickLookKit|100"
   "CLI|CLI|Sources|95"
   "USDBridge|Packages/USDBridge|Sources/USDBridge|95"          # spec floor; measures 100 today
   # Ratchet floors — pinned below spec target (noted), gap tracked in ROADMAP Phase T.
   "ViewportKit|Packages/ViewportKit|Sources/ViewportKit|50"    # ratchet 46→50; spec target 90
-  "EditorUI|Packages/EditorUI|Sources/EditorUI|34"             # ratchet 27→34; spec target 90
+  "EditorUI|Packages/EditorUI|Sources/EditorUI|64"             # ratchet 34→64; spec target 90
 )
 
 REPORT=0
