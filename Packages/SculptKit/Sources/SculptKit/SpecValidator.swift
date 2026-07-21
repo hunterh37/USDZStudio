@@ -98,7 +98,9 @@ public enum SpecValidator {
         guard color.count == 3 else {
             return [.init(.error, "\(label) must be [r, g, b]")]
         }
-        if color.contains(where: { $0 < 0 || $0 > 1 }) {
+        // A non-finite (NaN/±inf) component is neither < 0 nor > 1, so it would
+        // slip past a bare range comparison and be authored onto the stage.
+        if color.contains(where: { !$0.isFinite || $0 < 0 || $0 > 1 }) {
             return [.init(.error, "\(label) components must be in 0...1")]
         }
         return []
@@ -182,7 +184,8 @@ public enum SpecValidator {
                 issues.append(.init(.error, "material '\(material.id)' \(label) path must not be empty"))
             }
         }
-        if let scale = material.normalScale, scale < 0 {
+        // `!isFinite` guards NaN/±inf, which a bare `< 0` comparison misses.
+        if let scale = material.normalScale, !scale.isFinite || scale < 0 {
             issues.append(.init(.error, "material '\(material.id)' normalScale must be >= 0"))
         }
         return issues
@@ -204,6 +207,8 @@ public enum SpecValidator {
                              (projection.camera.up, "camera up")] {
             if vec.count != 3 {
                 issues.append(.init(.error, "surface projection \(label) must be [x, y, z]"))
+            } else if vec.contains(where: { !$0.isFinite }) {
+                issues.append(.init(.error, "surface projection \(label) must be finite"))
             }
         }
         return issues
@@ -219,6 +224,8 @@ public enum SpecValidator {
             }
             if landmark.position.count != 3 {
                 issues.append(.init(.error, "landmark '\(landmark.name)' position must be [x, y, z]"))
+            } else if landmark.position.contains(where: { !$0.isFinite }) {
+                issues.append(.init(.error, "landmark '\(landmark.name)' position must be finite"))
             }
         }
         return issues

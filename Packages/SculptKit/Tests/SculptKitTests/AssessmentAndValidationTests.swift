@@ -217,6 +217,47 @@ import Testing
         #expect(errs.contains { $0.contains("normalScale must be >= 0") })
     }
 
+    // MARK: - Non-finite blind spots
+    //
+    // NaN/±inf are neither `< 0` nor `> 1`, so a bare range comparison treats
+    // them as valid and authors them onto the stage. Every numeric field must
+    // reject non-finite input.
+
+    @Test func rejectsNonFiniteNormalScale() {
+        for bad in [Double.nan, .infinity, -.infinity] {
+            var spec = validSpec()
+            spec.materials[0].normalScale = bad
+            #expect(SpecValidator.validate(spec).errors
+                .contains { $0.message.contains("normalScale must be >= 0") },
+                "normalScale \(bad) must be rejected")
+        }
+    }
+
+    @Test func rejectsNonFiniteColors() {
+        for bad in [Double.nan, .infinity, -.infinity] {
+            var spec = validSpec()
+            spec.materials[0] = MaterialSpec(id: "wood", baseColor: [bad, 0.5, 0.5],
+                                             emissive: [0.1, bad, 0.1])
+            let errs = SpecValidator.validate(spec).errors.map(\.message)
+            #expect(errs.contains { $0.contains("baseColor components must be in 0...1") })
+            #expect(errs.contains { $0.contains("emissive components must be in 0...1") })
+        }
+    }
+
+    @Test func rejectsNonFiniteCameraAndLandmark() {
+        let badCam = surfaceSpec(SurfaceProjection(
+            targetComponent: "Body",
+            camera: CameraPose(position: [.nan, 0, 5], target: [0, .infinity, 0])))
+        let camMsgs = SpecValidator.validate(badCam).errors.map(\.message)
+        #expect(camMsgs.contains { $0.contains("camera position must be finite") })
+        #expect(camMsgs.contains { $0.contains("camera target must be finite") })
+
+        var lm = validSpec()
+        lm.landmarks = [Landmark(name: "head", component: "Body", position: [0, .nan, 0])]
+        #expect(SpecValidator.validate(lm).errors
+            .contains { $0.message.contains("landmark 'head' position must be finite") })
+    }
+
     // MARK: - Surface projection schema
 
     func surfaceSpec(_ projection: SurfaceProjection) -> ObjectSculptSpec {
