@@ -129,6 +129,12 @@ public struct EditorShellView: View {
     /// Owned/updated by the app; observed inside the activity panel subviews.
     let mcpActivity: MCPActivityModel?
 
+    /// The agent's reference image, shown in a panel above the inspector (nil
+    /// when the feature isn't wired, e.g. previews). Owned/updated by the app —
+    /// from the in-app MCP host or the on-launch hand-off file — and observed
+    /// inside the inspector column (specs/agent-live-editing.md).
+    let referenceImage: ReferenceImageModel?
+
     /// Persisted user preferences. When present, the viewport environment is
     /// seeded from the saved lighting on appear and re-saved as it's edited, so
     /// the environment survives relaunch (nil in previews/tests → transient).
@@ -153,6 +159,7 @@ public struct EditorShellView: View {
                 importingFileName: String? = nil,
                 tutorial: TutorialEngine? = nil,
                 mcpActivity: MCPActivityModel? = nil,
+                referenceImage: ReferenceImageModel? = nil,
                 settings: EditorSettings? = nil,
                 makeScriptExecutor: @escaping () -> (any ScriptExecuting)? = { nil },
                 onReimportFile: @escaping (URL) async -> Void = { _ in },
@@ -167,6 +174,7 @@ public struct EditorShellView: View {
         self.importingFileName = importingFileName
         self.tutorial = tutorial
         self.mcpActivity = mcpActivity
+        self.referenceImage = referenceImage
         self.settings = settings
         self.makeScriptExecutor = makeScriptExecutor
         self.onReimportFile = onReimportFile
@@ -178,6 +186,19 @@ public struct EditorShellView: View {
         self.onSaveAs = onSaveAs
     }
 
+    /// The right column: inspector alone, or — when the app wired a reference
+    /// model — the reference-image panel stacked above it. `InspectorColumn`
+    /// observes the model so the panel shows/hides as the agent sets or clears
+    /// the reference.
+    @ViewBuilder
+    private var inspectorColumn: some View {
+        if let referenceImage {
+            InspectorColumn(document: document, referenceImage: referenceImage)
+        } else {
+            InspectorView(document: document)
+        }
+    }
+
     public var body: some View {
         VStack(spacing: 0) {
             actionBar
@@ -187,7 +208,7 @@ public struct EditorShellView: View {
                     .frame(minWidth: 180, idealWidth: 210, maxWidth: 320)
                 centerColumn
                     .frame(minWidth: 480, maxWidth: .infinity, maxHeight: .infinity)
-                InspectorView(document: document)
+                inspectorColumn
                     .frame(minWidth: 200, idealWidth: 230, maxWidth: 360)
             }
         }

@@ -59,6 +59,7 @@ struct OpenUSDZEditorApp: App {
                             importingFileName: importingFileName,
                             tutorial: tutorial,
                             mcpActivity: mcp.model,
+                            referenceImage: mcp.referenceModel,
                             settings: settings,
                             makeScriptExecutor: {
                                 ProcessScriptExecutor(
