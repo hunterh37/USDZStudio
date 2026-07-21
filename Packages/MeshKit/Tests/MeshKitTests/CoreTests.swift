@@ -63,6 +63,22 @@ struct CoreTests {
         #expect(MeshInvariants.violations(in: mesh).contains { $0.rule == "degenerate" })
     }
 
+    @Test func singleElementRemovalWrappers() {
+        // The single-element `removeFace`/`removeVertex` delegate to the batch
+        // primitives; ops delete in bulk, so exercise the scalar entry points
+        // (public API) directly.
+        var mesh = Fixtures.grid(2)
+        let face = mesh.faceOrder[0]
+        mesh.removeFace(face)
+        #expect(mesh.faceLoops[face] == nil)
+        #expect(!mesh.faceOrder.contains(face))
+        mesh.pruneIsolatedVertices()
+        let vertex = mesh.vertexOrder[0]
+        mesh.removeVertex(vertex)
+        #expect(mesh.positions[vertex] == nil)
+        #expect(!mesh.vertexOrder.contains(vertex))
+    }
+
     @Test func copyOnWriteSnapshotIsIndependent() {
         var a = Fixtures.cube()
         let snapshot = a

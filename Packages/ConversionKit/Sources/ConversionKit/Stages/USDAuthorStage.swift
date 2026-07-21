@@ -79,13 +79,17 @@ public struct USDAuthorStage: ConversionStage {
         }
 
         let skeletonPath = node.skinIndex.flatMap { plan.skeletonPath(forSkin: $0) }
+        // Track sibling names in a set so dedup is O(1) per mesh rather than an
+        // O(meshes²) scan of `prim.children` on every append.
+        var usedNames = Set(prim.children.map(\.name))
         for meshIndex in node.meshIndices {
             guard plan.scene.meshes.indices.contains(meshIndex) else {
                 throw AuthorError.danglingMeshIndex(node: node.name, index: meshIndex)
             }
             let mesh = plan.scene.meshes[meshIndex]
             var name = USDNameSanitizer.sanitize(mesh.name)
-            while prim.children.contains(where: { $0.name == name }) { name += "_1" }
+            while usedNames.contains(name) { name += "_1" }
+            usedNames.insert(name)
             let meshPath = path.appending(name)!  // sanitized + suffixed names stay legal
             prim.children.append(author(mesh, at: meshPath, scene: plan.scene, skeletonPath: skeletonPath, plan: &plan))
         }

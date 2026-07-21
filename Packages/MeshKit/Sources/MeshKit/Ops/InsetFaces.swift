@@ -24,6 +24,10 @@ public enum InsetFaces: MeshOp {
         var out = mesh
         var predictedV = 0, predictedE = 0, predictedF = 0
         var innerFaces = Set<FaceID>()
+        // Batch the original-face removals: deleting each face individually is
+        // O(faceCount) per call, so a k-face inset would be O(k · faceCount).
+        // Iteration reads the *original* `mesh`, so deferring the removal is safe.
+        var facesToRemove = Set<FaceID>()
 
         for f in faces.sorted() {
             guard let loop = mesh.faceLoops[f] else {
@@ -50,7 +54,7 @@ public enum InsetFaces: MeshOp {
             let innerFace = out.addFace(inner)
             innerFaces.insert(innerFace)
             replacements.append(innerFace)
-            out.removeFace(f)
+            facesToRemove.insert(f)
             for name in parentSubsets {
                 for r in replacements { out.addFaceToSubset(r, subset: name) }
             }
@@ -59,6 +63,7 @@ public enum InsetFaces: MeshOp {
             predictedE += 2 * n
             predictedF += n
         }
+        out.removeFaces(facesToRemove)
 
         let predicted = TopologyDelta(vertices: predictedV, edges: predictedE, faces: predictedF)
         try OpSupport.verify(before: mesh, after: out, predicted: predicted)
