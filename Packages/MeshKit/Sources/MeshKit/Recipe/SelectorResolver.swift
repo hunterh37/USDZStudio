@@ -81,14 +81,16 @@ enum SelectorResolver {
         }
         if let pairs = selector.edges {
             var out = Set<EdgeKey>()
-            let known = mesh.edgeFaceMap
+            // Membership-only check: the undirected edge key set is enough, so
+            // avoid `edgeFaceMap`'s per-edge `[FaceID]` array allocations.
+            let known = mesh.edgeSet
             for pair in pairs {
                 guard pair.count == 2 else {
                     throw RecipeError(message: "each edge must be a [a, b] vertex-index pair")
                 }
                 let key = EdgeKey(try vertexID(at: pair[0], in: mesh),
                                   try vertexID(at: pair[1], in: mesh))
-                guard known[key] != nil else {
+                guard known.contains(key) else {
                     throw RecipeError(message: "no edge between vertex indices \(pair[0]) and \(pair[1])")
                 }
                 out.insert(key)

@@ -17,6 +17,7 @@ enum FuzzCorpus {
         0xC0FFEE + 7,      // bevel after extrude on jittered cube (BevelEdges bring-up)
         0xC0FFEE + 23,     // merge-by-distance collapsing a full grid row
         0xC0FFEE + 31,     // delete → bevel on the surviving region
+        0xC0FFEE + 42,      // loop cut on a jittered grid strip (LoopCut bring-up)
     ]
 
     /// `MESHKIT_FUZZ_ITERATIONS` (CI knob) > default 40.

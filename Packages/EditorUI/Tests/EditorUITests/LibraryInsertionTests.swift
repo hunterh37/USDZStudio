@@ -69,6 +69,45 @@ struct LibraryInsertionTests {
         #expect(prim?.children.first?.path == PrimPath("/Widget/Geo"))
     }
 
+    @Test func performInsertDismissesOnSuccess() {
+        let doc = EditorDocument(snapshot: StageSnapshot(rootPrims: []))
+        var dismissed = false
+        // A successful add closes the sheet so keyboard focus returns to the
+        // editor — otherwise the library sheet swallows the ⇥ the user presses
+        // next to enter edit mode on the object they just added.
+        let status = LibraryPanel.performInsert(
+            cube(), document: doc, createDocument: { nil }, dismiss: { dismissed = true })
+        #expect(dismissed)
+        #expect(status == "Added Cube to the scene.")
+        #expect(doc.snapshot.rootPrims.count == 1)
+    }
+
+    @Test func performInsertCreatesScratchSceneWhenNoDocumentOpen() {
+        // No file open: the library starts a fresh scratch document rather than
+        // silently no-opping. The created scene ends up with the inserted prim
+        // selected, so ⇥ can enter edit mode on it right away.
+        var created: EditorDocument?
+        var dismissed = false
+        let status = LibraryPanel.performInsert(
+            cube(), document: nil,
+            createDocument: { let d = EditorDocument(snapshot: StageSnapshot(rootPrims: [])); created = d; return d },
+            dismiss: { dismissed = true })
+        #expect(dismissed)
+        #expect(status == "Added Cube to the scene.")
+        #expect(created?.snapshot.rootPrims.count == 1)
+        #expect(created?.selection.paths == [PrimPath("/Cube")!])
+    }
+
+    @Test func performInsertReportsAndStaysOpenWhenNoSceneCanBeCreated() {
+        // Can't create a scene (e.g. previews): report the failure and keep the
+        // sheet open rather than dismissing into nothing.
+        var dismissed = false
+        let status = LibraryPanel.performInsert(
+            cube(), document: nil, createDocument: { nil }, dismiss: { dismissed = true })
+        #expect(!dismissed)
+        #expect(status.contains("Couldn’t create a scene"))
+    }
+
     @Test func uniqueRootNameSanitizesAndSuffixes() {
         let existing = Prim(path: PrimPath("/Box")!, typeName: "Xform")
         let doc = EditorDocument(snapshot: StageSnapshot(rootPrims: [existing]))

@@ -69,6 +69,16 @@ public final class EditorDocument {
     /// Bumped on every stack change so the menu can observe undo/redo enablement.
     public private(set) var revision: Int = 0
 
+    /// Bumped only when an edit can change prim *geometry or topology* (points,
+    /// face topology, prim add/remove), never for a transform-only edit. The
+    /// viewport's expensive per-prim mesh extraction is memoized against this so
+    /// an interactive translate/rotate/scale drag — which republishes the
+    /// snapshot every pointer event — reuses the geometry it already built
+    /// instead of re-walking every mesh's points on each event. Not
+    /// observation-tracked: it is only read inside `computeViewportScene`, which
+    /// is already gated on `viewportSceneRevision`.
+    @ObservationIgnored public private(set) var geometryRevision: Int = 0
+
     /// Absolute path strings of every prim on the stage, for the viewport's
     /// live-stage sync (deleted prims get their entities disabled). Cached per
     /// revision so repeated SwiftUI reads don't re-walk a large stage.
@@ -87,6 +97,17 @@ public final class EditorDocument {
     /// keyed by the viewport scene revision it was computed at.
     @ObservationIgnored var sceneCacheRevision: Int = -1
     @ObservationIgnored var sceneCache: ViewportScene = ViewportScene()
+
+    /// Memoized per-prim renderable geometry, keyed by prim path and generation-
+    /// stamped with `geometryRevision`. `computeViewportScene` still runs on
+    /// every scene revision (transforms and visibility are cheap to reassemble),
+    /// but the O(vertices) extraction in `Self.mesh(from:)` is skipped whenever
+    /// geometry hasn't changed since the array was last built — the win that
+    /// makes a transform drag stop re-meshing the whole stage each pointer event.
+    /// Values are `Optional` so a prim that legitimately has no geometry (an
+    /// Xform, or a malformed mesh) is cached as a hit, not re-extracted.
+    @ObservationIgnored var meshCacheGeneration: Int = -1
+    @ObservationIgnored var meshCache: [String: ViewportMeshData?] = [:]
 
     /// Cache backing `viewportMaterialOverrides` (see EditorDocument+ViewportMaterial),
     /// keyed by the revision it was computed at.
@@ -335,7 +356,9 @@ public final class EditorDocument {
                                                          in: snapshot)
                 try? session.translate(by: [delta.x, delta.y, delta.z])
             }
-            refresh() // republish the snapshot so the viewport previews live
+            // Transform-only preview: geometry is untouched, so keep the
+            // viewport's mesh cache warm across the drag.
+            refresh(geometryChanged: false)
         case .ended:
             let commands = gizmoDragSessions.compactMap { $0.makeCommand(verb: "Move") }
             gizmoDragSessions = []
@@ -483,7 +506,8 @@ public final class EditorDocument {
                 .map { Matrix4.multiply(worldPrime, $0) } ?? worldPrime
             try? drag.session.update(TRS.from(matrix: local))
         }
-        refresh()
+        // World-space rotate/uniform-scale preview: transform-only.
+        refresh(geometryChanged: false)
     }
 
     /// Routes rotate-gizmo drag phases: live world-space rotation about the
@@ -519,7 +543,8 @@ public final class EditorDocument {
                     factors[axis.rawValue] = factor
                     try? drag.session.scale(byPerAxis: factors)
                 }
-                refresh()
+                // Per-axis local scale preview: transform-only.
+                refresh(geometryChanged: false)
             }
         case .ended:
             endGizmoTransformDrag(verb: "Scale")
@@ -845,9 +870,17 @@ public final class EditorDocument {
 
     // MARK: Private
 
-    private func refresh() {
+    /// Republishes the live stage snapshot and bumps the viewport's revision.
+    ///
+    /// `geometryChanged` defaults to `true` so every path is correct-by-default:
+    /// a caller that forgets simply loses the fast path, never correctness. Only
+    /// the transform-only gizmo drag handlers (translate/rotate/scale live
+    /// previews, which author `xformOp:transform` and nothing else) pass `false`
+    /// to keep the geometry cache warm across the drag.
+    private func refresh(geometryChanged: Bool = true) {
         snapshot = stage.currentSnapshot
         revision &+= 1
+        if geometryChanged { geometryRevision &+= 1 }
     }
 
     /// Finds a prim plus its parent path and sibling index (for undoable delete).

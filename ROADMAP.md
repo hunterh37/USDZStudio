@@ -50,12 +50,12 @@ Make the editor safe to trust with real work. All four items shipped; see specs/
 - FBX support via checksum-verified FBX2glTF download flow. *(✅ shipped)*
 - **Exit / harness:** ✅ CLI `validate` gained `--json` (machine-readable report whose `exportAllowed` field mirrors the exit code) and the full {valid, invalid, warning} × {default, --json, --strict} matrix now runs as a parametrised T1 CLI suite, with JSON↔human agreement asserted diagnostic-for-diagnostic. REPL single-undo contract test lands with the console item.
 
-### Milestone 6 — Perceptual texture recoloring (Phase 4.5, the category-defining differentiator)
-Nothing else in the USDZ ecosystem does this; it is the strongest reason to choose this tool.
-- `RecolorEngine`: OKLab hue/chroma remap, Metal kernel + parity-tested CPU reference, explicit sRGB/linear/P3 color management.
-- Auto-segmentation masks (OKLab clustering + viewport-click seeding), live double-buffered textured preview, undoable `RecolorPartCommand` (uniquify material + texture), calibrated accuracy mode with ΔE readout.
-- Console API `app.recolor(...)`, `recolor_batch.py`, CLI `recolor` subcommand.
-- **Exit / harness:** golden-image ΔE < 2.0 gate on calibration scenes; CPU/GPU parity tests; recolor round-trip.
+### Milestone 6 — Perceptual texture recoloring (Phase 4.5, the category-defining differentiator) — 🚧 **In progress**
+Nothing else in the USDZ ecosystem does this; it is the strongest reason to choose this tool. The perceptual core is built and 100%-gated; the GPU/UI surface and the in-stage textured command remain (see Phase 4.5 detail below for the item-by-item status and blockers).
+- ✅ `RecolorEngine`: OKLab hue/chroma remap, parity-tested **CPU reference**, explicit sRGB/linear/P3 color management (`ConversionKit/Recolor/*`, 100%-covered). The Metal kernel is the remaining accelerator, parity-tested against this reference once built (a GPU kernel can't run under the coverage gate).
+- ✅ Auto-segmentation masks (OKLab clustering + viewport-click UV seeding); ✅ calibrated ΔE readout converging < 2.0 on flat swatches. Live double-buffered textured preview (GPU) and the undoable **textured** `RecolorPartCommand` remain — the latter blocked by Phase 7 `UsdUVTexture`-network authoring (solid-color part recolor already ships in Phase 3).
+- ✅ `recolor_batch.py` + CLI `recolor` subcommand. The in-app `app.recolor(...)` console facade + EditorUI panel remain (app-side wiring).
+- **Exit / harness:** golden-image ΔE < 2.0 gate on calibration scenes (flat-swatch calibration assertions in CI now; full offscreen-render corpus with T1); CPU/GPU parity tests (reference shipped; GPU pending); recolor round-trip (PNG decode→recolor→encode→decode stable ✓).
 
 ### Milestone 7 — Raise the ratchets to spec (finishes Phase T, continuous)
 With the golden-image, round-trip, corpus, and XCUITest harnesses now built by earlier milestones, lift ViewportKit and EditorUI from their regression ratchets toward the `specs/testing.md` floors, add the coverage-delta PR comment, and stand up the nightly perf/leaks/mutation jobs.
@@ -175,20 +175,20 @@ With the golden-image, round-trip, corpus, and XCUITest harnesses now built by e
 
 ## Phase 4.5 — Perceptual Texture Recoloring (v0.5, overlaps Phase 5 start)
 
-- [ ] RecolorEngine: OKLab hue/chroma remap, Metal kernel + CPU reference implementation, parity-tested
-- [ ] Color management: explicit sRGB/linear/P3 handling, sourceColorSpace honoring, reference-value tests
-- [ ] Auto-segmentation masks (OKLab clustering, viewport-click seeding) + 2D mask refinement view
-- [ ] Live textured recolor preview (double-buffered texture updates while dragging)
-- [ ] `RecolorPartCommand` (textured): uniquify material + texture, undoable, round-trip tested
-- [ ] Calibrated accuracy mode (inverse-render match, ΔE readout, metallic-aware)
-- [ ] Console API `app.recolor(...)`, `recolor_batch.py`, CLI `recolor` subcommand
-- [ ] Golden-image suite: ΔE < 2.0 gate on calibration scenes
+- [x] RecolorEngine: OKLab hue/chroma remap, **CPU reference implementation**, parity-tested — `ConversionKit/Recolor/RecolorEngine.swift`: pure, deterministic OKLCh remap (snap hue → target, target mean chroma + preserved per-pixel deviation, lightness/detail preserved, optional bias + hue-variation), region statistics (coverage-weighted circular-mean hue), feathered mask blend in OKLab, and `meanDeltaE76` (CIELab). 100%-covered. The Metal live-path kernel is the remaining accelerator — it is parity-*tested against this CPU reference* once built, but is excluded here because a GPU kernel can't run under the CI coverage gate; the reference it will be measured against ships now.
+- [x] Color management: explicit sRGB/linear/P3 handling, sourceColorSpace honoring, reference-value tests — `ConversionKit/Recolor/ColorManagement.swift`: sRGB transfer curves, linear-sRGB ↔ OKLab ↔ OKLCh, CIELab(D65)+ΔE*76, Display-P3 primary matrices, tagged `TextureColorSpace` decode/encode with out-of-gamut clamping, `#RRGGBB` parsing. Reference-value unit tests (mid-gray 0.214, white L*=100, ΔE white↔black=100). 100%-covered.
+- [x] Auto-segmentation masks (OKLab clustering, viewport-click seeding) — `ConversionKit/Recolor/Segmentation.swift`: deterministic k-means over OKLab samples, `clusterMask(atUV:)` (click the 3D part → hit UV seeds the owning cluster) and `similarityMask(atUV:threshold:feather:)`. 100%-covered. *2D mask-refinement brush view remains (EditorUI).*
+- [ ] Live textured recolor preview (double-buffered texture updates while dragging) — GPU/RealityKit path, unbuilt (needs the Metal kernel + viewport wiring).
+- [ ] `RecolorPartCommand` (textured): uniquify material + texture, undoable, round-trip tested — **blocked by Phase 7**: swapping a part's albedo in-stage needs `UsdUVTexture`-network authoring in `USDAuthorStage` (the standing Phase 3 texture-replace TODO). The perceptual byte transform it would call is shipped (`RecolorPipeline`); the solid-color part recolor already ships (Phase 3 `EditorDocument.recolorMaterials`).
+- [~] Calibrated accuracy mode (ΔE readout) — `RecolorPipeline` `.calibrated` mode iterates ≤3 correction passes (hue/chroma/lightness residual) and converges to ΔE < 2.0 on flat swatches, reporting `achievedDeltaE`. Inverse-render match under a calibration IBL + metallic-aware biasing remain (need offscreen RealityKit render).
+- [x] Console API / `recolor_batch.py` / CLI `recolor` subcommand — `recolor_batch.py` (bundled, self-contained pure-Python OKLab remap of solid `diffuseColor` across the selection/stage — the "rebrand N SKUs" workflow; textured parts detected and skipped); `openusdz recolor <in> <out> --color --mode --source/target-space --mask-uv …` (matrix-tested). *The in-app `app.recolor(...)` console facade + EditorUI panel remain (app-side wiring).*
+- [x] Golden-image / calibration ΔE < 2.0 gate — enforced as the `calibratedModeConvergesUnderDeltaE2` / `calibratedJSONReportsDeltaE` assertions in the ConversionKit + CLI suites (flat calibration swatches). Full offscreen-render golden corpus lands with the T1 golden-image harness.
 
-**Exit:** recolor red leather to blue without losing the grain — live, accurate, batchable. Nothing else in the USDZ ecosystem does this.
+**Exit:** recolor red leather to blue without losing the grain — live, accurate, batchable. Nothing else in the USDZ ecosystem does this. *(Perceptual engine + color management + segmentation + CLI + batch shipped and 100%-gated; live GPU preview, in-stage textured command (Phase 7), and the EditorUI panel remain.)*
 
 ## Phase 5 — 1.0 Polish
 
-- [ ] Command palette (⌘K) + ActionRegistry (menu/shortcut/palette unification)
+- [x] Command palette (⌘K) + ActionRegistry (menu/shortcut/palette unification) — `ActionRegistry`/`FuzzyMatcher`/`CommandPaletteModel` + ⌘K overlay in EditorUI; every palette action mirrors an existing menu/toolbar command (one behaviour per command). Pure ranking/selection at 100% coverage; see specs/command-palette.md (snapshot-UI harness for the overlay tracked in Phase T1)
 - [ ] Camera bookmarks, turntable/thumbnail rendering, "AirDrop to test on iPhone"
 - [ ] Light theme, accessibility pass (VoiceOver, contrast), localization scaffolding
 - [ ] Performance: 1M-tri @ 60fps target, large-stage outliner virtualization
@@ -211,7 +211,7 @@ Targeted mesh repair & adjustment — extrude a mounting tab, close a hole, merg
 **Exit:** open a vendor USDZ, Tab into the bumper, extrude a mounting tab, fill a hole, export — all invariant-verified.
 
 ### v1.15 follow-up
-- [ ] LoopCut (quad-strip traversal)
+- [x] LoopCut (quad-strip traversal) — single edge-loop cut over a quad strip: walks opposite edges in both directions from a seed edge, closing on itself (a ring, e.g. around a cube) or terminating at boundaries (an open strip, e.g. across a grid). Places a midpoint per crossed rung and splits each strip quad into two. Strict v1 preconditions fail loudly (single seed edge, quads-only strip, manifold rungs, single segment); new faces inherit the split face's subsets. χ-preserving (ΔV−ΔE+ΔF=0) and volume-neutral on closed meshes (analytic-tested on the cube ring); in the fuzz rotation with a pinned regression seed. 100% MeshKit line coverage held (three reviewed defensive exclusions).
 - [ ] Multi-segment bevel, skin-weight propagation investigation
 
 # Editing-Tools Spine (post-1.0) — the authoring roadmap
@@ -307,8 +307,8 @@ Typed, transactional, verification-gated MCP editing API over the kits
 ## Continuous / Platform
 
 - [ ] Python console REPL + `app.*` scripting parity for every command above (single-undo script runs).
-- [ ] Command palette (⌘K) coverage for all authoring actions via ActionRegistry.
-- [ ] USD stage **diff view** (compare two files / before-after an edit batch).
+- [x] Command palette (⌘K) coverage for all authoring actions via ActionRegistry — `ActionRegistry` + `FuzzyMatcher` (EditorUI, pure): a value-typed, deterministically-ranked action set (subsequence fuzzy match with start/boundary/consecutive bonuses; enabled-first, score-then-title total order), driven by `CommandPaletteModel` (`@Observable @MainActor` query/results/selection) and the `CommandPaletteView` overlay (↑/↓ navigate, ↩ run, ⎋ dismiss). Each `PaletteAction` mirrors an existing menu/toolbar command so a command has one behaviour however it's invoked (File Open/Save/Save As/Export, Edit Undo/Redo, Convert/Batch/Library/Scripts/Console/Sculpt, View Validate/Environment/Agent), with `isEnabled` matching menu enablement (disabled rows appear greyed). ⌘K opens it (Convert File moved to ⇧⌘K); the App menu carries the same item. 100% coverage on `ActionRegistry`/`CommandPaletteModel`; the SwiftUI overlay is tracked with the snapshot-UI harness in Phase T1. Full authoring-action coverage extends as later phases add actions.
+- [x] USD stage **diff view** (compare two files / before-after an edit batch) — `StageDiff` (USDCore, pure): `StageDiff.between(before, after)` computes a structured, value-typed diff — root-metadata field changes, added/removed prims (matched by absolute path across the flattened stage, so a rename reads as remove+add like `usddiff`), and shallow per-prim field edits (type/active/visibility plus keyed attribute/relationship/metadata/variant-set changes, each captured uniformly as a before→after `ValueChange`). `render()` gives a deterministic text report and the whole diff is `Codable`. Surfaced as `openusdz diff <before> <after> [--json]`, whose exit code follows `diff(1)` (0 identical, 1 differing, 2 usage/open error). 100% USDCore + CLI `DiffCommand` coverage. A before/after diff *panel* in EditorUI can consume the same engine (tracked with the snapshot-UI harness in Phase T1).
 - [ ] Plugin API v2: native Swift plugin bundles for importers/panels/tools.
 - [ ] visionOS companion viewer (edit on Mac, view synced over network).
 - [x] First-launch Welcome Tour, re-triggerable from the Help menu (onboarding).

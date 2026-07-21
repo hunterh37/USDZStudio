@@ -87,6 +87,15 @@ enum McpCommand {
         guard let resolution = resolve(arguments: arguments, printError: printError) else {
             return 2
         }
+        // If the editor app is running, it hosts the editing session against its
+        // OPEN document — become a thin stdin↔socket↔stdout pump so the agent
+        // edits (and the user watches) the live viewport (specs/agent-live-editing.md).
+        let endpointURL = MCPActivityPaths.endpointURL()
+        if let pump = RelayPump.make(endpointURL: endpointURL) {
+            FileHandle.standardError.write(Data(
+                "openusdz mcp: editor is live — relaying to the open document\n".utf8))
+            return await pump.run()
+        }
         do {
             guard let executor = ProcessBridgeExecutor(scriptPath: try CLIRunner.snapshotScriptPath()) else {
                 printError("error: no Python interpreter found — run scripts/fetch-python-runtime.sh")

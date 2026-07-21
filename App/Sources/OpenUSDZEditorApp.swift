@@ -18,9 +18,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
-        // Remove the activity-endpoint discovery file so a later-spawned server
-        // doesn't try to reach a dead port.
-        try? FileManager.default.removeItem(at: MCPActivityListener.endpointURL())
+        // Remove the discovery file + UNIX socket so a later-spawned pump doesn't
+        // try to reach a dead editor — but only if this instance owns them, so a
+        // quitting second instance never orphans the first's endpoint.
+        MCPActivityListener.removeEndpointIfOwned()
     }
 }
 
@@ -68,7 +69,10 @@ struct OpenUSDZEditorApp: App {
                                 document = doc
                                 return doc
                             },
-                            onExport: { url in try await export(to: url) })
+                            onExport: { url in try await export(to: url) },
+                            onOpenFile: { presentOpenPanel() },
+                            onSave: { save(to: document?.modelURL) },
+                            onSaveAs: { save(to: nil) })
                 .frame(minWidth: 1000, minHeight: 620)
                 .alert("Could Not Open File", isPresented: .constant(openError != nil)) {
                     Button("OK") { openError = nil }
@@ -92,6 +96,12 @@ struct OpenUSDZEditorApp: App {
                     if document == nil && !hasSeenTutorial {
                         startTutorial()
                     }
+                    // Host the agent editing session on the current document so
+                    // agent MCP edits render live in this window (specs/agent-live-editing.md).
+                    mcp.bindDocument(document)
+                }
+                .onChange(of: document.map(ObjectIdentifier.init)) {
+                    mcp.bindDocument(document)
                 }
                 .onDrop(of: [.fileURL], isTargeted: nil) { providers in
                     _ = providers.first?.loadObject(ofClass: URL.self) { url, _ in
@@ -134,12 +144,16 @@ struct OpenUSDZEditorApp: App {
                     .keyboardShortcut("l", modifiers: [.command, .shift])
                 Divider()
                 Button("Convert File…") { postMenu(.convert) }
-                    .keyboardShortcut("k")
+                    .keyboardShortcut("k", modifiers: [.command, .shift])
                 Button("Batch Convert…") { postMenu(.batch) }
                     .keyboardShortcut("b", modifiers: [.command, .shift])
                 Divider()
                 Button("Validate Stage") { postMenu(.validate) }
                     .keyboardShortcut("u")
+                    .disabled(document == nil)
+                Divider()
+                Button("Sculpt Demo House") { postMenu(.sculptDemo) }
+                    .keyboardShortcut("h", modifiers: [.command, .shift])
                     .disabled(document == nil)
                 Button("Scripts…") { postMenu(.scripts) }
                 Button("Python Console…") { postMenu(.console) }
@@ -157,6 +171,10 @@ struct OpenUSDZEditorApp: App {
                     .disabled(tutorial != nil)
             }
             CommandGroup(after: .toolbar) {
+                // ⌘K opens the command palette — the single entry point that
+                // unifies menu/shortcut/palette (ROADMAP Phase 5 / Continuous).
+                Button("Command Palette…") { postMenu(.commandPalette) }
+                    .keyboardShortcut("k")
                 Button("Show Agent Activity") {
                     postMenu(.mcpActivity)
                 }

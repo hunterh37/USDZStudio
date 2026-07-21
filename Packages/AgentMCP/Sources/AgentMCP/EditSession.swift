@@ -92,6 +92,25 @@ public final class EditSession: @unchecked Sendable {
         self.sourceURL = sourceURL
     }
 
+    /// Bind a session to an **existing** stage + command stack rather than a
+    /// fresh copy — the seam that lets the app host this session directly on
+    /// its open `EditorDocument`'s stage/stack, so agent mutations run through
+    /// the same `CommandStack.onChange` that refreshes the viewport
+    /// (specs/agent-live-editing.md). Every tool then edits the live document.
+    public init(
+        sharing stage: InMemoryStage,
+        stack: CommandStack,
+        sourceURL: URL? = nil,
+        strictness: ValidationStrictness = .warn,
+        profile: ValidationProfile = .arkit
+    ) {
+        self.stage = stage
+        self.stack = stack
+        self.strictness = strictness
+        self.profile = profile
+        self.sourceURL = sourceURL
+    }
+
     // MARK: - Prim resolution
 
     /// Resolve a tool argument that may be a `path` ("/A/B") or a `primId`

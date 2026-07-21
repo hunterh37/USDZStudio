@@ -29,6 +29,13 @@ extension EditorDocument {
     private func computeViewportScene() -> ViewportScene {
         let live = viewportLivePrimPaths
         let transforms = viewportLiveTransforms
+        // Drop the memoized geometry only when an edit could actually have
+        // changed it; a transform-only drag leaves this generation untouched, so
+        // every `cachedMesh(for:)` below is a hit.
+        if meshCacheGeneration != geometryRevision {
+            meshCache.removeAll(keepingCapacity: true)
+            meshCacheGeneration = geometryRevision
+        }
         var nodes: [String: ViewportPrimNode] = [:]
         // Own-opinion visibility, before inheritance is resolved below.
         var selfVisible: [String: Bool] = [:]
@@ -38,7 +45,7 @@ extension EditorDocument {
             nodes[path] = ViewportPrimNode(
                 path: path,
                 transform: transforms[path] ?? matrix_identity_float4x4,
-                mesh: Self.mesh(from: prim),
+                mesh: cachedMesh(for: prim, path: path),
                 isEnabled: live.contains(path))
         }
 
@@ -53,6 +60,20 @@ extension EditorDocument {
             nodes[path] = node
         }
         return ViewportScene(nodes: nodes)
+    }
+
+    /// `Self.mesh(from:)` for `prim`, served from `meshCache` when this prim's
+    /// geometry was already extracted at the current `geometryRevision`. The
+    /// cache is generation-cleared in `computeViewportScene`, so a stale entry
+    /// can never outlive a geometry edit. `nil` results are cached too (via an
+    /// explicit key check) so meshless prims aren't re-walked every event.
+    private func cachedMesh(for prim: Prim, path: String) -> ViewportMeshData? {
+        if let existing = meshCache.index(forKey: path) {
+            return meshCache[existing].value
+        }
+        let mesh = Self.mesh(from: prim)
+        meshCache[path] = mesh
+        return mesh
     }
 
     /// Renderable geometry for `prim`, or `nil` when it carries none (a grouping

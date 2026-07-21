@@ -76,6 +76,9 @@ public struct ViewportPane: View {
     /// `editedMesh` is active. The second parameter is `true` when ⇧ was held
     /// (additive selection: toggle the face into/out of the current set).
     let onPickFace: ((Int, Bool) -> Void)?
+    /// Blender-style Tab toggle: fires when Tab is pressed while the viewport
+    /// has keyboard focus. Wired by the host to `document.toggleMeshEditMode()`.
+    let onToggleEditMode: (() -> Void)?
     /// Live hover preview: highlight the face under the cursor (the one a
     /// click / op would target). Reported up so the HUD can name it.
     let hoverPreview: Bool
@@ -134,6 +137,7 @@ public struct ViewportPane: View {
                 scene: ViewportScene? = nil,
                 editedMesh: EditedMeshData? = nil,
                 onPickFace: ((Int, Bool) -> Void)? = nil,
+                onToggleEditMode: (() -> Void)? = nil,
                 hoverPreview: Bool = false,
                 onHoverFace: ((Int?) -> Void)? = nil,
                 extrudeGizmo: ExtrudeGizmoDescriptor? = nil,
@@ -155,6 +159,7 @@ public struct ViewportPane: View {
         self.scene = scene
         self.editedMesh = editedMesh
         self.onPickFace = onPickFace
+        self.onToggleEditMode = onToggleEditMode
         self.hoverPreview = hoverPreview
         self.onHoverFace = onHoverFace
         self.extrudeGizmo = extrudeGizmo
@@ -178,6 +183,7 @@ public struct ViewportPane: View {
                                   livePrimPaths: livePrimPaths, sceneRevision: sceneRevision,
                                   scene: scene,
                                   editedMesh: editedMesh, onPickFace: onPickFace,
+                                  onToggleEditMode: onToggleEditMode,
                                   hoverPreview: hoverPreview, onHoverFace: onHoverFace,
                                   extrudeGizmo: extrudeGizmo, onGizmoDrag: onGizmoDrag,
                                   translateGizmo: translateGizmo,
@@ -267,6 +273,7 @@ struct ViewportRepresentable: NSViewRepresentable {
     let scene: ViewportScene?
     let editedMesh: EditedMeshData?
     let onPickFace: ((Int, Bool) -> Void)?
+    let onToggleEditMode: (() -> Void)?
     let hoverPreview: Bool
     let onHoverFace: ((Int?) -> Void)?
     let extrudeGizmo: ExtrudeGizmoDescriptor?
@@ -302,6 +309,10 @@ struct ViewportRepresentable: NSViewRepresentable {
         context.coordinator.onStats = { stats = $0 }
         context.coordinator.onError = { loadError = $0 }
         view.interactionMode = mode
+        // Bare-Tab hotkey lives on the first responder (the viewport view), not
+        // the SwiftUI key-equivalent fallback which AppKit's key-view loop
+        // pre-empts. Re-set each update so it tracks the current host closure.
+        view.onToggleEditMode = onToggleEditMode
         context.coordinator.load(url: modelURL)
         context.coordinator.applyScene(scene)
         if let livePrimPaths {
@@ -963,8 +974,17 @@ final class ViewportCoordinator {
     private var onHoverFace: ((Int?) -> Void)?
     private var hoverEntity: ModelEntity?
     private var hoveredFace: Int?
-    /// BVH rebuilt per mesh revision; traversed per hover/click event.
+    /// BVH over the edit mesh; traversed per hover/click event. Rebuilt on a
+    /// topology change, but during a position-only drag it is left `stale` and
+    /// rebuilt lazily on the next pick — no pick happens mid-drag, so paying for
+    /// an O(n log n) BVH build on every pointer event is pure waste.
     private var pickAccelerator: PickAccelerator?
+    private var pickAcceleratorIsStale = false
+    /// The live edit-mesh entities, retained so a position-only drag update can
+    /// swap their geometry in place instead of tearing the anchor down and
+    /// re-instantiating entities + materials every pointer event.
+    private var editBaseEntity: ModelEntity?
+    private var editHighlightEntity: ModelEntity?
 
     /// Swap the file-loaded entity for the live edited mesh (flat-shaded, with
     /// an amber overlay on the selected faces); restore it when editing ends.
@@ -978,18 +998,60 @@ final class ViewportCoordinator {
             ? nil : { [weak self] point in self?.hover(at: point) }
         if data == nil || !hoverPreview { setHoveredFace(nil) }
         guard data != editData else { return }
+        let previous = editData
         editData = data
-        pickAccelerator = data.map(PickAccelerator.init)
-        setHoveredFace(nil) // geometry changed; stale hover would mislead
-        editAnchor.children.removeAll()
-        hoverEntity = nil
 
         guard let data else {
+            // Exit edit mode: full teardown.
+            pickAccelerator = nil
+            pickAcceleratorIsStale = false
+            editBaseEntity = nil
+            editHighlightEntity = nil
+            setHoveredFace(nil)
+            editAnchor.children.removeAll()
+            hoverEntity = nil
             hiddenOriginal?.isEnabled = true
             hiddenOriginal = nil
             if editAnchor.parent != nil { editAnchor.removeFromParent() }
             return
         }
+
+        switch data.update(from: previous) {
+        case .none:
+            // Only the revision counter churned — geometry, selection and prim
+            // are all unchanged, so there is nothing to redraw and the BVH still
+            // matches. This is the cheapest possible drag frame.
+            return
+        case .positions where editBaseEntity != nil:
+            // Interactive extrude/inset drag: vertices moved but topology and
+            // selection held. Refresh the existing entities' geometry in place
+            // and mark the BVH stale (rebuilt lazily on the next pick) — no
+            // teardown, no re-instantiation, no per-event BVH build.
+            pickAcceleratorIsStale = true
+            setHoveredFace(nil) // positions moved; a stale hover face would mislead
+            if let mesh = Self.meshResource(MeshFlattener.flatten(data)) {
+                editBaseEntity?.model?.mesh = mesh
+            }
+            if !data.selectedFaces.isEmpty,
+               let highlight = Self.meshResource(
+                MeshFlattener.flatten(data, faces: data.selectedFaces.sorted()), inflate: 0.003) {
+                editHighlightEntity?.model?.mesh = highlight
+            }
+            return
+        case .positions, .rebuild:
+            break // fall through to a full rebuild
+        }
+
+        // Full rebuild: topology, selection or prim identity changed (or this is
+        // the first frame of an edit session).
+        pickAccelerator = PickAccelerator(data)
+        pickAcceleratorIsStale = false
+        setHoveredFace(nil) // geometry changed; stale hover would mislead
+        editAnchor.children.removeAll()
+        editBaseEntity = nil
+        editHighlightEntity = nil
+        hoverEntity = nil
+
         if editAnchor.parent == nil { view?.scene.addAnchor(editAnchor) }
 
         // Hide the file-loaded entity for this prim; the edit mesh replaces it.
@@ -1019,6 +1081,7 @@ final class ViewportCoordinator {
             let entity = ModelEntity(mesh: mesh, materials: [material])
             entity.transform = Transform(matrix: worldMatrix)
             editAnchor.addChild(entity)
+            editBaseEntity = entity // retained for in-place position-only updates
         }
         if !data.selectedFaces.isEmpty,
            let highlight = Self.meshResource(
@@ -1028,6 +1091,7 @@ final class ViewportCoordinator {
                 materials: [UnlitMaterial(color: NSColor(srgbRed: 0.91, green: 0.7, blue: 0.25, alpha: 0.55))])
             entity.transform = Transform(matrix: worldMatrix)
             editAnchor.addChild(entity)
+            editHighlightEntity = entity // retained for in-place position-only updates
         }
     }
 
@@ -1058,6 +1122,12 @@ final class ViewportCoordinator {
 
     private func faceHit(at point: CGPoint) -> Int? {
         guard let data = editData, let ray = primLocalRay(at: point) else { return nil }
+        // A position-only drag left the BVH stale; rebuild it now, at the first
+        // pick after the drag, so it reflects the current vertex positions.
+        if pickAcceleratorIsStale {
+            pickAccelerator = PickAccelerator(data)
+            pickAcceleratorIsStale = false
+        }
         return (pickAccelerator?.pickFace(ray: ray) ?? MeshPicker.pickFace(ray: ray, in: data))?.faceIndex
     }
 
@@ -1725,6 +1795,12 @@ final class InteractiveARView: ARView {
     var onPan: ((Double, Double) -> Void)?
     var onDolly: ((Double) -> Void)?
     var onFrame: (() -> Void)?
+    /// Tab toggles object ⇄ mesh edit mode (Blender muscle memory). Handled here
+    /// in `keyDown` — while the viewport is first responder AppKit consumes bare
+    /// Tab for its key-view loop before it ever reaches the SwiftUI
+    /// `keyboardShortcut(.tab)` fallback, so the hotkey has to be caught on the
+    /// responder that actually has focus. `nil` outside edit-capable hosts.
+    var onToggleEditMode: (() -> Void)?
     /// Component picking in edit mode: fires with the click point in top-left
     /// view coordinates when a press releases without dragging. The Bool is
     /// `true` when ⇧ was held (additive multi-select).
@@ -1835,6 +1911,13 @@ final class InteractiveARView: ARView {
     }
 
     override func keyDown(with event: NSEvent) {
+        // Tab (keyCode 48) toggles edit mode. Match on keyCode rather than the
+        // character so a remapped field-editor Tab can't slip past, and swallow
+        // the event (no `super`) so AppKit doesn't also run its key-view loop.
+        if event.keyCode == 48, let onToggleEditMode {
+            onToggleEditMode()
+            return
+        }
         switch event.charactersIgnoringModifiers?.lowercased() {
         case "f": onFrame?()
         default: super.keyDown(with: event)

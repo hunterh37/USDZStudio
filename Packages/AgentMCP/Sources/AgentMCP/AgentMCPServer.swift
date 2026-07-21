@@ -61,6 +61,10 @@ public enum AgentMCPServer {
             on: server, session: session,
             executor: configuration.scriptExecutor,
             workDirectory: configuration.workDirectory)
+        SculptTools.register(
+            on: server, session: session,
+            store: SculptStore(),
+            workDirectory: configuration.workDirectory)
 
         // §3.1 — the same payloads as read tools, exposed as MCP resources so
         // clients that support resources get state readback without burning

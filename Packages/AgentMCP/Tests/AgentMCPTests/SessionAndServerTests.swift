@@ -210,7 +210,8 @@ import USDCore
         let prompts = await server.handle(request: JSONRPCRequest(id: .number(5), method: "prompts/list"))!
         let names = prompts["result"]["prompts"].arrayValue!.compactMap { $0["name"].stringValue }
         #expect(names.contains("build-validate-score-loop"))
-        #expect(names.count == 4)
+        #expect(names.contains("sculpt-from-image"))
+        #expect(names.count == 5)
 
         let prompt = await server.handle(request: JSONRPCRequest(
             id: .number(6), method: "prompts/get", params: ["name": "import-and-normalize"]))!
