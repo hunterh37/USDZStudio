@@ -1,15 +1,29 @@
 import Foundation
+import simd
 
-/// Per-face inset (v1): each selected n-gon is replaced by an inner n-gon
-/// shrunk toward its centroid plus n side quads.
+/// Per-face inset: each selected n-gon is replaced by an inner n-gon
+/// shrunk toward its centroid (`fraction`) and optionally offset along the
+/// face normal (`depth`), plus n side quads.
 /// Delta per face: V += n, E += 2n, F += n.
+///
+/// `depth` is what makes the inset visibly *deform* the surface: with
+/// `depth == 0` the inner ring is coplanar with the original face (a pure
+/// in-plane inset — invisible on a flat face except for the new edges).
+/// A negative `depth` pushes the inner face inward along the normal (the
+/// "punched-in panel" look); positive raises it outward.
 public enum InsetFaces: MeshOp {
     public static let name = "Inset"
 
     public struct Params: Sendable {
         /// 0 < fraction < 1 — how far each corner moves toward the centroid.
         public var fraction: Double
-        public init(fraction: Double) { self.fraction = fraction }
+        /// Signed offset of the inner ring along the (unit) face normal.
+        /// 0 = coplanar (classic inset); negative = inward; positive = outward.
+        public var depth: Double
+        public init(fraction: Double, depth: Double = 0) {
+            self.fraction = fraction
+            self.depth = depth
+        }
     }
 
     public static func apply(_ mesh: HalfEdgeMesh, selection: ComponentSelection,
@@ -35,10 +49,20 @@ public enum InsetFaces: MeshOp {
             // geometry that replaces the inset face.
             let parentSubsets = mesh.subsets.filter { $0.value.contains(f) }.keys
 
+            // Offset applied to every inner vertex along the face normal.
+            // Guard against a degenerate (zero-area) face: no normal ⇒ no
+            // depth, which cleanly falls back to a coplanar inset.
+            var offset = SIMD3<Double>()
+            if params.depth != 0 {
+                let areaNormal = mesh.faceNormalArea(f)
+                let len = simd_length(areaNormal)
+                if len > 1e-12 { offset = areaNormal / len * params.depth }
+            }
+
             var inner: [VertexID] = []
             for v in loop {
                 let p = mesh.positions[v]!
-                inner.append(out.addVertex(p + (centroid - p) * params.fraction))
+                inner.append(out.addVertex(p + (centroid - p) * params.fraction + offset))
             }
             // Side quads: traverse the original edge in the original direction
             // (the removed face owned that direction; neighbors run opposite).
