@@ -38,24 +38,36 @@ public enum SculptPass: String, Codable, Sendable, CaseIterable, Comparable {
         }
     }
 
-    /// Whether the fidelity gates (the subjective score threshold *and* the
-    /// measured-similarity floor) are enforced when continuing *out of* this
-    /// pass.
+    /// Whether the **subjective score threshold** is enforced when continuing
+    /// *out of* this pass.
     ///
-    /// The fidelity gates compare the pass render against a *placed* reference.
     /// `blockout` only authors coarse geometry at each prim's local origin —
     /// component placement is the `structural` pass's responsibility — so a
-    /// blockout render is an origin-collapsed massing that is not yet
-    /// comparable to the reference. Enforcing a similarity floor (or a high
-    /// subjective score) there is unsatisfiable for any multi-part object and
-    /// would deadlock the pipeline before placement can ever run.
+    /// blockout render is an origin-collapsed massing whose shape is not yet
+    /// judgeable against the reference. `blockout` is therefore exempt from the
+    /// score gate (it still owes the full evidence bundle). From `structural`
+    /// onward the render is placed and its shape *can* be judged, so the agent's
+    /// score is gated on every subsequent pass.
+    public var enforcesScoreGate: Bool { self != .blockout }
+
+    /// Whether the **deterministic measured-similarity floor** is enforced when
+    /// continuing *out of* this pass.
     ///
-    /// `blockout` is therefore exempt: continuing out of it still requires the
-    /// full evidence bundle (render + comparison sheet + score), but not that
-    /// the render *matches*. Fidelity gating begins at `structural` — the first
-    /// pass whose render is placed and comparable — and tightens through every
-    /// pass that follows.
-    public var enforcesFidelityGate: Bool { self != .blockout }
+    /// The similarity metric blends silhouette IoU with SSIM and luminance
+    /// correlation — pixel-intensity comparisons. Passes before `material`
+    /// (`blockout`, `structural`, `formRefinement`) author *untextured*
+    /// geometry, so their render is a uniform clay/grey shape. Comparing that to
+    /// a real, full-colour reference photograph drives SSIM and luminance down
+    /// no matter how faithful the geometry is, making the blended floor
+    /// unsatisfiable for the geometry passes — a general flaw, not specific to
+    /// any one object.
+    ///
+    /// The floor therefore engages only from `material` — the first pass whose
+    /// render carries colour and is genuinely comparable to a colour reference —
+    /// and applies through every pass that follows. The geometry passes are
+    /// still gated on shape via the subjective score (`enforcesScoreGate`); only
+    /// the colour-dependent deterministic floor is deferred to where it is fair.
+    public var enforcesSimilarityFloor: Bool { self >= .material }
 
     public static func < (lhs: SculptPass, rhs: SculptPass) -> Bool {
         lhs.index < rhs.index

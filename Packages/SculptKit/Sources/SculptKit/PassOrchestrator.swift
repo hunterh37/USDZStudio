@@ -82,23 +82,33 @@ public struct PassOrchestrator: Sendable, Equatable, Codable {
             guard review.renderPath != nil else { throw AdvanceError.continueRequiresRender }
             guard review.comparisonSheetPath != nil else { throw AdvanceError.continueRequiresComparisonSheet }
             guard let score = review.score else { throw AdvanceError.continueRequiresScore }
-            // The fidelity gates compare the render against a *placed* reference.
-            // `blockout` authors geometry at the origin (placement is the
-            // `structural` pass's job), so its render is not yet comparable and
-            // is exempt from the score threshold and the similarity floor — it
-            // still owes the full evidence bundle above. Gating begins at
-            // `structural` and tightens through the remaining passes.
-            if current.enforcesFidelityGate {
+            // Two gates fire independently, each where it is fair to compare:
+            //
+            // • Score gate (`enforcesScoreGate`): the agent's subjective shape
+            //   judgment. Exempt only for `blockout`, whose render is an
+            //   origin-collapsed massing (placement is `structural`'s job); the
+            //   shape is judgeable from `structural` onward.
+            //
+            // • Similarity floor (`enforcesSimilarityFloor`): the deterministic
+            //   silhouette/SSIM/luminance metric. Untextured geometry passes
+            //   (`blockout`, `structural`, `formRefinement`) render as uniform
+            //   clay, so a colour metric against a real photo is not a fair gate
+            //   there — the floor engages from `material` onward, where the
+            //   render carries colour.
+            //
+            // The full evidence bundle above (render + sheet + score) is always
+            // required, on every pass.
+            if current.enforcesScoreGate {
                 guard score >= threshold else {
                     throw AdvanceError.scoreBelowThreshold(score: score, threshold: threshold)
                 }
-                if similarityFloor > 0 {
-                    guard let measured = review.measuredSimilarity else {
-                        throw AdvanceError.continueRequiresMeasuredSimilarity
-                    }
-                    guard measured >= similarityFloor else {
-                        throw AdvanceError.similarityBelowFloor(measured: measured, floor: similarityFloor)
-                    }
+            }
+            if similarityFloor > 0, current.enforcesSimilarityFloor {
+                guard let measured = review.measuredSimilarity else {
+                    throw AdvanceError.continueRequiresMeasuredSimilarity
+                }
+                guard measured >= similarityFloor else {
+                    throw AdvanceError.similarityBelowFloor(measured: measured, floor: similarityFloor)
                 }
             }
             if let next = current.next {
