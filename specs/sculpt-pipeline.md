@@ -39,6 +39,17 @@ The USD-native analog of img2threejs's spec (`ObjectSculptSpec.swift`):
   `delight` flag) realized by the surface pass. Decode-defaults to nil.
 - `landmarks: [Landmark]` — proportion-lock anchors (name + component +
   position). Required for `.character` specs; decode-defaults to `[]`.
+- `lights: [LightSpec]` — real `UsdLux` lights authored by the lighting pass
+  (`distant|sphere|rect|dome`, intensity, colour, transform). Decode-defaults
+  to `[]`.
+- `lodTiers: [LODTier]` — level-of-detail tiers (name + screenCoverage +
+  decimation) authored by the optimization pass. Decode-defaults to `[]`.
+- each `ComponentNode` carries an optional `attachment`
+  (`root|weld|socket|pin|free`) declaring how it joins its parent — the
+  attachment-correctness gate rejects geometry leaves that are unspecified or
+  `.free`. Decode-defaults to nil.
+- `DetailItem` gains an optional `minScore` — the per-feature acceptance
+  threshold enforced by the feature-acceptance gate.
 - `sockets: [Socket]` — named attachment points for rigging/props.
 - `colliders: [Collider]` — runtime collision volumes (`box|sphere|capsule|convexHull`)
   wrapping a named component. Part of the action-ready runtime layer.
@@ -67,8 +78,8 @@ that realizes it. The strict-quality gate blocks any spec with unmapped items.
 
 In strict order (`SculptPass`): `blockout → structural → formRefinement →
 material → surface → lighting → interaction → optimization`. A pass unlocks
-only after the previous is accepted. Four passes author into the stage; the
-rest are review/annotation passes that gate but emit no `BuildStep`s:
+only after the previous is accepted. Six passes author into the stage;
+`formRefinement` alone remains review-only:
 
 | Pass | Authors |
 |------|---------|
@@ -76,8 +87,10 @@ rest are review/annotation passes that gate but emit no `BuildStep`s:
 | structural | `set_transform` placement for every authored prim. |
 | material | `create_material` for each painted node, plus the extra PBR channels (roughness/metallic scalars, emissive, and any texture maps + normalScale) as shader inputs on the created surface. |
 | surface | Authors a projected-texture / de-light descriptor (`sculptProjectedTexture` string attribute on the root) when the spec declares a `surfaceProjection` targeting a real component. |
+| lighting | Authors a real `UsdLux` light prim (with `inputs:intensity` + `inputs:color`) plus its placement for each declared `LightSpec`, under the sculpt root. |
 | interaction | Authors the action-ready runtime manifest (`sculptRuntime` string attribute on the root) when the spec exposes a socket or collider. |
-| formRefinement, lighting, optimization | Review-only (no mutations in v1). |
+| optimization | Authors the LOD manifest (`sculptLOD` string attribute on the root) when the spec declares `lodTiers`. |
+| formRefinement | Review-only (no mutations). |
 
 The surface pass mirrors img2threejs's `bake_projected_texture` +
 `delight_albedo`: SculptKit emits only the declarative descriptor (camera pose
@@ -110,6 +123,20 @@ processing and stays a pure leaf.
    pass is rejected unless the object exposes at least one socket or collider,
    mirroring img2threejs's requirement that the finished object carry a usable
    runtime layer.
+5. **Attachment-correctness gate** (part of strict-quality): every geometry
+   component other than the root must declare an `attachment` and it must not be
+   `.free` — img2threejs's "declare a join method; nothing floats mid-air".
+   Groups and the root are exempt.
+6. **Feature-acceptance gate** (`SpecValidator.featureAcceptance`): a `continue`
+   out of the final pass must clear every per-feature `minScore`. `sculpt_review`
+   records per-feature scores via its optional `featureScores` map, mirroring
+   img2threejs's `feature_acceptance_policy`.
+
+Light and LOD schema (unique valid names, finite non-negative intensity, RGB
+colour in 0...1, screenCoverage in 0...1, decimation in (0, 1]) is checked on
+every validate. A `sculpt_probe` intake step vets technical fitness (usable /
+marginal / unusable, plus a recommended component ceiling) from image
+dimensions before assessment.
 
 ## Review-loop contract
 
@@ -121,7 +148,7 @@ contract exactly. `continue` unlocks the next pass (or completes the object);
 
 ## Tool surface (`mcp__openusdz__*`)
 
-`sculpt_assess` → `sculpt_author_spec` → `sculpt_validate_spec` →
+`sculpt_probe` (optional intake vet) → `sculpt_assess` → `sculpt_author_spec` → `sculpt_validate_spec` →
 per pass: `sculpt_build_pass` → `render_views` → `sculpt_comparison_sheet`
 (composes the reference-vs-render SVG sheet into the work directory) → `score`
 → `sculpt_review` (fed the sheet path + fidelity score); `sculpt_status` reports

@@ -25,17 +25,32 @@ public struct DetailItem: Codable, Sendable, Equatable, Identifiable {
     public var mappedTo: String?
     /// Latest visual confidence score (0...1) from a review pass, if any.
     public var score: Double?
+    /// Per-feature acceptance threshold (0...1). When set, the feature-acceptance
+    /// gate requires `score >= minScore` before the pipeline can complete —
+    /// img2threejs's per-feature `feature_acceptance_policy`.
+    public var minScore: Double?
 
     public init(id: String, description: String, kind: DetailKind,
-                mappedTo: String? = nil, score: Double? = nil) {
+                mappedTo: String? = nil, score: Double? = nil,
+                minScore: Double? = nil) {
         self.id = id
         self.description = description
         self.kind = kind
         self.mappedTo = mappedTo
         self.score = score
+        self.minScore = minScore
     }
 
     public var isMapped: Bool { mappedTo != nil }
+
+    /// True when the feature carries a threshold and a recorded score that
+    /// meets it. A feature with no `minScore` imposes no acceptance constraint
+    /// and is considered accepted.
+    public var isAccepted: Bool {
+        guard let minScore else { return true }
+        guard let score else { return false }
+        return score >= minScore
+    }
 }
 
 /// The detail-first feature inventory for a spec.
@@ -49,6 +64,24 @@ public struct DetailInventory: Codable, Sendable, Equatable {
     public var mapped: [DetailItem] { items.filter(\.isMapped) }
     public var unmapped: [DetailItem] { items.filter { !$0.isMapped } }
     public var isFullyMapped: Bool { unmapped.isEmpty }
+
+    /// Items that declare a `minScore` but whose recorded score does not meet
+    /// it (or is missing) — the features blocking the feature-acceptance gate.
+    public var unaccepted: [DetailItem] { items.filter { !$0.isAccepted } }
+
+    /// Record per-feature review scores by item id. Unknown ids are ignored.
+    /// Returns the ids that were applied.
+    @discardableResult
+    public mutating func applyScores(_ scores: [String: Double]) -> [String] {
+        var applied: [String] = []
+        for index in items.indices {
+            if let score = scores[items[index].id] {
+                items[index].score = score
+                applied.append(items[index].id)
+            }
+        }
+        return applied
+    }
 
     /// Add (or replace, by id) a detail item.
     public mutating func upsert(_ item: DetailItem) {

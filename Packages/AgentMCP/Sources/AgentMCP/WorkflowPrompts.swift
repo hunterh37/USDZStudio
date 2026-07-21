@@ -64,12 +64,17 @@ public enum WorkflowPrompts {
             text: """
             Reconstruct a reference image as a USD object with the staged-sculpt loop. Your \
             tokens go to visual judgment; the tools do the mechanical work.
+            0. `sculpt_probe { width, height, hasAlpha? }` — vet technical fitness first. A \
+            `unusable` verdict means stop; note `recommendedMaxComponents` as your budget ceiling.
             1. `sculpt_assess { hints, width, height }` — describe the object with a few tags \
             and give the image's pixel size. Read back the objectClass, complexity, and the \
             acceptance `policy` (its minScore is your pass threshold).
             2. Enumerate identity details first, then author the spec: \
             `sculpt_author_spec { spec }` with a component tree of primitives / library prefabs, \
-            materials, and a detailInventory whose every item is mapped to a component or material.
+            materials, and a detailInventory whose every item is mapped to a component or material. \
+            Declare each non-root component's `attachment` (weld/socket/pin) so nothing floats; \
+            add `lights` (real UsdLux) and `lodTiers` for the lighting/optimization passes; give \
+            high-value details a `minScore`.
             3. `sculpt_validate_spec { strictQuality: true }` — if it returns an error, fix the \
             listed problems in the spec and re-author until it passes. No build happens until it does.
             4. For each locked pass, in order (blockout → structural → formRefinement → material → \
@@ -77,7 +82,8 @@ public enum WorkflowPrompts {
                a. `sculpt_build_pass {}` to author that pass into the stage.
                b. `render_views {}` to capture the pass, and build a reference-vs-render comparison.
                c. `score {}` and judge the sheet. Then `sculpt_review { decision, score, \
-            renderPath, comparisonSheetPath }`:
+            renderPath, comparisonSheetPath, featureScores? }` (pass per-detail scores as \
+            `featureScores` so the final `continue` clears every feature threshold):
                   - `continue` (needs render + sheet + score >= threshold) unlocks the next pass;
                   - `refineSpec` / `refineCode` keep you on the pass to fix the spec or rebuild;
                   - `requestInput` pauses for the user; `stop` halts.

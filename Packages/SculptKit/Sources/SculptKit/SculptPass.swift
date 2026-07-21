@@ -32,7 +32,7 @@ public enum SculptPass: String, Codable, Sendable, CaseIterable, Comparable {
         case .formRefinement: return "Refine silhouettes and bevels to match the reference."
         case .material: return "Author and bind PBR materials."
         case .surface: return "Surface detail: linework, wear, gloss variation."
-        case .lighting: return "Emissive regions and lighting-relevant materials."
+        case .lighting: return "Author real UsdLux lights (distant/sphere/rect/dome)."
         case .interaction: return "Sockets, pivots, and colliders for runtime use."
         case .optimization: return "Merge, decimate, and finalize for export."
         }
