@@ -125,6 +125,36 @@ struct USDASerializerTests {
         #expect(usda.contains("uniform token[] xformOpOrder = [\"xformOp:transform\"]"))
     }
 
+    /// Regression: a prim loaded with a *stored* `xformOpOrder` must serialize
+    /// to a single, correctly-typed `uniform token[] xformOpOrder` — never a
+    /// second `string[]` copy. The duplicate made USD reject the layer on
+    /// reopen and broke `render_views` for every transformed model.
+    @Test func storedXformOpOrderDoesNotDuplicate() {
+        var prim = Prim(path: PrimPath("/X")!, typeName: "Xform")
+        prim.attributes = [
+            Attribute(name: "xformOp:transform", value: .matrix4([Double](repeating: 0, count: 16))),
+            // As loaded from a file that already carried the op order.
+            Attribute(name: "xformOpOrder", value: .tokenArray(["xformOp:transform"]), isUniform: true),
+        ]
+        let usda = USDASerializer.serialize(makeStage([prim]))
+        let occurrences = usda.components(separatedBy: "xformOpOrder").count - 1
+        #expect(occurrences == 1)
+        #expect(usda.contains("uniform token[] xformOpOrder = [\"xformOp:transform\"]"))
+        #expect(!usda.contains("string[] xformOpOrder"))
+    }
+
+    /// A non-transform xform op (e.g. `rotateXYZ`) drives the regenerated order.
+    @Test func nonTransformXformOpDrivesOrder() {
+        var prim = Prim(path: PrimPath("/X")!, typeName: "Xform")
+        prim.attributes = [
+            Attribute(name: "xformOp:rotateXYZ", value: .vector([0, -32, 0])),
+            Attribute(name: "xformOpOrder", value: .tokenArray(["xformOp:rotateXYZ"]), isUniform: true),
+        ]
+        let usda = USDASerializer.serialize(makeStage([prim]))
+        #expect(usda.contains("uniform token[] xformOpOrder = [\"xformOp:rotateXYZ\"]"))
+        #expect((usda.components(separatedBy: "xformOpOrder").count - 1) == 1)
+    }
+
     @Test func numberFormattingIsCompact() {
         #expect(USDASerializer.number(1.0) == "1")
         #expect(USDASerializer.number(-2.0) == "-2")

@@ -35,6 +35,13 @@ public enum BuildStep: Sendable, Equatable {
     /// destruction groups) as a custom `sculptRuntime` string attribute on the
     /// sculpt root prim.
     case authorRuntime(rootPath: String, manifestJSON: String)
+    /// Apply real geometry-refinement ops to an authored prim's mesh (executed
+    /// by reading the prim back into a `HalfEdgeMesh`, applying the ops, and
+    /// re-authoring). Emitted by the `formRefinement` pass.
+    case refineMesh(path: String, ops: [MeshRefinement])
+    /// Decimate an authored prim's mesh by welding vertices within
+    /// `weldDistance`. Emitted by the `optimization` pass.
+    case decimateMesh(path: String, weldDistance: Double)
 }
 
 /// One expanded repetition copy: its full prim name and local transform.
@@ -69,8 +76,27 @@ public enum BuildPlanner {
         case .optimization:
             return optimizationSteps(spec)
         case .formRefinement:
-            return []
+            return refinementSteps(spec)
         }
+    }
+
+    // MARK: - Form refinement: real per-node geometry ops
+
+    /// Emit a `refineMesh` step for every geometry node (base prim + repetition
+    /// copies) that declares `refinements`. Group nodes carry no mesh, so they
+    /// are skipped. Stays review-only (empty) when nothing declares refinements.
+    static func refinementSteps(_ spec: ObjectSculptSpec) -> [BuildStep] {
+        var steps: [BuildStep] = []
+        walk(spec.root, parent: nil) { node, parentPath in
+            let selfPath = path(for: node.name, under: parentPath)
+            if node.shape.authorsGeometry, !node.refinements.isEmpty {
+                for name in geometryNames(for: node) {
+                    steps.append(.refineMesh(path: path(for: name, under: parentPath), ops: node.refinements))
+                }
+            }
+            return selfPath
+        }
+        return steps
     }
 
     // MARK: - Lighting: author real UsdLux lights
@@ -97,10 +123,34 @@ public enum BuildPlanner {
     // MARK: - Optimization: author the LOD manifest
 
     static func optimizationSteps(_ spec: ObjectSculptSpec) -> [BuildStep] {
+        var steps: [BuildStep] = []
+        // Real decimation: weld each geometry leaf when an optimization spec
+        // with a positive weld distance is declared.
+        if let optimization = spec.optimization, optimization.weldDistance > 0 {
+            for leaf in geometryLeafPaths(spec) {
+                steps.append(.decimateMesh(path: leaf, weldDistance: optimization.weldDistance))
+            }
+        }
+        // Author the LOD manifest when tiers are declared.
         let manifest = LODManifest(spec: spec)
-        // Nothing to author when no tiers are declared — stays review-only.
-        guard manifest.hasTiers, let json = try? manifest.json() else { return [] }
-        return [.authorLOD(rootPath: "/" + spec.root.name, manifestJSON: json)]
+        if manifest.hasTiers, let json = try? manifest.json() {
+            steps.append(.authorLOD(rootPath: "/" + spec.root.name, manifestJSON: json))
+        }
+        return steps
+    }
+
+    /// Full prim paths of every geometry leaf (base prim only; repetition copies
+    /// share the base's topology and are welded independently at export).
+    static func geometryLeafPaths(_ spec: ObjectSculptSpec) -> [String] {
+        var paths: [String] = []
+        walk(spec.root, parent: nil) { node, parentPath in
+            let selfPath = path(for: node.name, under: parentPath)
+            if node.children.isEmpty, node.shape.authorsGeometry {
+                paths.append(selfPath)
+            }
+            return selfPath
+        }
+        return paths
     }
 
     // MARK: - Surface: projected-texture / de-light descriptor

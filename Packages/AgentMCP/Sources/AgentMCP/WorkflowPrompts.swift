@@ -64,31 +64,40 @@ public enum WorkflowPrompts {
             text: """
             Reconstruct a reference image as a USD object with the staged-sculpt loop. Your \
             tokens go to visual judgment; the tools do the mechanical work.
-            0. `sculpt_probe { width, height, hasAlpha? }` — vet technical fitness first. A \
-            `unusable` verdict means stop; note `recommendedMaxComponents` as your budget ceiling.
-            1. `sculpt_assess { hints, width, height }` — describe the object with a few tags \
-            and give the image's pixel size. Read back the objectClass, complexity, and the \
-            acceptance `policy` (its minScore is your pass threshold).
+            0. `sculpt_probe { imagePath }` — vet technical fitness first (pass the image path so \
+            the tool decodes true dimensions + alpha; width/height still work if you have no file). \
+            A `unusable` verdict means stop; note `recommendedMaxComponents` as your budget ceiling.
+            1. `sculpt_assess { hints, imagePath }` — describe the object with a few tags and give \
+            the image (path or pixel size). Read back the objectClass, complexity, and the \
+            acceptance `policy`: its `minScore` is your subjective pass threshold, its \
+            `similarityFloor` is the deterministic floor a render must clear, and \
+            `requireCompliance` means the finished object must pass the AR gate to complete.
             2. Enumerate identity details first, then author the spec: \
             `sculpt_author_spec { spec }` with a component tree of primitives / library prefabs, \
             materials, and a detailInventory whose every item is mapped to a component or material. \
             Declare each non-root component's `attachment` (weld/socket/pin) so nothing floats; \
-            add `lights` (real UsdLux) and `lodTiers` for the lighting/optimization passes; give \
-            high-value details a `minScore`.
+            add `refinements` (real inset ops) for the formRefinement pass, `lights` (real UsdLux), \
+            `lodTiers` and an `optimization` weld for the optimization pass; give high-value \
+            details a `minScore`.
             3. `sculpt_validate_spec { strictQuality: true }` — if it returns an error, fix the \
             listed problems in the spec and re-author until it passes. No build happens until it does.
             4. For each locked pass, in order (blockout → structural → formRefinement → material → \
             surface → lighting → interaction → optimization):
                a. `sculpt_build_pass {}` to author that pass into the stage.
-               b. `render_views {}` to capture the pass, and build a reference-vs-render comparison.
-               c. `score {}` and judge the sheet. Then `sculpt_review { decision, score, \
-            renderPath, comparisonSheetPath, featureScores? }` (pass per-detail scores as \
-            `featureScores` so the final `continue` clears every feature threshold):
-                  - `continue` (needs render + sheet + score >= threshold) unlocks the next pass;
+               b. `render_views {}` to capture the pass — ideally a few angles.
+               c. `sculpt_comparison_sheet { referencePath, renderPath }` (or `{ views: [...] }` \
+            for a multi-angle turntable) — it writes the sheet AND returns `measuredSimilarity` \
+            (the worst view), the deterministic fidelity number.
+               d. Judge the sheet, then `sculpt_review { decision, score, renderPath, \
+            comparisonSheetPath, measuredSimilarity, featureScores? }` (forward the \
+            `measuredSimilarity` from step c; pass per-detail scores as `featureScores` so the \
+            final `continue` clears every feature threshold):
+                  - `continue` needs render + sheet + score >= minScore AND measuredSimilarity >= \
+            similarityFloor; it unlocks the next pass (the final `continue` also runs the AR gate);
                   - `refineSpec` / `refineCode` keep you on the pass to fix the spec or rebuild;
                   - `requestInput` pauses for the user; `stop` halts.
-            5. Check progress any time with `sculpt_status {}`. Finish with \
-            `check_compliance {}` and `save {}` once the pipeline reports complete.
+            5. Check progress any time with `sculpt_status {}` (shows the last measured similarity \
+            and the floor). Finish with `check_compliance {}` and `save {}` once complete.
             """))
 
         server.register(MCPPrompt(

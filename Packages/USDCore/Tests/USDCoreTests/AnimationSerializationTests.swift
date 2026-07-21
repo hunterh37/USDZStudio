@@ -47,7 +47,11 @@ struct AnimationSerializationTests {
             ])
         let usda = USDASerializer.serialize(stage([prim]))
         #expect(usda.contains("rel skel:skeleton = </Root/Skel>"))
-        #expect(usda.contains("uniform rel skel:blendShapeTargets = [</Root/A>, </Root/B>]"))
+        // Relationships are uniform by definition; USD's text syntax has no
+        // `uniform rel` form (it is a parse error), so even an `isUniform`
+        // relationship serializes as a bare `rel`.
+        #expect(usda.contains("rel skel:blendShapeTargets = [</Root/A>, </Root/B>]"))
+        #expect(!usda.contains("uniform rel"))
     }
 
     // MARK: - uniform + attribute metadata
