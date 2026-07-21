@@ -398,7 +398,7 @@ public enum SculptTools {
     private static func registerComparisonSheet(on server: MCPServer, store: SculptStore, workDirectory: URL) {
         server.register(MCPTool(
             name: "sculpt_comparison_sheet", group: .sculpt,
-            description: "Compose a reference-vs-render comparison sheet for the current pass (img2threejs's screenshot-review artifact) AND measure fidelity deterministically. Accepts a single reference/render pair, or a multi-view turntable via 'views' (each {label, referencePath, renderPath}) — the measured similarity is the WORST view, so a good angle can't hide a bad one. Writes an SVG to the work directory and, when the images decode, returns 'measuredSimilarity' (silhouette IoU + SSIM + luminance blend) plus per-metric detail. Feed the returned comparisonSheetPath and measuredSimilarity to sculpt_review — the continue-gate enforces the assessed similarity floor.",
+            description: "Compose a reference-vs-render comparison sheet for the current pass (img2threejs's screenshot-review artifact) AND measure fidelity deterministically. Accepts a single reference/render pair, or a multi-view turntable via 'views' (each {label, referencePath, renderPath}) — the measured similarity is the WORST view, so a good angle can't hide a bad one. Writes an SVG to the work directory and, when the images decode, returns 'measuredSimilarity' (a shape-dominant blend of a concavity-preserving shapeScore and an appearanceScore) plus the shape/appearance split and per-metric detail. Feed the returned comparisonSheetPath and measuredSimilarity to sculpt_review — the continue-gate enforces the assessed similarity floor.",
             inputSchema: Schema.object([
                 "referencePath": Schema.string("path to the original reference image (single-view)"),
                 "renderPath": Schema.string("path to the current pass render (single-view)"),
@@ -462,6 +462,10 @@ public enum SculptTools {
     static func similarityReportJSON(_ report: SimilarityReport) -> JSONValue {
         .object([
             "aggregate": .number(report.aggregate),
+            // Shape / appearance split (#93): the gate's `aggregate` is a
+            // shape-dominant blend of these two, so the sheet surfaces both.
+            "shapeScore": .number(report.shapeScore),
+            "appearanceScore": .number(report.appearanceScore),
             "silhouetteIoU": .number(report.silhouetteIoU),
             "ssim": .number(report.ssim),
             "luminanceCorrelation": .number(report.luminanceCorrelation),

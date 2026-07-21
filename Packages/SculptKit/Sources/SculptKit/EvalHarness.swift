@@ -114,6 +114,25 @@ public enum SculptEvalHarness {
             poseResidualDegrees: referencePose.angularDistance(to: renderPose))
     }
 
+    /// Run the whole labelled benchmark: for every corpus reference, evaluate
+    /// its "raw photo" render (opaque textured background — the F1 hard case)
+    /// against its clean matte, at matched ground-truth pose. This is the fixed
+    /// number the CI regression gate freezes and fails a drop against
+    /// (`scripts/sculpt-eval-gate.sh`); it exercises the *same* metric the live
+    /// gate uses, so a metric change that would move the gate shows up here first.
+    public static func benchmark(side: Int = ImageSimilarity.gridSide) -> [EvalRecord] {
+        EvalCorpus.benchmark(side: side).map { ref in
+            evaluate(
+                name: ref.name,
+                reference: ref.matted,
+                render: ref.raw,
+                trueForeground: ref.trueForeground,
+                referencePose: ref.pose,
+                renderPose: ref.pose,
+                side: side)
+        }
+    }
+
     /// IoU between a produced foreground mask and the ground-truth mask. When
     /// the two lengths disagree the comparison is meaningless → 0. Two empty
     /// masks trivially agree → 1.
