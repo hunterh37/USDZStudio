@@ -30,79 +30,83 @@ What is missing is purely the coordinator:
 ## Design decisions (locked)
 
 1. **Restore-but-prompt.** On launch we reconstruct the full document (open source + WAL replay + view state) into a *staged, not-yet-shown* document, then present a lightweight "Restore your previous session?" prompt reporting the unsaved-edit count. Committing shows it; declining deletes the session artifacts and opens clean. Recovery is cheap and reversible, so building before prompting is fine and yields an accurate count.
-2. **Single document (v1).** Array-of-one modeling as above.
-3. **Application Support files.** Session envelope + relocated WAL live under `~/Library/Application Support/OpenUSDZEditor/Sessions/<sessionID>/`. Security-scoped bookmark data (not raw paths) identifies the source file so it reopens under sandboxing.
+2. **Single document (v1).** One session directory per document; multi-window is additive later (see Architecture).
+3. **Application Support files.** Session envelope + WAL live under `~/Library/Application Support/OpenUSDZEditor/Sessions/<sessionID>/`. A `SourceReference` (bookmark + path) identifies the source file so it reopens across launches; the app is unsandboxed (specs/architecture.md), so a plain bookmark — not a security-scoped one — suffices.
 
-## Module: SessionKit (new package)
+## Architecture: reuse the existing WAL, add the envelope
 
-The session model references types spanning several kits — `StageSnapshot` (USDCore), `EnvironmentSettings` / `ViewportCameraPose` (ViewportKit), `Selection` / gizmo modes / `IsolationState` (EditingKit), and the journal (EditingKit). That crosses too many boundaries to live in any existing leaf module, so it is a dedicated package.
+Implementation revealed that `EditingKit` **already owns** the write-ahead-log half of this feature: `EditingKit.SessionStore` manages a per-document session directory with a `journal.wal` (`FileCommandJournal`, fsync per append) and a `session.live` sentinel, scans for `recoverableSessions()` on relaunch, and turns each leftover WAL into a `RecoveryPlan` (`sourceURL` + the post-checkpoint records). `CommandStack.recovered(...)` replays that plan. Rather than duplicate any of it, this feature *reuses* `EditingKit.SessionStore` for the WAL/recovery/lifecycle and adds only what it lacks: the higher-level **envelope** (which file was open + the transient view state) that lives beside each WAL, and the app wiring.
 
-- **Dependencies:** `USDCore`, `ViewportKit`, `EditingKit`. Consumed only by `EditorUI` (wiring) and `App` (lifecycle). Never imports UI (SwiftUI) beyond the `@Observable`/`@MainActor` store; authors no stage itself.
-- **Governance (CI-enforced, all in the implementation PR that creates the package):** the `specs/architecture.md §Adding a New Package` checklist applies in full — policy entry in `scripts/dependency-lint.sh`, workspace-layout + dependency-rules update in `architecture.md`, coverage-floor row in `specs/testing.md`, a real test target, inclusion in `scripts/test-all.sh`, and this spec referencing it. This spec PR does **not** create the package or touch the lint script; it only records the contract.
+### SessionKit (new leaf-ish package) — the envelope
 
-### Types
+- **Dependencies:** `USDCore`, `ViewportKit`, `EditingKit`. Consumed only by `EditorUI`/`App`. Authors no stage; the only concurrency surface is value types + injectable stores.
+- **`SessionEnvelope`** — the versioned `Codable` content of `session.json`: `schemaVersion: Int` + `document: DocumentSession`. `isCompatible` gates the discard-on-unknown-version policy (a newer/foreign version is ignored, never throws).
+- **`DocumentSession`** — `source: SourceReference?`, `fingerprint: SourceFingerprint?`, `savedRevision: Int`, `embeddedSnapshot: StageSnapshot?` (scratch scenes only), `viewState: ViewState`. `sourceChangedOnDisk()` does the fingerprint check. (No `journalRelativePath` — the WAL is `EditingKit.SessionStore`'s.)
+- **`ViewState`** — `Codable` sub-struct: selection paths + primary, `gizmoMode`/`gizmoOrientation`/`gizmoPivotMode` (raw strings, decoupled from the enums), isolate roots, outliner `collapsedPaths`, `panelVisibility`, `CameraState`, `EnvironmentSettings`, playback position. Custom lenient decode: every field defaults when absent, so an older/foreign envelope restores what it can.
+- **`CameraState`** — `ViewportCameraPose` as plain `Codable` scalars (the pose wraps a non-`Codable` `SIMD3`), degrading a malformed target to the origin — the same shape `CameraBookmark` uses.
+- **`SourceReference`** — bookmark + absolute path with move-resilient resolution (the app is unsandboxed, so a plain bookmark suffices).
+- **`SourceFingerprint`** — size + mtime; `matches(fileAt:)` for change detection.
+- **`EnvelopeStore`** (protocol) — `write(_:to:)` / `read(from:)` for a session directory. `FileEnvelopeStore` writes `session.json` atomically (temp + replace); `InMemoryEnvelopeStore` backs tests. `read` returns `nil` on absent/corrupt/incompatible — never blocks launch.
 
-- **`SessionState`** — versioned `Codable`, `Sendable` value type. Top-level envelope: `schemaVersion: Int` + `documents: [DocumentSession]`.
-- **`DocumentSession`** — per open document: `sourceBookmark: Data?` (security-scoped bookmark; nil for a scratch/never-saved scene), `journalRelativePath: String`, `savedRevision: Int`, `sourceFingerprint: SourceFingerprint?` (mtime + size or content hash, for change detection), `embeddedSnapshot: StageSnapshot?` (present only for scratch scenes with no source URL), and `viewState: ViewState`.
-- **`ViewState`** — `Codable` sub-struct: selection paths, `gizmoMode`/`gizmoOrientation`/`gizmoPivotMode`, `IsolationState`, outliner `collapsed: Set<PrimPath>`, panel/sheet visibility flags, `EnvironmentSettings`, `ViewportCameraPose`, playback position. Every field degrades to a sensible default when absent.
-- **`SessionStore`** — `@Observable @MainActor` coordinator over an injectable `SessionPersistence`. Owns capture (debounced) and restore orchestration.
-- **`SessionPersistence`** (protocol) — abstracts *where* the envelope and journals live. Default `FileSessionPersistence` writes to Application Support; tests inject an in-memory/temp backend, mirroring the ephemeral-`UserDefaults` pattern used elsewhere.
+### EditingKit additions
+
+- **`CommandStack.checkpointSaved(sourceURL:)`** — on save, flatten the WAL to a fresh checkpoint at the saved file *without* clearing in-session undo history, so recovery replays against the just-saved baseline instead of double-applying pre-save commands. Wired into `EditorDocument.save`.
+- **`SessionStore.journal(for:)`** — reopen a recovered plan's WAL so a restored document keeps appending to the same session.
+
+### EditorUI — mapping + the session service
+
+- **`EditorDocument`** — journaling initializer (`journal:`), a `restored(baseline:modelURL:journal:records:)` WAL-replay factory with dirty-state reconciliation, and `restoreIsolation`.
+- **`SessionMapping`** — `ViewState.capture` / `DocumentSession.capture` and `EditorDocument.applySessionViewState` (selection primary-first, gizmo modes, isolate roots; stale paths + unknown enum values degrade gracefully) + `EditorDocument.restore`.
+- **`SessionController`** (`@Observable @MainActor`) — the app-session service composing `EditingKit.SessionStore` + `EnvelopeStore`: `begin(for:)` → `attach` → `capture` → (relaunch) `findRecoverable` → `restore` (adopts the session) → `discard`/`endActive`. The scratch-scene baseline is fixed at `attach` time so replay never double-applies.
 
 ## Persistence layout
 
 ```
 ~/Library/Application Support/OpenUSDZEditor/Sessions/
 └── <sessionID>/
-    ├── session.json      # SessionState envelope (atomic temp-write + rename)
-    └── journal.jsonl      # relocated FileCommandJournal WAL (fsync per append)
+    ├── journal.wal       # EditingKit.SessionStore WAL (fsync per append)
+    ├── session.live      # crash sentinel (present ⇒ offer for restore)
+    └── session.json      # SessionKit SessionEnvelope (atomic temp-write + replace)
 ```
 
-- **Atomic writes** for `session.json` (temp file + rename), exactly as `StageSaver` already does for stage files.
-- **Envelope in a file, not UserDefaults**, because it may embed a full `StageSnapshot` and pairs with a growing WAL. (Camera bookmarks / settings stay in UserDefaults — they are tiny prefs, not session data.)
-- The WAL keeps its existing `FileCommandJournal` format; only its path becomes session-scoped and discoverable at launch.
+Per-`sessionID` directories mean multi-window is additive later (one dir per window), never a schema migration.
 
-## Lifecycle integration
+## Lifecycle integration (App)
 
 ### Capture
 
-- **View-state + embedded snapshot:** debounced writes triggered by the existing `document.revision` / `hasUnsavedChanges` signals — no new change-tracking machinery.
-- **Undo/redo:** already eager (the WAL appends per command); no extra capture needed.
-- **Durable flush points:** a `scenePhase` observer added to `OpenUSDZEditorApp`, plus `applicationWillTerminate` in `AppDelegate`.
+- **On open/create/import** (`makeSessionedDocument`): `session.begin(for: url)` starts a fresh WAL session; the document's `CommandStack` is built with its journal (writing the opening checkpoint); `attach` fixes the scratch baseline; `capture` writes the first envelope.
+- **Undo/redo:** eager — the WAL appends per command, no extra work.
+- **View state:** `capture` on every `scenePhase` transition out of `.active` (background/quit). On a hard kill between transitions the envelope is at worst one background-cycle stale while the WAL (scene + undo/redo) stays current.
 
-### Restore
+### Restore (`offerSessionRestore`, in the launch `.task`, before any document is shown)
 
-Slots into the existing launch `.task` block (which already handles CLI-arg open and the tutorial), and must run *before* an empty document is presented. Flow:
-
-1. Read `SessionState`; if absent/unreadable/newer-schema → open clean (no prompt).
-2. For the single `DocumentSession`: resolve the security-scoped bookmark. If the source is missing → offer a soft "couldn't find <file>" notice, not a crash.
-3. Open the source via the existing `BridgedStage.open` path to get the baseline snapshot (or use `embeddedSnapshot` for a scratch scene).
-4. Compare `sourceFingerprint`; if the file changed on disk since last session, flag it in the prompt (replaying a WAL onto a changed baseline is unsafe).
-5. `CommandStack.recover(records:)` to replay the WAL and rebuild undo/redo, then apply `ViewState`, into a staged (hidden) `EditorDocument`.
-6. Present the restore prompt with the unsaved-edit count. Commit → show it; decline → delete the session directory and open clean.
+1. `session.findRecoverable()` → the newest recoverable session that has a readable envelope; `nil` → clean launch.
+2. Only offer when `plan.hasWork` (there were uncommitted edits); a saved-and-quit session is swept silently.
+3. Resolve the baseline: reopen `source` via `BridgedStage.open` (bridge), or the `embeddedSnapshot` for a scratch scene. Failure → discard, clean launch.
+4. `session.restore(...)` replays the WAL (`CommandStack.recovered`) and applies the view state, building the document up-front (recovery is cheap).
+5. Present the restore-or-start-fresh prompt; the message warns when `sourceChangedOnDisk`. Restore → show the rebuilt document; Start Fresh → `discard` + clean launch.
 
 ## Enterprise-grade concerns
 
-- **Versioning & migration.** `schemaVersion` from day one with a migration switch. Unknown/newer versions degrade to "start fresh," never throw — same philosophy as the existing malformed-data handling.
-- **Corruption & partial-write safety.** Atomic envelope writes; a torn WAL tail is treated as recoverable-up-to-last-good-record. A bad session file must never block launch.
-- **Security-scoped bookmarks**, not raw paths — required to reopen user files across launches under macOS sandboxing.
-- **Change detection.** `sourceFingerprint` guards against replaying edits onto a file that changed underneath us; surfaced in the prompt.
-- **Multi-agent / future multi-window.** Session data is keyed per `sessionID`; no single global mutable file that windows would race on. v1 uses one session but the layout already supports many.
-- **Determinism.** WAL replay determinism is partly covered by the existing recovery tests; the round-trip invariant below extends that guarantee to the whole envelope.
+- **Versioning & migration.** `SessionEnvelope.schemaVersion` from day one; an unrecognized version is discarded (never throws), so a future format can't wedge an older build. Value migrations slot into `FileEnvelopeStore` decode.
+- **Corruption & partial-write safety.** Atomic envelope writes; the WAL already tolerates a torn final record (`FileCommandJournal`). A bad envelope or failed rebuild degrades to clean launch, never a crash.
+- **No double-apply on save.** `checkpointSaved` rebaselines the WAL at each save; the scratch baseline is frozen at `attach`.
+- **Move/rename resilience.** `SourceReference` prefers a bookmark, falls back to the stored path.
+- **Change detection.** `SourceFingerprint` (size+mtime) flags a file that changed under a captured session; surfaced in the prompt rather than silently replayed.
+- **Multi-agent / future multi-window.** Per-`sessionID` directories; no global mutable file to race on.
 
 ## Testing
 
-Meets the repo's coverage floor via the injectable `SessionPersistence` (no disk needed for unit tests):
+- **SessionKit (100% floor):** envelope + view-state Codable round-trips, lenient/partial decode, incompatible-version + corrupt + absent envelope reads, `SourceReference` resolution (bookmark / path / fallback / none), `SourceFingerprint` match/mismatch/missing, `DocumentSession.sourceChangedOnDisk`.
+- **EditingKit (100% floor):** `checkpointSaved` flattens the log yet keeps undo history (and is a no-op without a journal); `journal(for:)` reopens a plan's WAL.
+- **EditorUI:** `ViewState`/`DocumentSession` capture, `applySessionViewState` (primary-first, stale-path/unknown-enum degradation), WAL-replay `restore` (scene + undo + dirty state), and the full `SessionController` lifecycle (begin → capture → relaunch → findRecoverable → restore → discard) against a temp WAL dir + in-memory envelope store.
+- **App:** build-only wiring (not coverage-gated by design).
 
-- **Round-trip invariant** (fits `scripts/roundtrip-gate.sh` philosophy): `state → serialize → deserialize → restore → equal state` for `SessionState`/`ViewState`, including empty, scratch-scene (embedded snapshot), and full-view-state cases.
-- **Migration:** older `schemaVersion` payloads migrate; newer/unknown degrade to fresh.
-- **Corruption:** truncated `session.json`, truncated WAL tail, missing source file, changed-fingerprint — each degrades gracefully and never crashes launch.
-- **Recovery composition:** a captured session replays through `CommandStack.recover` to the exact undo/redo depth and stage content (extends existing EditingKit recovery tests).
-- **Lifecycle (EditorHarness):** drive the real app — edit, quit, relaunch, assert the prompt appears and commit restores scene + history + view state.
+## Phases (status)
 
-## Phases (acceptance criteria)
-
-1. **SessionKit scaffold** — `SessionState`/`ViewState` models + `SessionPersistence` protocol + governance/spec/lint entries + round-trip tests. No lifecycle yet.
-2. **Persistence backend** — `FileSessionPersistence`, atomic writes, versioning/migration, corruption tests.
-3. **Single-document lifecycle wiring** — `scenePhase`/launch hooks in App; reuse WAL recovery to restore scene + undo/redo behind the restore prompt.
-4. **Full view-state restoration** — selection, gizmo, isolation, outliner expansion, camera, panels, environment, playback.
-5. **(Deferred) multi-window / multi-document** + richer "file changed since last session" reconciliation — additive on the array model, no schema break.
+1. **SessionKit envelope + models** — ✅ done (`SessionEnvelope`/`DocumentSession`/`ViewState`/`SourceReference`/`SourceFingerprint`/`EnvelopeStore`), 100% coverage.
+2. **WAL reuse + save boundary** — ✅ done (reuse `EditingKit.SessionStore`; `checkpointSaved`; `journal(for:)`).
+3. **Single-document lifecycle wiring** — ✅ done (`SessionController`; App open/create journaling, scenePhase capture, launch restore prompt; scene + undo/redo restored).
+4. **View-state restoration** — ⏳ partial: document-owned state (selection, gizmo, isolate) is captured and restored. Shell-owned state (camera, outliner expansion, panel visibility, playback) has model + capture/apply support in `SessionController`/`ViewState`, but the `EditorShellView` `@State` hookup to feed/consume it is not yet wired; environment/lighting already restores independently via `EditorSettings.restoreEnvironmentOnLaunch`.
+5. **(Deferred) multi-window / multi-document** + richer "file changed since last session" reconciliation — additive on the per-session-directory layout, no schema break.
