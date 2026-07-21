@@ -272,6 +272,9 @@ public struct ComponentNode: Codable, Sendable, Equatable, Identifiable {
     public var segments: Int
     public var materialID: String?
     public var repetition: RepetitionSystem?
+    /// How this node joins its parent (img2threejs's "declare a join method").
+    /// Decode-defaults to nil; the attachment gate treats nil as unspecified.
+    public var attachment: AttachmentKind?
     public var children: [ComponentNode]
 
     public init(
@@ -283,6 +286,7 @@ public struct ComponentNode: Codable, Sendable, Equatable, Identifiable {
         radius: Double = 0.5, segments: Int = 16,
         materialID: String? = nil,
         repetition: RepetitionSystem? = nil,
+        attachment: AttachmentKind? = nil,
         children: [ComponentNode] = []
     ) {
         self.name = name
@@ -297,6 +301,7 @@ public struct ComponentNode: Codable, Sendable, Equatable, Identifiable {
         self.segments = segments
         self.materialID = materialID
         self.repetition = repetition
+        self.attachment = attachment
         self.children = children
     }
 
@@ -323,6 +328,10 @@ public struct ObjectSculptSpec: Codable, Sendable, Equatable {
     public var surfaceProjection: SurfaceProjection?
     /// Proportion-lock landmarks (required for `.character` specs).
     public var landmarks: [Landmark]
+    /// Real lights authored by the lighting pass (`UsdLux`).
+    public var lights: [LightSpec]
+    /// Level-of-detail tiers authored by the optimization pass.
+    public var lodTiers: [LODTier]
     public var detailInventory: DetailInventory
     public var reviewHistory: [PassReview]
 
@@ -331,6 +340,7 @@ public struct ObjectSculptSpec: Codable, Sendable, Equatable {
         materials: [MaterialSpec] = [], sockets: [Socket] = [],
         colliders: [Collider] = [], destructionGroups: [DestructionGroup] = [],
         surfaceProjection: SurfaceProjection? = nil, landmarks: [Landmark] = [],
+        lights: [LightSpec] = [], lodTiers: [LODTier] = [],
         detailInventory: DetailInventory = DetailInventory(),
         reviewHistory: [PassReview] = []
     ) {
@@ -343,6 +353,8 @@ public struct ObjectSculptSpec: Codable, Sendable, Equatable {
         self.destructionGroups = destructionGroups
         self.surfaceProjection = surfaceProjection
         self.landmarks = landmarks
+        self.lights = lights
+        self.lodTiers = lodTiers
         self.detailInventory = detailInventory
         self.reviewHistory = reviewHistory
     }
@@ -352,7 +364,7 @@ public struct ObjectSculptSpec: Codable, Sendable, Equatable {
     private enum CodingKeys: String, CodingKey {
         case name, objectClass, root, materials, sockets
         case colliders, destructionGroups, surfaceProjection, landmarks
-        case detailInventory, reviewHistory
+        case lights, lodTiers, detailInventory, reviewHistory
     }
 
     public init(from decoder: Decoder) throws {
@@ -366,6 +378,8 @@ public struct ObjectSculptSpec: Codable, Sendable, Equatable {
         destructionGroups = try c.decodeIfPresent([DestructionGroup].self, forKey: .destructionGroups) ?? []
         surfaceProjection = try c.decodeIfPresent(SurfaceProjection.self, forKey: .surfaceProjection)
         landmarks = try c.decodeIfPresent([Landmark].self, forKey: .landmarks) ?? []
+        lights = try c.decodeIfPresent([LightSpec].self, forKey: .lights) ?? []
+        lodTiers = try c.decodeIfPresent([LODTier].self, forKey: .lodTiers) ?? []
         detailInventory = try c.decodeIfPresent(DetailInventory.self, forKey: .detailInventory) ?? DetailInventory()
         reviewHistory = try c.decodeIfPresent([PassReview].self, forKey: .reviewHistory) ?? []
     }

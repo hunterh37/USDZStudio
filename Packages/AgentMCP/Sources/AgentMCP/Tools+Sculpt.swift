@@ -23,14 +23,28 @@ public actor SculptStore {
     }
 
     /// Build a review for the current pass, record it, and advance the
-    /// orchestrator. Returns the advance result, or throws if no spec exists
-    /// yet or the gate rejects the decision.
+    /// orchestrator. Optionally records per-feature review scores first, and —
+    /// when this `continue` would complete the pipeline — enforces the
+    /// feature-acceptance gate. Returns the advance result, or throws if no
+    /// spec exists yet or a gate rejects the decision.
     func review(
         decision: PassDecision, score: Double?, renderPath: String?,
-        comparisonSheetPath: String?, note: String?, threshold: Double
+        comparisonSheetPath: String?, note: String?, threshold: Double,
+        featureScores: [String: Double] = [:]
     ) throws -> AdvanceResult {
         guard spec != nil, orchestrator != nil else {
             throw ToolError.failed("no spec authored yet — call sculpt_author_spec first")
+        }
+        if !featureScores.isEmpty {
+            spec!.detailInventory.applyScores(featureScores)
+        }
+        // Feature-acceptance completion gate: a `continue` out of the final
+        // pass must clear every declared per-feature threshold.
+        if decision == .continue, orchestrator!.current.next == nil {
+            let acceptance = SpecValidator.featureAcceptance(spec!)
+            if !acceptance.isValid {
+                throw ToolError.rejectedByValidation(acceptance.errors.map(\.message))
+            }
         }
         let review = PassReview(
             pass: orchestrator!.current, decision: decision, score: score,
@@ -55,6 +69,7 @@ public enum SculptTools {
         on server: MCPServer, session: EditSession,
         store: SculptStore, workDirectory: URL
     ) {
+        registerProbe(on: server)
         registerAssess(on: server, store: store)
         registerAuthor(on: server, store: store, workDirectory: workDirectory)
         registerValidate(on: server, store: store)
@@ -62,6 +77,28 @@ public enum SculptTools {
         registerReview(on: server, store: store)
         registerStatus(on: server, store: store)
         registerComparisonSheet(on: server, store: store, workDirectory: workDirectory)
+    }
+
+    // MARK: - Probe
+
+    private static func registerProbe(on server: MCPServer) {
+        server.register(MCPTool(
+            name: "sculpt_probe", group: .sculpt,
+            description: "Technical fitness probe of a reference image (img2threejs's probe_image intake). Vets pixel dimensions — and optional alpha — before assessment: returns a usable/marginal/unusable verdict, megapixels, aspect ratio, a recommended component ceiling, and the reasons. Decode-free: supply width/height (and hasAlpha if known).",
+            inputSchema: Schema.object([
+                "width": Schema.integer("reference image width in pixels"),
+                "height": Schema.integer("reference image height in pixels"),
+                "hasAlpha": Schema.boolean("whether the source carries a transparency channel (optional)"),
+            ], required: ["width", "height"])
+        ) { args in
+            let width = args["width"].intValue ?? 0
+            let height = args["height"].intValue ?? 0
+            guard width > 0, height > 0 else {
+                throw ToolError.invalidParams("'width' and 'height' must be positive")
+            }
+            let report = ImageProbe.probe(width: width, height: height, hasAlpha: args["hasAlpha"].boolValue)
+            return probeReportJSON(report)
+        })
     }
 
     // MARK: - Assess
@@ -187,13 +224,14 @@ public enum SculptTools {
     private static func registerReview(on server: MCPServer, store: SculptStore) {
         server.register(MCPTool(
             name: "sculpt_review", group: .sculpt,
-            description: "Record the agent's visual judgment of the current pass and advance the pipeline. decision: continue | refineSpec | refineCode | requestInput | stop. `continue` requires a render, a comparison sheet, and a score >= the assessed acceptance threshold; otherwise it is rejected.",
+            description: "Record the agent's visual judgment of the current pass and advance the pipeline. decision: continue | refineSpec | refineCode | requestInput | stop. `continue` requires a render, a comparison sheet, and a score >= the assessed acceptance threshold; otherwise it is rejected. Optional `featureScores` (detailItemId → 0...1) records per-feature scores; a `continue` out of the final pass must clear every declared per-feature threshold.",
             inputSchema: Schema.object([
                 "decision": Schema.string("continue | refineSpec | refineCode | requestInput | stop"),
                 "score": Schema.number("vision score 0...1 (required to continue)"),
                 "renderPath": Schema.string("path to the pass render (required to continue)"),
                 "comparisonSheetPath": Schema.string("path to the reference-vs-render sheet (required to continue)"),
                 "note": Schema.string("optional reviewer note"),
+                "featureScores": .object(["type": "object", "description": "map of detail-item id → vision score (0...1)"]),
             ], required: ["decision"])
         ) { args in
             guard let decisionRaw = args["decision"].stringValue,
@@ -205,7 +243,8 @@ public enum SculptTools {
                 decision: decision, score: args["score"].doubleValue,
                 renderPath: args["renderPath"].stringValue,
                 comparisonSheetPath: args["comparisonSheetPath"].stringValue,
-                note: args["note"].stringValue, threshold: threshold)
+                note: args["note"].stringValue, threshold: threshold,
+                featureScores: featureScores(from: args["featureScores"]))
             return advanceResultJSON(result)
         })
     }
@@ -231,7 +270,11 @@ public enum SculptTools {
                 "unmappedDetails": .array(unmapped.map { .string($0) }),
                 "socketCount": .number(Double(spec.sockets.count)),
                 "colliderCount": .number(Double(spec.colliders.count)),
+                "lightCount": .number(Double(spec.lights.count)),
+                "lodTierCount": .number(Double(spec.lodTiers.count)),
                 "actionReady": .bool(SpecValidator.actionReady(spec).isValid),
+                "featuresAccepted": .bool(SpecValidator.featureAcceptance(spec).isValid),
+                "unacceptedFeatures": .array(spec.detailInventory.unaccepted.map { .string($0.id) }),
                 "lastScore": spec.reviewHistory.last?.score.map { .number($0) } ?? .null,
             ])
         })
@@ -332,9 +375,26 @@ public enum SculptTools {
             }
             return command.materialPath.description
 
+        case let .createLight(name, parentPath, kind, intensity, color):
+            let args = insertArgs(name: name, parent: parentPath)
+            let built = try MutateTools.makeInsert(
+                args: args, session: session,
+                extraAttributes: [
+                    Attribute(name: "inputs:intensity", value: .double(intensity)),
+                    Attribute(name: "inputs:color", value: .vector(color)),
+                ],
+                typeOverride: kind.usdTypeName)
+            _ = try session.mutate(built.command)
+            return built.path.description
+
         case .projectTexture(let rootPath, let descriptorJSON):
             return try authorRootAttribute(
                 name: "sculptProjectedTexture", value: descriptorJSON,
+                rootPath: rootPath, session: session)
+
+        case .authorLOD(let rootPath, let manifestJSON):
+            return try authorRootAttribute(
+                name: "sculptLOD", value: manifestJSON,
                 rootPath: rootPath, session: session)
 
         case .authorRuntime(let rootPath, let manifestJSON):
@@ -424,6 +484,25 @@ public enum SculptTools {
     }
 
     // MARK: - JSON
+
+    /// Parse an optional `featureScores` object argument into a numeric map,
+    /// keeping only entries with a numeric value.
+    static func featureScores(from value: JSONValue) -> [String: Double] {
+        guard let object = value.objectValue else { return [:] }
+        return object.compactMapValues { $0.doubleValue }
+    }
+
+    static func probeReportJSON(_ report: ProbeReport) -> JSONValue {
+        .object([
+            "verdict": .string(report.verdict.rawValue),
+            "width": .number(Double(report.width)),
+            "height": .number(Double(report.height)),
+            "megapixels": .number(report.megapixels),
+            "aspectRatio": .number(report.aspectRatio),
+            "recommendedMaxComponents": .number(Double(report.recommendedMaxComponents)),
+            "reasons": .array(report.reasons.map { .string($0) }),
+        ])
+    }
 
     static func assessmentJSON(_ a: PreSpecAssessment) -> JSONValue {
         .object([

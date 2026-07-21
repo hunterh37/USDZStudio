@@ -81,14 +81,36 @@ public enum SculptBuildRunner {
             }
             return command.materialPath.description
 
+        case let .createLight(name, parentPath, kind, intensity, color):
+            return insert(prim: lightPrim(at: fullPath(name, under: parentPath), kind: kind,
+                                          intensity: intensity, color: color), to: document)
+
         case .projectTexture(let rootPath, let descriptorJSON):
             return authorRootAttribute(name: "sculptProjectedTexture", value: descriptorJSON,
+                                       rootPath: rootPath, to: document)
+
+        case .authorLOD(let rootPath, let manifestJSON):
+            return authorRootAttribute(name: "sculptLOD", value: manifestJSON,
                                        rootPath: rootPath, to: document)
 
         case .authorRuntime(let rootPath, let manifestJSON):
             return authorRootAttribute(name: "sculptRuntime", value: manifestJSON,
                                        rootPath: rootPath, to: document)
         }
+    }
+
+    /// Build a typed `UsdLux` light prim with intensity/colour channels and an
+    /// identity transform (the lighting pass positions it via `setTransform`).
+    static func lightPrim(at path: String, kind: LightSpec.Kind,
+                          intensity: Double, color: [Double]) -> Prim? {
+        guard let primPath = PrimPath(path) else { return nil }
+        return Prim(
+            path: primPath, typeName: kind.usdTypeName,
+            attributes: [
+                Attribute(name: transformAttributeName, value: .matrix4(Matrix4.identity)),
+                Attribute(name: "inputs:intensity", value: .double(intensity)),
+                Attribute(name: "inputs:color", value: .vector(color)),
+            ])
     }
 
     /// The extra shader-input attributes beyond the base colour authored by
