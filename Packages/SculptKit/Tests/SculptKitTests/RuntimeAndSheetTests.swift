@@ -209,7 +209,7 @@ import Testing
         #expect(svg.contains("width=\"512\""))          // 2 × 256
         #expect(svg.contains("file:///tmp/ref.png"))
         #expect(svg.contains("file:///tmp/out.png"))
-        #expect(svg.contains("Reference"))
+        #expect(svg.contains("reference"))
         #expect(svg.contains("blockout"))
     }
 

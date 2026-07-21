@@ -20,13 +20,42 @@ public struct FeatureAcceptancePolicy: Codable, Sendable, Equatable {
     public var minComponents: Int
     /// Whether every geometry leaf must have a bound material.
     public var requireMaterials: Bool
+    /// Minimum *measured* image similarity (0...1) a render must clear to
+    /// `continue`, independent of the agent's subjective score. This is the
+    /// verifiable floor under the review loop: a deterministic reference-vs-render
+    /// metric (`ImageSimilarity`) that the agent cannot talk its way past.
+    /// Decode-defaults to 0 so assessments authored before the floor existed
+    /// still load (and stay unchanged in behaviour).
+    public var similarityFloor: Double
+    /// Whether completing the object requires the finished stage to pass the
+    /// AR-compliance gate (ARKit profile). Decode-defaults to false so
+    /// pre-existing policies keep their behaviour; `assess()` turns it on.
+    public var requireCompliance: Bool
 
     public init(minScore: Double, minDetailItems: Int, minComponents: Int,
-                requireMaterials: Bool) {
+                requireMaterials: Bool, similarityFloor: Double = 0,
+                requireCompliance: Bool = false) {
         self.minScore = minScore
         self.minDetailItems = minDetailItems
         self.minComponents = minComponents
         self.requireMaterials = requireMaterials
+        self.similarityFloor = similarityFloor
+        self.requireCompliance = requireCompliance
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case minScore, minDetailItems, minComponents, requireMaterials
+        case similarityFloor, requireCompliance
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        minScore = try c.decode(Double.self, forKey: .minScore)
+        minDetailItems = try c.decode(Int.self, forKey: .minDetailItems)
+        minComponents = try c.decode(Int.self, forKey: .minComponents)
+        requireMaterials = try c.decode(Bool.self, forKey: .requireMaterials)
+        similarityFloor = try c.decodeIfPresent(Double.self, forKey: .similarityFloor) ?? 0
+        requireCompliance = try c.decodeIfPresent(Bool.self, forKey: .requireCompliance) ?? false
     }
 }
 
@@ -114,7 +143,15 @@ public struct PreSpecAssessment: Codable, Sendable, Equatable {
             minScore: isCharacter ? 0.8 : 0.7,
             minDetailItems: complexity,
             minComponents: max(2, complexity),
-            requireMaterials: complexity >= 2)
+            requireMaterials: complexity >= 2,
+            // The measured floor is deliberately looser than the subjective
+            // score: a coarse-but-correct blockout should clear it, while a
+            // render of the wrong shape (low IoU) cannot. It rises modestly with
+            // complexity because more-detailed targets tolerate less drift.
+            similarityFloor: isCharacter ? 0.55 : 0.5,
+            // An assessed object must finish AR-valid — the completion gate runs
+            // the ARKit profile over the finished stage.
+            requireCompliance: true)
 
         var notes = ["classified as \(objectClass.rawValue)", "complexity \(complexity)"]
         if hints.isEmpty { notes.append("no hints supplied — assessment is conservative") }
