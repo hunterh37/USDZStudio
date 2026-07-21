@@ -1,0 +1,24 @@
+{
+  "name": "authoring",
+  "description": "Author-from-scratch journey: add geometry, bind a material, then read the scene back and validate — the core create flow an agent drives.",
+  "open": "../fixtures/cube.usda",
+  "strictness": "warn",
+  "steps": [
+    { "call": "scene_stats",
+      "expect": { "path": ["meshes"], "equals": 1 } },
+    { "call": "create_mesh",
+      "args": { "name": "Box", "shape": "box", "width": 1, "height": 1, "depth": 1 },
+      "expect": { "isError": false } },
+    { "call": "create_material",
+      "args": { "target": "/Box", "baseColor": [0.8, 0.1, 0.1] },
+      "expect": { "isError": false } },
+    { "call": "describe_scene",
+      "expect": { "path": ["stats", "meshes"], "equals": 2 } },
+    { "call": "describe_scene",
+      "expect": { "path": ["stats", "materials"], "atLeast": 1 } },
+    { "call": "validate",
+      "expect": { "isError": false } },
+    { "call": "save",
+      "expect": { "isError": false } }
+  ]
+}

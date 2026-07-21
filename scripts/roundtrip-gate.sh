@@ -41,6 +41,7 @@ BIN="CLI/.build/debug/openusdz"
 EXPECTATIONS=(
   "cube.usda|yes|yes|no"
   "cube.usdz|yes|yes|no"
+  "subdiv_quads.usda|yes|yes|no"   # pure-quad refined mesh (subdivide) — issue #92
   "variants.usda|no|yes|no"     # variant sets dropped on save — Phase 12
   "skel.usda|yes|yes|no"
   "skel.usdz|yes|yes|no"
