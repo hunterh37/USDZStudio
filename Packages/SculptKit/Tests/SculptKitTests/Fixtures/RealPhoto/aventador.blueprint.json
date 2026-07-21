@@ -1,0 +1,46 @@
+{
+  "name": "aventador",
+  "pose": { "azimuthDegrees": 0, "elevationDegrees": 0 },
+  "width": 0,
+  "height": 0,
+  "passes": [
+    {
+      "baseline": {
+        "id": "blockout-raw",
+        "referenceForm": "raw",
+        "aggregate": 0.170,
+        "silhouetteIoU": 0.166,
+        "ssim": 0.028,
+        "luminance": 0.513,
+        "tolerance": 0.01
+      }
+    },
+    {
+      "baseline": {
+        "id": "blockout-matte",
+        "referenceForm": "matte",
+        "aggregate": 0.348,
+        "silhouetteIoU": 0.420,
+        "ssim": 0.145,
+        "luminance": 0.582,
+        "tolerance": 0.01
+      }
+    },
+    {
+      "baseline": {
+        "id": "structural",
+        "referenceForm": "matte",
+        "aggregate": 0.483,
+        "tolerance": 0.01
+      }
+    },
+    {
+      "baseline": {
+        "id": "material",
+        "referenceForm": "matte",
+        "aggregate": 0.411,
+        "tolerance": 0.01
+      }
+    }
+  ]
+}
