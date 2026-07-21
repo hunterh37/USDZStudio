@@ -17,3 +17,4 @@ OpenUSDZEditor.xcodeproj/
 
 # Xcode per-target build intermediates
 build/
+__pycache__/

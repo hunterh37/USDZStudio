@@ -113,19 +113,27 @@ def prim_payload(prim):
     return payload
 
 
-def main():
-    if len(sys.argv) != 2:
-        sys.stderr.write("usage: stage_snapshot.py <file.usd[z|a|c]>\n")
-        return 2
+class SnapshotError(Exception):
+    """Carries a process-style exit code alongside the message, so both the
+    one-shot CLI and the persistent server report the same failures."""
+    def __init__(self, code, message):
+        super().__init__(message)
+        self.code = code
+        self.message = message
+
+
+def build_snapshot(path):
+    """Open `path` and return its snapshot dict — the single source of truth for
+    the wire format, shared by `main()` (one-shot) and `bridge_server.py` (the
+    long-lived worker). Raises `SnapshotError(code, message)` on failure.
+    """
     try:
         from pxr import Usd, UsdGeom
     except ImportError as exc:
-        sys.stderr.write("usd-core not importable: %s\n" % exc)
-        return 3
-    stage = Usd.Stage.Open(sys.argv[1])
+        raise SnapshotError(3, "usd-core not importable: %s" % exc)
+    stage = Usd.Stage.Open(path)
     if stage is None:
-        sys.stderr.write("could not open stage: %s\n" % sys.argv[1])
-        return 4
+        raise SnapshotError(4, "could not open stage: %s" % path)
     metadata = {
         "upAxis": str(UsdGeom.GetStageUpAxis(stage)),
         "metersPerUnit": float(UsdGeom.GetStageMetersPerUnit(stage)),
@@ -134,11 +142,22 @@ def main():
     if default_prim:
         metadata["defaultPrim"] = default_prim.GetName()
     root = stage.GetPseudoRoot()
-    snapshot = {
+    return {
         "metadata": metadata,
         "prims": [prim_payload(p)
                   for p in root.GetFilteredChildren(Usd.PrimIsDefined)],
     }
+
+
+def main():
+    if len(sys.argv) != 2:
+        sys.stderr.write("usage: stage_snapshot.py <file.usd[z|a|c]>\n")
+        return 2
+    try:
+        snapshot = build_snapshot(sys.argv[1])
+    except SnapshotError as err:
+        sys.stderr.write(err.message + "\n")
+        return err.code
     json.dump(snapshot, sys.stdout)
     return 0
 

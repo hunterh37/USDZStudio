@@ -304,7 +304,7 @@ struct OpenUSDZEditorApp: App {
             importingFileName = nil
         }
         do {
-            guard let executor = ProcessBridgeExecutor(scriptPath: Self.snapshotScriptPath) else {
+            guard let executor = Self.sharedOpenExecutor else {
                 throw BridgeError.pythonUnavailable(detail: "no Python interpreter found")
             }
             let snapshot = try await BridgedStage.open(url: url, executor: executor).snapshot
@@ -326,7 +326,7 @@ struct OpenUSDZEditorApp: App {
                 importingFileName = nil
             }
             do {
-                guard let executor = ProcessBridgeExecutor(scriptPath: Self.snapshotScriptPath) else {
+                guard let executor = Self.sharedOpenExecutor else {
                     throw BridgeError.pythonUnavailable(detail: "no Python interpreter found")
                 }
                 let snapshot = try await BridgedStage.open(url: url, executor: executor).snapshot
@@ -362,4 +362,19 @@ struct OpenUSDZEditorApp: App {
         }
         return "Resources/Python/stage_snapshot.py"
     }
+
+    /// The long-lived worker script, shipped beside the one-shot snapshot script.
+    static var serverScriptPath: String {
+        URL(fileURLWithPath: snapshotScriptPath)
+            .deletingLastPathComponent()
+            .appendingPathComponent("bridge_server.py").path
+    }
+
+    /// One resident Python interpreter for the whole app session. Every Open…
+    /// and script re-import reuses it, so `import pxr` (hundreds of ms) is paid
+    /// once per launch instead of once per file. `nil` when no interpreter with
+    /// usd-core is present, exactly like the one-shot executor; each open falls
+    /// back to a fresh subprocess if the resident worker ever dies mid-session.
+    static let sharedOpenExecutor: PersistentBridgeExecutor? =
+        PersistentBridgeExecutor(serverScriptPath: serverScriptPath)
 }

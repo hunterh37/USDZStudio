@@ -21,6 +21,37 @@ OpenUSDZEditor.app/Contents/Resources/Python/
 - Interpreter embedded **in-process** via `libpython` C API (PythonKit or thin hand-rolled C shim). No subprocesses → works sandboxed, fast round-trips, shared memory for buffers.
 - One interpreter, initialized lazily on first stage open, pinned to a dedicated thread (`BridgeExecutor`). All Swift calls hop through an actor onto that thread; GIL never touched from elsewhere.
 
+## Executor ladder (`BridgeExecutor`)
+
+The `BridgeExecutor` protocol is the swap point; three backends implement it, in
+increasing capability and decreasing portability:
+
+1. **`ProcessBridgeExecutor` (one-shot)** — spawns the interpreter with
+   `stage_snapshot.py` per call. Simplest, fully isolated (a usd-core crash
+   dies with the subprocess), but re-pays `import pxr` every open. The
+   correctness baseline and the fallback for the others.
+2. **`PersistentBridgeExecutor` (resident worker) — current default for the
+   app's Open… path.** Keeps one interpreter resident and serves opens over a
+   framed stdin/stdout protocol (`Resources/Python/bridge_server.py`), so
+   `import pxr` is paid once per session. The server reuses
+   `stage_snapshot.build_snapshot`, so its JSON is byte-identical to the one-shot
+   and `StageSnapshotDecoder` decodes both unchanged. A single worker has a
+   single channel, so the executor is an `actor` (opens serialize). Any
+   *transport* failure (dead worker, malformed frame) tears the worker down and
+   serves that one open through `ProcessBridgeExecutor`, so the resident path is
+   never less reliable than the subprocess baseline; a *clean* error the worker
+   reports (a file it refused to open) surfaces unchanged, without a respawn. A
+   malformed file makes `Usd.Stage.Open` raise, so the server catches broadly
+   and answers with an `ERR` frame rather than letting one bad file kill the
+   worker. CLI opens stay one-shot (the process exits after one file, so a
+   resident worker buys nothing).
+3. **In-process libpython (future)** — the target below. Requires the Phase-1
+   relocatable `Python.framework`; until that ships, the resident worker is the
+   fast path.
+
+Framing: request = one line of JSON (`{"op":"snapshot","path":…}`); response =
+a header line `"<OK|ERR> <byte-length>\n"` then that many payload bytes.
+
 ## Swift Facade
 
 ```swift
