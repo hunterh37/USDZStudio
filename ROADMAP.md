@@ -188,7 +188,7 @@ With the golden-image, round-trip, corpus, and XCUITest harnesses now built by e
 
 ## Phase 5 — 1.0 Polish
 
-- [ ] Command palette (⌘K) + ActionRegistry (menu/shortcut/palette unification)
+- [x] Command palette (⌘K) + ActionRegistry (menu/shortcut/palette unification) — `ActionRegistry`/`FuzzyMatcher`/`CommandPaletteModel` + ⌘K overlay in EditorUI; every palette action mirrors an existing menu/toolbar command (one behaviour per command). Pure ranking/selection at 100% coverage; see specs/command-palette.md (snapshot-UI harness for the overlay tracked in Phase T1)
 - [ ] Camera bookmarks, turntable/thumbnail rendering, "AirDrop to test on iPhone"
 - [ ] Light theme, accessibility pass (VoiceOver, contrast), localization scaffolding
 - [ ] Performance: 1M-tri @ 60fps target, large-stage outliner virtualization
@@ -307,7 +307,7 @@ Typed, transactional, verification-gated MCP editing API over the kits
 ## Continuous / Platform
 
 - [ ] Python console REPL + `app.*` scripting parity for every command above (single-undo script runs).
-- [ ] Command palette (⌘K) coverage for all authoring actions via ActionRegistry.
+- [x] Command palette (⌘K) coverage for all authoring actions via ActionRegistry — `ActionRegistry` + `FuzzyMatcher` (EditorUI, pure): a value-typed, deterministically-ranked action set (subsequence fuzzy match with start/boundary/consecutive bonuses; enabled-first, score-then-title total order), driven by `CommandPaletteModel` (`@Observable @MainActor` query/results/selection) and the `CommandPaletteView` overlay (↑/↓ navigate, ↩ run, ⎋ dismiss). Each `PaletteAction` mirrors an existing menu/toolbar command so a command has one behaviour however it's invoked (File Open/Save/Save As/Export, Edit Undo/Redo, Convert/Batch/Library/Scripts/Console/Sculpt, View Validate/Environment/Agent), with `isEnabled` matching menu enablement (disabled rows appear greyed). ⌘K opens it (Convert File moved to ⇧⌘K); the App menu carries the same item. 100% coverage on `ActionRegistry`/`CommandPaletteModel`; the SwiftUI overlay is tracked with the snapshot-UI harness in Phase T1. Full authoring-action coverage extends as later phases add actions.
 - [x] USD stage **diff view** (compare two files / before-after an edit batch) — `StageDiff` (USDCore, pure): `StageDiff.between(before, after)` computes a structured, value-typed diff — root-metadata field changes, added/removed prims (matched by absolute path across the flattened stage, so a rename reads as remove+add like `usddiff`), and shallow per-prim field edits (type/active/visibility plus keyed attribute/relationship/metadata/variant-set changes, each captured uniformly as a before→after `ValueChange`). `render()` gives a deterministic text report and the whole diff is `Codable`. Surfaced as `openusdz diff <before> <after> [--json]`, whose exit code follows `diff(1)` (0 identical, 1 differing, 2 usage/open error). 100% USDCore + CLI `DiffCommand` coverage. A before/after diff *panel* in EditorUI can consume the same engine (tracked with the snapshot-UI harness in Phase T1).
 - [ ] Plugin API v2: native Swift plugin bundles for importers/panels/tools.
 - [ ] visionOS companion viewer (edit on Mac, view synced over network).
