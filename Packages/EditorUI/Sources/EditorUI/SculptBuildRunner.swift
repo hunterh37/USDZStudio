@@ -68,21 +68,70 @@ public enum SculptBuildRunner {
             return document.run(SetTransformCommand(path: primPath, newTRS: trs, oldAttribute: old)) != nil
                 ? primPath.description : nil
 
-        case .createMaterial(let targetPath, let baseColor):
+        case .createMaterial(let targetPath, let material):
             guard let primPath = PrimPath(targetPath),
                   let command = CreateMaterialCommand.make(
-                    bindingTo: primPath, baseColor: baseColor, in: document.snapshot)
+                    bindingTo: primPath, baseColor: material.baseColor, in: document.snapshot)
             else { return nil }
-            return document.run(command) != nil ? command.materialPath.description : nil
+            guard document.run(command) != nil else { return nil }
+            // Author the remaining PBR channels (scalars + texture maps) onto
+            // the surface shader; best-effort, mirroring the MCP executor.
+            for attribute in materialChannelAttributes(material) {
+                authorAttribute(attribute, on: command.surfacePath, to: document)
+            }
+            return command.materialPath.description
+
+        case .projectTexture(let rootPath, let descriptorJSON):
+            return authorRootAttribute(name: "sculptProjectedTexture", value: descriptorJSON,
+                                       rootPath: rootPath, to: document)
 
         case .authorRuntime(let rootPath, let manifestJSON):
-            guard let primPath = PrimPath(rootPath), document.snapshot.prim(at: primPath) != nil
-            else { return nil }
-            let attribute = Attribute(name: "sculptRuntime", value: .string(manifestJSON))
-            let old = document.snapshot.prim(at: primPath)?.attribute(named: "sculptRuntime")
-            return document.run(SetAttributeCommand(path: primPath, newAttribute: attribute, oldAttribute: old)) != nil
-                ? primPath.description : nil
+            return authorRootAttribute(name: "sculptRuntime", value: manifestJSON,
+                                       rootPath: rootPath, to: document)
         }
+    }
+
+    /// The extra shader-input attributes beyond the base colour authored by
+    /// `CreateMaterialCommand`: roughness/metallic scalars, optional emissive,
+    /// texture-map asset paths, and normal scale.
+    static func materialChannelAttributes(_ material: MaterialSpec) -> [Attribute] {
+        var attributes: [Attribute] = [
+            Attribute(name: "inputs:roughness", value: .double(material.roughness)),
+            Attribute(name: "inputs:metallic", value: .double(material.metallic)),
+        ]
+        if let emissive = material.emissive {
+            attributes.append(Attribute(name: "inputs:emissiveColor", value: .vector(emissive)))
+        }
+        let maps: [(String?, String)] = [
+            (material.albedoMap, "inputs:albedoMap"), (material.normalMap, "inputs:normalMap"),
+            (material.roughnessMap, "inputs:roughnessMap"), (material.emissiveMap, "inputs:emissiveMap"),
+        ]
+        for (path, name) in maps {
+            if let path { attributes.append(Attribute(name: name, value: .string(path))) }
+        }
+        if let scale = material.normalScale {
+            attributes.append(Attribute(name: "inputs:normalScale", value: .double(scale)))
+        }
+        return attributes
+    }
+
+    /// Set one attribute on an existing prim through the document command stack
+    /// (best-effort; a missing prim or failed run is skipped).
+    @discardableResult
+    static func authorAttribute(_ attribute: Attribute, on path: PrimPath,
+                                to document: EditorDocument) -> String? {
+        guard document.snapshot.prim(at: path) != nil else { return nil }
+        let old = document.snapshot.prim(at: path)?.attribute(named: attribute.name)
+        return document.run(SetAttributeCommand(path: path, newAttribute: attribute, oldAttribute: old)) != nil
+            ? path.description : nil
+    }
+
+    /// Author a string attribute onto the resolved sculpt-root prim (shared by
+    /// the runtime-manifest and projected-texture descriptor steps).
+    static func authorRootAttribute(name: String, value: String, rootPath: String,
+                                    to document: EditorDocument) -> String? {
+        guard let primPath = PrimPath(rootPath) else { return nil }
+        return authorAttribute(Attribute(name: name, value: .string(value)), on: primPath, to: document)
     }
 
     // MARK: - Prim construction (parent-aware; mirrors LibraryInsertion.makePrim)

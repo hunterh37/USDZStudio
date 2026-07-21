@@ -29,7 +29,16 @@ The USD-native analog of img2threejs's spec (`ObjectSculptSpec.swift`):
   TRS, parametric dimensions, an optional `materialID`, an optional
   `RepetitionSystem`, and children.
 - `materials: [MaterialSpec]` — channel-independent PBR (baseColor, roughness,
-  metallic, optional emissive).
+  metallic, optional emissive) plus optional **texture channels** (`albedoMap`,
+  `normalMap`, `roughnessMap`, `emissiveMap` asset-path strings and a
+  `normalScale`). Every map field is optional and decode-defaulted so specs
+  authored before texture support still load; the material pass authors the
+  declared maps as extra shader inputs, not just a flat colour.
+- `surfaceProjection: SurfaceProjection?` — optional projected-texture /
+  de-light descriptor (a `CameraPose` + target UV set + target component +
+  `delight` flag) realized by the surface pass. Decode-defaults to nil.
+- `landmarks: [Landmark]` — proportion-lock anchors (name + component +
+  position). Required for `.character` specs; decode-defaults to `[]`.
 - `sockets: [Socket]` — named attachment points for rigging/props.
 - `colliders: [Collider]` — runtime collision volumes (`box|sphere|capsule|convexHull`)
   wrapping a named component. Part of the action-ready runtime layer.
@@ -58,16 +67,22 @@ that realizes it. The strict-quality gate blocks any spec with unmapped items.
 
 In strict order (`SculptPass`): `blockout → structural → formRefinement →
 material → surface → lighting → interaction → optimization`. A pass unlocks
-only after the previous is accepted. Only three passes author into the stage;
-the rest are review/annotation passes that gate but emit no `BuildStep`s:
+only after the previous is accepted. Four passes author into the stage; the
+rest are review/annotation passes that gate but emit no `BuildStep`s:
 
 | Pass | Authors |
 |------|---------|
 | blockout | Coarse geometry for every node + repetition copies (real prims). |
 | structural | `set_transform` placement for every authored prim. |
-| material | `create_material` for each painted node. |
+| material | `create_material` for each painted node, plus the extra PBR channels (roughness/metallic scalars, emissive, and any texture maps + normalScale) as shader inputs on the created surface. |
+| surface | Authors a projected-texture / de-light descriptor (`sculptProjectedTexture` string attribute on the root) when the spec declares a `surfaceProjection` targeting a real component. |
 | interaction | Authors the action-ready runtime manifest (`sculptRuntime` string attribute on the root) when the spec exposes a socket or collider. |
-| formRefinement, surface, lighting, optimization | Review-only (no mutations in v1). |
+| formRefinement, lighting, optimization | Review-only (no mutations in v1). |
+
+The surface pass mirrors img2threejs's `bake_projected_texture` +
+`delight_albedo`: SculptKit emits only the declarative descriptor (camera pose
++ target UV set); the executors realize it, so SculptKit performs no image
+processing and stays a pure leaf.
 
 ## Gates
 
@@ -81,7 +96,13 @@ the rest are review/annotation passes that gate but emit no `BuildStep`s:
    mapping, minimum detail-item count, minimum component count, and material
    coverage of geometry leaves. Blocks before any build pass. Runtime-layer
    references (collider components, destruction-group members) are schema-checked
-   on every validate.
+   on every validate. Material texture channels are schema-checked too (map
+   paths must be non-empty; `normalScale >= 0`), as is the `surfaceProjection`
+   (target component must exist, `uvSet` non-empty, camera vectors `[x,y,z]`)
+   and each `landmark` (component must exist, position `[x,y,z]`). The
+   strict-quality gate additionally requires that a `.character` spec declare at
+   least one proportion-lock landmark, keeping character proportions
+   deterministic across rebuilds.
 3. **Continue gate** (`PassOrchestrator.advance`): `continue` requires a
    render, a comparison sheet, **and** a vision score ≥ the assessed threshold
    (`policy.minScore`). Missing evidence or a low score is rejected.
