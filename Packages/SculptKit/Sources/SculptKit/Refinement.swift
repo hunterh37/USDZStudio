@@ -8,16 +8,23 @@ import Foundation
 /// mesh surgery itself, keeping the module a pure leaf.
 ///
 /// v1 exposes `inset` (adds surface definition — a recessed inner ring on every
-/// face). The op applies cleanly to a full-face selection, so it is always
-/// valid on any authored primitive; more ops can be added behind new cases.
+/// face) and `subdivide` (Catmull-Clark smoothing — rounds faceted low-poly
+/// stock). Both apply cleanly whole-mesh, so they are always valid on any
+/// authored primitive; more ops can be added behind new cases.
 public enum MeshRefinement: Codable, Sendable, Equatable {
     /// Inset every face: each face grows a recessed inner ring. `fraction` is
     /// how far each corner moves toward the face centroid (0 < fraction < 1);
     /// `depth` offsets the inner ring along the face normal (negative = inward).
     case inset(fraction: Double, depth: Double)
 
-    private enum CodingKeys: String, CodingKey { case kind, fraction, depth }
-    private enum Kind: String, Codable { case inset }
+    /// Catmull-Clark subdivide the whole mesh `levels` times (≥ 1): every face
+    /// becomes quads and vertices are smoothed toward the limit surface. Valid
+    /// on every build primitive (closed solids and the open plane), it targets
+    /// the "lumpy / subdivision rounding" complaint directly.
+    case subdivide(levels: Int)
+
+    private enum CodingKeys: String, CodingKey { case kind, fraction, depth, levels }
+    private enum Kind: String, Codable { case inset, subdivide }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -26,6 +33,8 @@ public enum MeshRefinement: Codable, Sendable, Equatable {
             self = .inset(
                 fraction: try c.decode(Double.self, forKey: .fraction),
                 depth: try c.decodeIfPresent(Double.self, forKey: .depth) ?? 0)
+        case .subdivide:
+            self = .subdivide(levels: try c.decodeIfPresent(Int.self, forKey: .levels) ?? 1)
         }
     }
 
@@ -36,6 +45,9 @@ public enum MeshRefinement: Codable, Sendable, Equatable {
             try c.encode(Kind.inset, forKey: .kind)
             try c.encode(fraction, forKey: .fraction)
             try c.encode(depth, forKey: .depth)
+        case let .subdivide(levels):
+            try c.encode(Kind.subdivide, forKey: .kind)
+            try c.encode(levels, forKey: .levels)
         }
     }
 }

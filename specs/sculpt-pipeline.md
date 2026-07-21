@@ -93,7 +93,7 @@ spec fields are absent):
 |------|---------|
 | blockout | Coarse geometry for every node + repetition copies (real prims). |
 | structural | `set_transform` placement for every authored prim. |
-| formRefinement | Applies real MeshKit geometry ops (v1: `inset`) declared per-node in `refinements` — the prim is read back into a `HalfEdgeMesh`, the ops are applied over the whole mesh, and the result is re-authored. Review-only when no node declares refinements. |
+| formRefinement | Applies real MeshKit geometry ops (v1: `inset`, `subdivide`) declared per-node in `refinements` — the prim is read back into a `HalfEdgeMesh`, the ops are applied over the whole mesh, and the result is re-authored. Review-only when no node declares refinements. |
 | material | `create_material` for each painted node, plus the extra PBR channels (roughness/metallic scalars, emissive, and any texture maps + normalScale) as shader inputs on the created surface. |
 | surface | Authors a projected-texture / de-light descriptor (`sculptProjectedTexture` string attribute on the root) when the spec declares a `surfaceProjection` targeting a real component. |
 | lighting | Authors a real `UsdLux` light prim (with `inputs:intensity` + `inputs:color`) plus its placement for each declared `LightSpec`, under the sculpt root. |

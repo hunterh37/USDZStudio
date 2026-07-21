@@ -1,0 +1,28 @@
+#usda 1.0
+(
+    defaultPrim = "Subdiv"
+    metersPerUnit = 1
+    upAxis = "Y"
+)
+
+# A pure-quad grid mesh — the topology a Catmull-Clark `subdivide` refinement
+# produces (every face a quad, shared interior vertices). Pins round-trip
+# safety of a many-quad refined mesh through the bridge (issue #92).
+def Xform "Subdiv"
+{
+    def Mesh "Geom"
+    {
+        int[] faceVertexCounts = [4, 4, 4, 4, 4, 4, 4, 4, 4]
+        int[] faceVertexIndices = [
+            0, 1, 5, 4,   1, 2, 6, 5,   2, 3, 7, 6,
+            4, 5, 9, 8,   5, 6, 10, 9,   6, 7, 11, 10,
+            8, 9, 13, 12,   9, 10, 14, 13,   10, 11, 15, 14
+        ]
+        point3f[] points = [
+            (-1.5, 0, -1.5), (-0.5, 0, -1.5), (0.5, 0, -1.5), (1.5, 0, -1.5),
+            (-1.5, 0, -0.5), (-0.5, 0, -0.5), (0.5, 0, -0.5), (1.5, 0, -0.5),
+            (-1.5, 0, 0.5), (-0.5, 0, 0.5), (0.5, 0, 0.5), (1.5, 0, 0.5),
+            (-1.5, 0, 1.5), (-0.5, 0, 1.5), (0.5, 0, 1.5), (1.5, 0, 1.5)
+        ]
+    }
+}
