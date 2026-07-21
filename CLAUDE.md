@@ -59,4 +59,6 @@ Write UI as an expert SwiftUI 6 + macOS architect would. These rules are mandato
 
 ## PRs
 
-Topic branch → PR against `main`, squash-merged. Use a conventional-commit-style title (e.g. `feat(viewport): …`, `fix(meshkit): …`). Both `lint` and `test` CI jobs must pass.
+**Every PR targets `main`. No exceptions.** Branch a topic branch off `main`, PR against `main`, squash-merge into `main`. Never open, base, or merge a PR against another feature/topic branch — not even to "keep the diff scoped" or because the base isn't on `main` yet. If the work depends on an unmerged branch, land that branch to `main` first (or rebase your work onto `main`), then open your PR against `main`. If you ever find yourself about to set a PR `--base` to anything other than `main`, stop and ask the user.
+
+Use a conventional-commit-style title (e.g. `feat(viewport): …`, `fix(meshkit): …`). Both `lint` and `test` CI jobs must pass before merge.
