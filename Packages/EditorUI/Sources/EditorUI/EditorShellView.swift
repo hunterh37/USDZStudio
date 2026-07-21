@@ -81,6 +81,8 @@ public struct EditorShellView: View {
 
     @State private var showValidation = false
     @State private var showMCPActivity = false
+    /// Before/after diff drawer (changes since open / last save).
+    @State private var showDiff = false
     /// Viewport image-based-lighting + background state (specs/viewport.md
     /// "Environment & Lighting"); edited via the popover control strip.
     @State private var environment = EnvironmentSettings()
@@ -88,6 +90,14 @@ public struct EditorShellView: View {
     /// Drives the viewport animation transport (play/pause/scrub/loop). Kept in
     /// sync with the open stage's authored time range via `configure(from:)`.
     @State private var playback = PlaybackController()
+
+    /// Camera channel shared with the viewport so bookmarks can read the live
+    /// pose; the store holds the persisted named views.
+    @StateObject private var cameraLink = ViewportCameraLink()
+    @State private var bookmarks = CameraBookmarkStore()
+    /// When set, jumps the viewport to this pose once (then cleared so the user
+    /// regains free camera control and the same bookmark can be re-applied).
+    @State private var appliedBookmarkPose: ViewportCameraPose?
     @State private var activeSheet: Sheet?
     /// The console controller for the currently-open console sheet (built via
     /// `makeConsoleController` when the console opens).
@@ -119,9 +129,14 @@ public struct EditorShellView: View {
     /// Owned/updated by the app; observed inside the activity panel subviews.
     let mcpActivity: MCPActivityModel?
 
+    /// Persisted user preferences. When present, the viewport environment is
+    /// seeded from the saved lighting on appear and re-saved as it's edited, so
+    /// the environment survives relaunch (nil in previews/tests → transient).
+    let settings: EditorSettings?
+
 
     private enum Sheet: String, Identifiable {
-        case convert, batch, scripts, library, console, export
+        case convert, batch, scripts, library, console, export, recolor
         var id: String { rawValue }
     }
 
@@ -129,7 +144,7 @@ public struct EditorShellView: View {
     /// menu shortcuts and toolbar buttons drive the same state.
     public enum MenuCommand: String {
         case convert, batch, scripts, library, console, validate, mcpActivity, export, sculptDemo
-        case commandPalette
+        case commandPalette, diff, recolor
         public static let notification = Notification.Name("EditorUI.MenuCommand")
     }
 
@@ -138,6 +153,7 @@ public struct EditorShellView: View {
                 importingFileName: String? = nil,
                 tutorial: TutorialEngine? = nil,
                 mcpActivity: MCPActivityModel? = nil,
+                settings: EditorSettings? = nil,
                 makeScriptExecutor: @escaping () -> (any ScriptExecuting)? = { nil },
                 onReimportFile: @escaping (URL) async -> Void = { _ in },
                 makeConsoleController: @escaping () -> ReplController? = { nil },
@@ -151,6 +167,7 @@ public struct EditorShellView: View {
         self.importingFileName = importingFileName
         self.tutorial = tutorial
         self.mcpActivity = mcpActivity
+        self.settings = settings
         self.makeScriptExecutor = makeScriptExecutor
         self.onReimportFile = onReimportFile
         self.makeConsoleController = makeConsoleController
@@ -193,6 +210,8 @@ public struct EditorShellView: View {
                 } else {
                     unavailableSheet("The Python console needs an open document and a Python runtime.")
                 }
+            case .recolor:
+                RecolorPanel(document: document, onClose: dismissSheet)
             case .export:
                 ExportPanel(sourceURL: modelURL,
                             // Re-evaluated per profile change against the live
@@ -224,6 +243,8 @@ public struct EditorShellView: View {
                     Task { await SculptBuildRunner.playLive(SculptDemos.lowPolyHouse(), into: document) }
                 }
             case .commandPalette: openCommandPalette()
+            case .diff: if document != nil { showDiff.toggle() }
+            case .recolor: if document != nil { activeSheet = .recolor }
             }
         }
         .overlay {
@@ -305,6 +326,12 @@ public struct EditorShellView: View {
                    keywords: ["mcp"], enabled: mcpActivity != nil) {
                 if mcpActivity != nil { showMCPActivity.toggle() }
             },
+            action("view.diff", showDiff ? "Hide Changes" : "Show Changes", "View",
+                   shortcut: "⇧⌘D", keywords: ["diff", "compare", "changes"],
+                   enabled: hasDocument) { if document != nil { showDiff.toggle() } },
+            action("edit.recolor", "Recolor…", "Edit", shortcut: "⇧⌘R",
+                   keywords: ["color", "colour", "material", "paint", "rebrand"],
+                   enabled: hasDocument) { if document != nil { activeSheet = .recolor } },
         ]
     }
 
@@ -352,6 +379,8 @@ public struct EditorShellView: View {
             }
             Divider().frame(height: 16).overlay(Palette.borderSubtle.color)
             actionButton("Library", systemImage: "square.grid.2x2") { activeSheet = .library }
+            actionButton("Recolor", systemImage: "paintpalette") { activeSheet = .recolor }
+                .disabled(document == nil)
             Spacer()
             if let mcpActivity {
                 MCPStatusAccessory(model: mcpActivity, showActivity: $showMCPActivity)
@@ -464,6 +493,12 @@ public struct EditorShellView: View {
             if showMCPActivity, let mcpActivity {
                 MCPActivityPanel(model: mcpActivity, onClose: { showMCPActivity = false })
                     .frame(minHeight: 140, idealHeight: 220, maxHeight: 360)
+            }
+            if showDiff, document != nil {
+                StageDiffPanel(document: document,
+                               onSelectPrim: { select($0) },
+                               onClose: { showDiff = false })
+                    .frame(minHeight: 140, idealHeight: 200, maxHeight: 320)
             }
         }
     }
@@ -680,6 +715,46 @@ public struct EditorShellView: View {
         }
     }
 
+    /// Camera-bookmarks menu: save the current view, then jump back to any saved
+    /// view (ROADMAP Phase 5 — camera bookmarks). The live pose is read from the
+    /// shared `cameraLink`; applying a bookmark pushes its pose to the viewport.
+    private var cameraBookmarksButton: some View {
+        Menu {
+            Button {
+                bookmarks.add(name: "", pose: ViewportCameraPose(camera: cameraLink.camera))
+            } label: {
+                Label("Save Current View", systemImage: "plus")
+            }
+            if !bookmarks.bookmarks.isEmpty {
+                Divider()
+                ForEach(bookmarks.bookmarks) { bookmark in
+                    Button(bookmark.name) { applyBookmark(bookmark) }
+                }
+                Divider()
+                Menu("Delete") {
+                    ForEach(bookmarks.bookmarks) { bookmark in
+                        Button(bookmark.name, role: .destructive) { bookmarks.remove(bookmark.id) }
+                    }
+                }
+            }
+        } label: {
+            Image(systemName: "camera.viewfinder")
+        }
+        .menuStyle(.borderlessButton)
+        .frame(width: 28)
+        .help("Camera bookmarks")
+        .accessibilityLabel("Camera bookmarks")
+        .padding(8)
+    }
+
+    /// Jumps to a bookmark: set the pose, then clear it on the next runloop tick
+    /// so the user regains free camera control and re-applying the same bookmark
+    /// works (the coordinator only re-asserts a *changed* pose).
+    private func applyBookmark(_ bookmark: CameraBookmark) {
+        appliedBookmarkPose = bookmark.pose
+        DispatchQueue.main.async { appliedBookmarkPose = nil }
+    }
+
     /// Presents an open panel for a custom `.hdr`/`.exr` environment map.
     static func chooseEnvironmentFile() -> URL? {
         let panel = NSOpenPanel()
@@ -727,16 +802,31 @@ public struct EditorShellView: View {
                 onScaleGizmoDrag: { [weak document] phase in
                     document?.handleScaleGizmoDrag(phase)
                 },
-                cameraPose: tutorial?.cameraPose,
+                cameraPose: tutorial?.cameraPose ?? appliedBookmarkPose,
                 // The tour's scripted tweens own the channel while running;
                 // otherwise the document's authored transforms render live
                 // (gizmo drags, inspector edits, undo).
                 liveTransforms: tutorial?.liveTransforms ?? document?.viewportLiveTransforms,
                 materialOverrides: document?.viewportMaterialOverrides,
                 environment: environment,
-                animationTime: playback.animationTime)
-                .overlay(alignment: .topTrailing) { environmentButton }
-                .onAppear { playback.configure(from: stage?.metadata) }
+                animationTime: playback.animationTime,
+                cameraLink: cameraLink)
+                .overlay(alignment: .topTrailing) {
+                    HStack(spacing: 0) {
+                        cameraBookmarksButton
+                        environmentButton
+                    }
+                }
+                .onAppear {
+                    playback.configure(from: stage?.metadata)
+                    // Seed the viewport lighting from the persisted settings so
+                    // the environment survives relaunch (specs/viewport.md).
+                    if let settings { environment = settings.loadEnvironment() }
+                }
+                .onChange(of: environment) { _, newValue in
+                    // Persist every lighting edit; a no-op when settings absent.
+                    settings?.saveEnvironment(newValue)
+                }
                 .onChange(of: stage?.metadata) { _, newValue in
                     playback.configure(from: newValue)
                 }
