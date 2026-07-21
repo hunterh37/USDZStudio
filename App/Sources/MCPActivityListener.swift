@@ -58,6 +58,13 @@ final class MCPActivityListener: ObservableObject {
     /// Presentational state observed by the activity panel + menu-bar tray.
     let model = MCPActivityModel()
 
+    /// The agent's reference image, observed by the reference panel above the
+    /// inspector. Updated as the in-app host handles `set_reference_image`, and
+    /// seeded on launch from the hand-off file so an image set before this
+    /// window existed (agent/CLI-driven launch) is restored
+    /// (specs/agent-live-editing.md — "Reference panel").
+    let referenceModel = ReferenceImageModel()
+
     /// Most recent tool calls kept in the panel.
     private let maxRows = 200
     private var server: UnixSocketServer?
@@ -82,6 +89,11 @@ final class MCPActivityListener: ObservableObject {
         mcpDirectory().appendingPathComponent("agent.sock", isDirectory: false)
     }
 
+    /// The reference-image hand-off file (mirrors the CLI sink's path).
+    static func referenceURL() -> URL {
+        mcpDirectory().appendingPathComponent("reference.json", isDirectory: false)
+    }
+
     // MARK: Lifecycle
 
     private var listenerRetries = 0
@@ -97,6 +109,11 @@ final class MCPActivityListener: ObservableObject {
 
     func start() {
         wantsListening = true
+        // Restore a reference image set before this window existed (an agent- or
+        // CLI-driven launch persisted it to the hand-off file).
+        if let image = ReferenceImage.read(from: Self.referenceURL()) {
+            referenceModel.set(path: image.path, caption: image.caption)
+        }
         guard server == nil else { return }
         let socketPath = Self.socketURL().path
         try? FileManager.default.createDirectory(
@@ -253,10 +270,24 @@ final class MCPActivityListener: ObservableObject {
         let sink = HostActivitySink(pid: hostPID) { [weak self] event in
             Task { @MainActor in self?.apply(event) }
         }
+        // Mirror the agent's reference image into the panel model, and persist
+        // the hand-off record so a relaunch (or a window opened later) restores
+        // it. Fired on the tool thread; hop to the main actor for UI state.
+        session.onReferenceImageChange = { [weak self] image in
+            Task { @MainActor in self?.applyReference(image) }
+        }
         hostSession = session
         hostServer = AgentMCPServer.make(
             session: session,
             configuration: AgentMCPServer.Configuration(eventSink: sink))
+    }
+
+    /// Fold a reference-image change into the panel model and the hand-off file.
+    func applyReference(_ image: ReferenceImage?) {
+        referenceModel.set(path: image?.path, caption: image?.caption)
+        let url = Self.referenceURL()
+        if let image { try? image.write(to: url) }
+        else { ReferenceImage.remove(at: url) }
     }
 
     /// Run one relayed JSON-RPC request against the hosted server, mirror the

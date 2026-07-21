@@ -46,6 +46,7 @@ public enum AgentMCPServer {
 
         ReadTools.register(on: server, session: session)
         MutateTools.register(on: server, session: session)
+        JointTools.register(on: server, session: session)
         VerifyTools.register(on: server, session: session)
         RenderTools.register(
             on: server, session: session,
@@ -56,6 +57,7 @@ public enum AgentMCPServer {
             generators: configuration.generators,
             libraryDirectories: configuration.libraryDirectories,
             jobs: AssetJobStore())
+        ReferenceImageTools.register(on: server, session: session)
         TransactionTools.register(on: server, session: session)
         ScriptTools.register(
             on: server, session: session,
@@ -64,6 +66,10 @@ public enum AgentMCPServer {
         SculptTools.register(
             on: server, session: session,
             store: SculptStore(workDirectory: configuration.workDirectory),
+            workDirectory: configuration.workDirectory)
+        RigTools.register(
+            on: server, session: session,
+            store: RigStore(workDirectory: configuration.workDirectory),
             workDirectory: configuration.workDirectory)
 
         // §3.1 — the same payloads as read tools, exposed as MCP resources so
@@ -90,7 +96,13 @@ public enum AgentMCPServer {
             ])
         })
 
+        server.register(MCPResource(
+            uri: "usd://reference", name: "Reference image",
+            description: "The reference image the agent is working from (path + caption), or null."
+        ) { session.referenceImage?.asJSON ?? .null })
+
         WorkflowPrompts.register(on: server)
+        server.instructions = AgentInstructions.text
 
         // Announce the session to any attached activity observer, now that the
         // full tool set is registered (so toolCount/groups are final).

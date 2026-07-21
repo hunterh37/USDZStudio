@@ -1,5 +1,6 @@
 import Foundation
 import MeshKit
+import MechanismKit
 
 /// Severity of a spec-validation issue.
 public enum SpecIssueSeverity: String, Sendable, Equatable {
@@ -204,6 +205,19 @@ public enum SpecValidator {
                 issues.append(.init(.error, "destruction group '\(group.name)' references unknown component '\(member)'"))
             }
         }
+        var jointNames = Set<String>()
+        for joint in spec.joints {
+            if !jointNames.insert(joint.name).inserted {
+                issues.append(.init(.error, "duplicate joint name '\(joint.name)'"))
+            }
+            if !componentNames.contains(joint.target) {
+                issues.append(.init(.error, "joint '\(joint.name)' targets unknown component '\(joint.target)'"))
+            }
+            // Delegate schema/geometry checks to MechanismKit's invariant layer.
+            for issue in JointInvariants.validate(joint) where issue.severity == .error {
+                issues.append(.init(.error, issue.message))
+            }
+        }
         return issues
     }
 
@@ -343,7 +357,7 @@ public enum SpecValidator {
         let manifest = RuntimeManifest(spec: spec)
         var issues: [SpecIssue] = []
         if !manifest.isActionable {
-            issues.append(.init(.error, "action-ready: object exposes no runtime handles — author at least one socket or collider"))
+            issues.append(.init(.error, "action-ready: object exposes no runtime handles — author at least one socket, collider, or joint"))
         }
         return SpecValidationResult(issues: issues)
     }

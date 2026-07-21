@@ -130,18 +130,79 @@ public final class EditorDocument {
     private let stage: InMemoryStage
     private let stack: CommandStack
 
-    public init(snapshot: StageSnapshot = StageSnapshot(), modelURL: URL? = nil) {
+    /// Opens a document over `snapshot`. Pass a `journal` to enable the crash-safe
+    /// write-ahead log that also powers cross-launch session restore
+    /// (specs/session-restoration.md); the `CommandStack` writes a checkpoint for
+    /// `modelURL` immediately so recovery knows which file to replay against.
+    public convenience init(
+        snapshot: StageSnapshot = StageSnapshot(),
+        modelURL: URL? = nil,
+        journal: (any CommandJournal)? = nil
+    ) {
+        self.init(baseline: snapshot, modelURL: modelURL) { stage in
+            CommandStack(stage: stage, journal: journal)
+        }
+    }
+
+    /// Shared setup: seeds the stage/baseline from `baseline`, builds the command
+    /// stack via `makeStack` (a fresh journaled stack, or a recovered one that
+    /// replays a WAL), and wires the refresh hook. `rethrows` so the recovery
+    /// path can surface a replay failure while the common path stays non-throwing.
+    private init(
+        baseline: StageSnapshot,
+        modelURL: URL?,
+        makeStack: (InMemoryStage) throws -> CommandStack
+    ) rethrows {
         self.modelURL = modelURL
-        self.snapshot = snapshot
-        self.baselineSnapshot = snapshot
-        let stage = InMemoryStage(snapshot)
+        self.snapshot = baseline
+        self.baselineSnapshot = baseline
+        let stage = InMemoryStage(baseline)
         self.stage = stage
-        self.stack = CommandStack(stage: stage)
+        self.stack = try makeStack(stage)
         self.stack.onChange = { [weak self] in
             // Runs synchronously on the calling (main) thread — mirrors the
             // UndoManagerBridge's own assumeIsolated pattern.
             MainActor.assumeIsolated { self?.refresh() }
         }
+    }
+
+    /// Rebuilds a document by replaying a write-ahead log against the last-saved
+    /// `baseline`, restoring the exact undo/redo stacks and the edited stage
+    /// content (specs/session-restoration.md). `records` are the post-checkpoint
+    /// WAL tail (see `SessionKit.RecoveryPlan`); `journal` is the same log so
+    /// further edits keep appending. Throws only if replay itself fails, letting
+    /// the caller fall back to a clean open.
+    public static func restored(
+        baseline: StageSnapshot,
+        modelURL: URL?,
+        journal: (any CommandJournal)?,
+        records: [JournalRecord]
+    ) throws -> EditorDocument {
+        let document = try EditorDocument(baseline: baseline, modelURL: modelURL) { stage in
+            try CommandStack.recovered(stage: stage, journal: journal, records: records)
+        }
+        document.reconcileAfterRecovery()
+        return document
+    }
+
+    /// After a WAL replay the stage may differ from the last-saved baseline
+    /// (unsaved edits). Republish the live snapshot and mark the document dirty
+    /// iff it actually diverged, so the title bar's "Edited" state and the
+    /// restore prompt's unsaved-edit indication are correct. `savedRevision`
+    /// stays 0 (the baseline is the on-disk state), so `hasUnsavedChanges`
+    /// reduces to "did replay change anything".
+    private func reconcileAfterRecovery() {
+        snapshot = stage.currentSnapshot
+        geometryRevision &+= 1
+        if snapshot != baselineSnapshot {
+            revision &+= 1
+        }
+    }
+
+    /// Restores isolate mode to `roots` (view-only; non-dirtying) — used when
+    /// reapplying a restored session's view state.
+    public func restoreIsolation(_ roots: some Sequence<PrimPath>) {
+        setIsolation(IsolationState(roots: Set(roots)))
     }
 
     // MARK: Undo/redo surface
@@ -878,6 +939,11 @@ public final class EditorDocument {
         savedRevision = revision
         // The freshly written state is the new diff baseline.
         baselineSnapshot = snapshot
+        // Flatten the write-ahead log to a checkpoint at the just-saved file so
+        // crash recovery / session restore replays against it with an empty tail
+        // (the on-disk state is now the baseline; replaying the pre-save commands
+        // onto it would double-apply them). In-session undo history is kept.
+        stack.checkpointSaved(sourceURL: url)
     }
 
     // MARK: Console (REPL) edits

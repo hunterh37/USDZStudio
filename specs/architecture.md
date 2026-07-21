@@ -13,12 +13,15 @@ OpenUSDZEditor/
 │   ├── USDCore/                  # Pure Swift USD stage model (no UI, no Python)
 │   ├── USDBridge/                # Python/usd-core interop (only module touching Python)
 │   ├── MeshKit/                  # Pure Swift half-edge mesh model + topology ops (zero deps)
+│   ├── MechanismKit/             # Pure Swift rigid-articulation math: hinge/slider joints, pivot transforms, invariants (zero deps)
+│   ├── RigKit/                   # Pure Swift skeletal rig/skinning/motion math: FK, IK/FK solvers, constraints, auto-rig, retargeting, clip blending, motion-quality metric (zero deps)
 │   ├── ConversionKit/            # Importers, pipeline stages, batch engine
 │   ├── ViewportKit/              # RealityKit viewport, camera, gizmos, IBL
 │   ├── EditingKit/               # Command layer, undo, stage mutations
 │   ├── ValidationKit/            # Rules engine, usdchecker adapter
 │   ├── ScriptingKit/             # Python console, script library, CLI core
 │   ├── SculptKit/                # Pure staged-sculpt pipeline logic (image→USD spec, passes, gates)
+│   ├── SessionKit/               # Cross-launch session envelope + restore (models, persistence, WAL recovery)
 │   ├── AgentMCP/                 # MCP server: typed, transactional agent editing API over the kits
 │   ├── EditorUI/                 # Panels: outliner, inspector, console, toolbar
 │   ├── QuickLookKit/             # Pure render-plan logic for the Finder QuickLook .appex (zero deps)
@@ -35,6 +38,9 @@ OpenUSDZEditor/
 App ─▶ EditorUI ─▶ {ViewportKit, EditingKit, ConversionKit, ValidationKit, ScriptingKit} ─▶ USDCore
 USDBridge ─▶ USDCore          (bridge implements USDCore protocols)
 {EditingKit, ViewportKit} ─▶ MeshKit   (MeshKit itself imports nothing internal)
+MechanismKit imports nothing internal (pure leaf, like MeshKit); its consumers ({EditingKit, SculptKit, AgentMCP}) import it for rigid-joint authoring (specs/articulation-mechanisms.md)
+RigKit imports nothing internal (pure leaf, like MeshKit/MechanismKit); its consumers ({EditingKit, ViewportKit, AgentMCP}) import it for skeletal rig/skinning/motion authoring (specs/animation-rigging.md)
+SessionKit ─▶ {USDCore, ViewportKit, EditingKit}; consumed by EditorUI/App only — cross-launch session envelope + restore (reuses ViewportKit value types + the EditingKit WAL; authors no stage itself), specs/session-restoration.md
 DicyaninDesignSystem ◀─ EditorUI only
 QuickLookKit — leaf, zero internal deps (pure render-plan logic; App QuickLook .appex targets consume it)
 CLI ─▶ kits (never EditorUI)

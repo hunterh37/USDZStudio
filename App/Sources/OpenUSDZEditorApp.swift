@@ -3,6 +3,7 @@ import EditorUI
 import USDBridge
 import USDCore
 import ScriptingKit
+import SessionKit
 
 /// Thin app target: SwiftUI lifecycle + DI wiring only (<200 lines by design,
 /// specs/testing.md). The real document-based architecture arrives with the
@@ -32,6 +33,23 @@ struct OpenUSDZEditorApp: App {
     @State private var document: EditorDocument?
     @State private var openError: String?
 
+    /// Drives cross-launch session restore (specs/session-restoration.md): owns
+    /// the per-document write-ahead-log session and the view-state envelope, so a
+    /// relaunch can rebuild the scene, its unsaved edits, and the undo/redo stack.
+    @State private var session = SessionController()
+
+    /// Set on launch when a previous session with unsaved work is found; drives
+    /// the "restore your previous session?" prompt. The document is rebuilt
+    /// up-front (recovery is cheap) so accepting is instant.
+    @State private var restoreCandidate: SessionController.Recoverable?
+    @State private var restoredDocument: EditorDocument?
+    @State private var showRestorePrompt = false
+
+    /// The shell-owned view state to reapply after accepting a restore (camera,
+    /// outliner expansion, panels, playback); `nil` for a normal open, so a
+    /// later open never re-applies a stale restore.
+    @State private var restoredViewStateToApply: ViewState?
+
     /// App-wide persisted preferences, shared by the editor shell and the
     /// Settings (⌘,) window.
     @State private var settings = EditorSettings()
@@ -59,6 +77,7 @@ struct OpenUSDZEditorApp: App {
                             importingFileName: importingFileName,
                             tutorial: tutorial,
                             mcpActivity: mcp.model,
+                            referenceImage: mcp.referenceModel,
                             settings: settings,
                             makeScriptExecutor: {
                                 ProcessScriptExecutor(
@@ -69,15 +88,22 @@ struct OpenUSDZEditorApp: App {
                             onCreateDocument: {
                                 // Start a fresh, empty scratch scene (no backing
                                 // file) so the library can add primitives without
-                                // opening a file first.
-                                let doc = EditorDocument()
+                                // opening a file first. A journaled session is
+                                // started so its edits survive a relaunch.
+                                restoredViewStateToApply = nil
+                                let journal = session.begin(for: nil)
+                                let doc = EditorDocument(journal: journal)
+                                session.attach(doc)
+                                session.capture(doc)
                                 document = doc
                                 return doc
                             },
                             onExport: { url in try await export(to: url) },
                             onOpenFile: { presentOpenPanel() },
                             onSave: { save(to: document?.modelURL) },
-                            onSaveAs: { save(to: nil) })
+                            onSaveAs: { save(to: nil) },
+                            session: session,
+                            restoredViewState: restoredViewStateToApply)
                 .frame(minWidth: 1000, minHeight: 620)
                 .alert("Could Not Open File", isPresented: .constant(openError != nil)) {
                     Button("OK") { openError = nil }
@@ -85,20 +111,49 @@ struct OpenUSDZEditorApp: App {
                     Text(openError ?? "")
                 }
                 .onOpenURL(perform: open)
+                // Scene-phase capture (including shell-owned camera/panels/
+                // outliner state) is owned by EditorShellView, which holds that
+                // @State; the App only kicks off the initial envelope on open.
+                // Restore-but-prompt: the document is already rebuilt, so this is
+                // a pure yes/no (specs/session-restoration.md).
+                .confirmationDialog("Restore your previous session?",
+                                    isPresented: $showRestorePrompt, titleVisibility: .visible) {
+                    Button("Restore") {
+                        // Hand the shell-owned view state to EditorShellView to
+                        // reapply (camera, outliner, panels); document-owned
+                        // state was already applied by SessionController.restore.
+                        restoredViewStateToApply = restoreCandidate?.document.viewState
+                        if let restoredDocument { document = restoredDocument }
+                        restoreCandidate = nil
+                        restoredDocument = nil
+                    }
+                    Button("Start Fresh", role: .destructive) {
+                        if let restoreCandidate { session.discard(restoreCandidate) }
+                        session.endActive()
+                        restoreCandidate = nil
+                        restoredDocument = nil
+                    }
+                } message: {
+                    Text(restorePromptMessage)
+                }
                 .task {
                     // Start the localhost activity listener + write the
                     // endpoint-discovery file so `openusdz mcp` can connect.
                     mcp.start()
+                    // Offer to restore a previous session with unsaved work
+                    // before anything else opens a document.
+                    if document == nil { await offerSessionRestore() }
                     // Dev convenience: `swift run OpenUSDZEditorApp file.usda`
                     // opens straight into the file.
-                    if document == nil,
+                    if document == nil, !showRestorePrompt,
                        let arg = CommandLine.arguments.dropFirst().first(where: {
                            ["usda", "usdz", "usdc", "usd"].contains(URL(fileURLWithPath: $0).pathExtension)
                        }) {
                         open(URL(fileURLWithPath: arg))
                     }
-                    // First run, nothing open: show the guided tour.
-                    if document == nil && !hasSeenTutorial {
+                    // First run, nothing open (and not awaiting a restore
+                    // decision): show the guided tour.
+                    if document == nil && !showRestorePrompt && !hasSeenTutorial {
                         startTutorial()
                     }
                     // Host the agent editing session on the current document so
@@ -115,6 +170,10 @@ struct OpenUSDZEditorApp: App {
                     return true
                 }
         }
+        // Size the window from the content's *minimum*, not its ideal, size.
+        // Guards against any panel's content-driven ideal height (e.g. the
+        // outliner List growing per row) pushing the window root larger.
+        .windowResizability(.contentMinSize)
         .commands {
             CommandGroup(replacing: .newItem) {
                 Button("Open…") { presentOpenPanel() }
@@ -324,7 +383,7 @@ struct OpenUSDZEditorApp: App {
                 throw BridgeError.pythonUnavailable(detail: "no Python interpreter found")
             }
             let snapshot = try await BridgedStage.open(url: url, executor: executor).snapshot
-            document = EditorDocument(snapshot: snapshot, modelURL: url)
+            document = makeSessionedDocument(snapshot: snapshot, modelURL: url)
         } catch {
             let bridgeError = error as? BridgeError
             openError = [bridgeError?.errorDescription, bridgeError?.recoverySuggestion]
@@ -346,7 +405,7 @@ struct OpenUSDZEditorApp: App {
                     throw BridgeError.pythonUnavailable(detail: "no Python interpreter found")
                 }
                 let snapshot = try await BridgedStage.open(url: url, executor: executor).snapshot
-                document = EditorDocument(snapshot: snapshot, modelURL: url)
+                document = makeSessionedDocument(snapshot: snapshot, modelURL: url)
             } catch {
                 let bridgeError = error as? BridgeError
                 openError = [bridgeError?.errorDescription, bridgeError?.recoverySuggestion]
@@ -354,6 +413,66 @@ struct OpenUSDZEditorApp: App {
                 if openError?.isEmpty != false { openError = error.localizedDescription }
             }
         }
+    }
+
+    // MARK: Session restoration
+
+    /// Builds a document over a fresh WAL session (so its edits survive a
+    /// relaunch) and captures the initial envelope. Used by every open/import.
+    @MainActor
+    private func makeSessionedDocument(snapshot: StageSnapshot, modelURL: URL?) -> EditorDocument {
+        // A normal open supersedes any pending restore hand-off, so stale
+        // shell-owned state is never reapplied to a different document.
+        restoredViewStateToApply = nil
+        let journal = session.begin(for: modelURL)
+        let doc = EditorDocument(snapshot: snapshot, modelURL: modelURL, journal: journal)
+        session.attach(doc)
+        session.capture(doc)
+        return doc
+    }
+
+    /// On launch, if a previous session left unsaved work, rebuild its document
+    /// and raise the restore prompt. Saved-and-quit sessions (no WAL work) are
+    /// swept silently. Recovery is bounded and best-effort: a document that can't
+    /// be rebuilt is discarded rather than blocking launch.
+    @MainActor
+    private func offerSessionRestore() async {
+        guard let recoverable = session.findRecoverable() else { return }
+        guard recoverable.plan.hasWork else { session.discard(recoverable); return }
+        guard let rebuilt = await buildRestoredDocument(recoverable) else {
+            session.discard(recoverable)
+            return
+        }
+        restoreCandidate = recoverable
+        restoredDocument = rebuilt
+        showRestorePrompt = true
+    }
+
+    /// Resolves the last-saved baseline (reopened from the file via the bridge,
+    /// or the embedded scratch snapshot) and replays the WAL to rebuild the
+    /// document. `nil` when the baseline can't be obtained.
+    @MainActor
+    private func buildRestoredDocument(_ recoverable: SessionController.Recoverable) async -> EditorDocument? {
+        if let url = recoverable.document.source?.resolve() {
+            guard let executor = Self.sharedOpenExecutor,
+                  let baseline = try? await BridgedStage.open(url: url, executor: executor).snapshot
+            else { return nil }
+            return session.restore(recoverable, baseline: baseline)
+        }
+        guard let baseline = session.embeddedBaseline(for: recoverable) else { return nil }
+        return session.restore(recoverable, baseline: baseline)
+    }
+
+    /// The restore prompt's body: how many unsaved edits, and a caution when the
+    /// underlying file changed on disk since the session was captured.
+    private var restorePromptMessage: String {
+        guard let recoverable = restoreCandidate else { return "" }
+        let name = recoverable.displayName ?? "your last scene"
+        var message = "You had unsaved changes to \(name) when the app last closed."
+        if recoverable.sourceChangedOnDisk {
+            message += "\n\n⚠︎ The file has changed on disk since then, so restored edits may not line up."
+        }
+        return message
     }
 
     /// Resolution order: explicit env override → bundled resource (packaged

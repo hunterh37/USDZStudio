@@ -134,6 +134,22 @@ public final class CommandStack: @unchecked Sendable {
         onChange?()
     }
 
+    /// Records a save boundary in the write-ahead log without discarding the
+    /// in-memory undo/redo history.
+    ///
+    /// Truncates the log and writes a fresh checkpoint for `sourceURL`, so crash
+    /// recovery (and cross-launch session restore) replays against the
+    /// just-saved file with an empty tail — the on-disk state is now the
+    /// baseline, and replaying the pre-save commands onto it would double-apply
+    /// them. Unlike ``clear()``, the undo/redo stacks are left intact so the user
+    /// can still undo past a save in-session; only the durable log is flattened.
+    /// A no-op when the stack has no journal.
+    public func checkpointSaved(sourceURL: URL?) {
+        guard journal != nil else { return }
+        try? journal?.reset()
+        try? journal?.append(.checkpoint(sourceURL: sourceURL))
+    }
+
     // MARK: Crash recovery
 
     /// Rebuilds the undo/redo stacks (and the stage content) by replaying WAL

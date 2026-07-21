@@ -82,10 +82,28 @@ public struct PassOrchestrator: Sendable, Equatable, Codable {
             guard review.renderPath != nil else { throw AdvanceError.continueRequiresRender }
             guard review.comparisonSheetPath != nil else { throw AdvanceError.continueRequiresComparisonSheet }
             guard let score = review.score else { throw AdvanceError.continueRequiresScore }
-            guard score >= threshold else {
-                throw AdvanceError.scoreBelowThreshold(score: score, threshold: threshold)
+            // Two gates fire independently, each where it is fair to compare:
+            //
+            // • Score gate (`enforcesScoreGate`): the agent's subjective shape
+            //   judgment. Exempt only for `blockout`, whose render is an
+            //   origin-collapsed massing (placement is `structural`'s job); the
+            //   shape is judgeable from `structural` onward.
+            //
+            // • Similarity floor (`enforcesSimilarityFloor`): the deterministic
+            //   silhouette/SSIM/luminance metric. Untextured geometry passes
+            //   (`blockout`, `structural`, `formRefinement`) render as uniform
+            //   clay, so a colour metric against a real photo is not a fair gate
+            //   there — the floor engages from `material` onward, where the
+            //   render carries colour.
+            //
+            // The full evidence bundle above (render + sheet + score) is always
+            // required, on every pass.
+            if current.enforcesScoreGate {
+                guard score >= threshold else {
+                    throw AdvanceError.scoreBelowThreshold(score: score, threshold: threshold)
+                }
             }
-            if similarityFloor > 0 {
+            if similarityFloor > 0, current.enforcesSimilarityFloor {
                 guard let measured = review.measuredSimilarity else {
                     throw AdvanceError.continueRequiresMeasuredSimilarity
                 }

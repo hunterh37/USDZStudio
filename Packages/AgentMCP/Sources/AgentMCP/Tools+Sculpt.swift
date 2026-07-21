@@ -218,7 +218,7 @@ public enum SculptTools {
     private static func registerAuthor(on server: MCPServer, store: SculptStore) {
         server.register(MCPTool(
             name: "sculpt_author_spec", group: .sculpt,
-            description: "Author (or replace) the ObjectSculptSpec: the component tree, materials, sockets, and detail inventory. Pass the full spec as JSON (SculptKit.ObjectSculptSpec shape). Resets the pass orchestrator to blockout and persists the spec to the work directory.",
+            description: "Author (or replace) the ObjectSculptSpec: the component tree, materials, sockets, detail inventory, and — for objects that realistically open/swing (case or chest lid, door, cap, drawer) — `joints` (revolute hinge / prismatic slider, each with an axis + a pivot point on the hinge line, targeting a component) so the interaction pass authors real articulation. Pass the full spec as JSON (SculptKit.ObjectSculptSpec shape). Resets the pass orchestrator to blockout and persists the spec to the work directory.",
             inputSchema: Schema.object([
                 "spec": .object(["type": "object", "description": "the full ObjectSculptSpec JSON"]),
             ], required: ["spec"])

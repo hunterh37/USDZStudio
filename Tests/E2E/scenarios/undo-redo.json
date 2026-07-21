@@ -1,0 +1,27 @@
+{
+  "name": "undo-redo",
+  "description": "Edit / undo / redo neutrality through the transactional command stack: a mutation raises the mesh count and undo depth, undo restores the original, redo re-applies it.",
+  "open": "../fixtures/cube.usda",
+  "strictness": "warn",
+  "steps": [
+    { "call": "describe_scene",
+      "expect": { "path": ["undoDepth"], "equals": 0 } },
+    { "call": "create_mesh",
+      "args": { "name": "Extra", "shape": "sphere", "radius": 0.5 },
+      "expect": { "isError": false } },
+    { "call": "describe_scene",
+      "expect": { "path": ["stats", "meshes"], "equals": 2 } },
+    { "call": "describe_scene",
+      "expect": { "path": ["undoDepth"], "equals": 1 } },
+    { "call": "undo",
+      "expect": { "isError": false } },
+    { "call": "describe_scene",
+      "expect": { "path": ["stats", "meshes"], "equals": 1 } },
+    { "call": "describe_scene",
+      "expect": { "path": ["canUndo"], "equals": false } },
+    { "call": "redo",
+      "expect": { "isError": false } },
+    { "call": "describe_scene",
+      "expect": { "path": ["stats", "meshes"], "equals": 2 } }
+  ]
+}

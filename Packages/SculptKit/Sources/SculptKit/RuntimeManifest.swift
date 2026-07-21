@@ -1,4 +1,5 @@
 import Foundation
+import MechanismKit
 
 /// The "action-ready" runtime layer img2threejs exposes on the built object as
 /// `root.userData.sculptRuntime`. Here it is serialized to JSON and authored
@@ -8,13 +9,16 @@ import Foundation
 public struct RuntimeManifest: Codable, Sendable, Equatable {
     public var nodes: [String]
     public var sockets: [Socket]
+    /// Rigid articulations (hinges/sliders) exposed to runtime tooling.
+    public var joints: [Joint]
     public var colliders: [Collider]
     public var destructionGroups: [DestructionGroup]
 
-    public init(nodes: [String], sockets: [Socket],
+    public init(nodes: [String], sockets: [Socket], joints: [Joint] = [],
                 colliders: [Collider], destructionGroups: [DestructionGroup]) {
         self.nodes = nodes
         self.sockets = sockets
+        self.joints = joints
         self.colliders = colliders
         self.destructionGroups = destructionGroups
     }
@@ -25,6 +29,7 @@ public struct RuntimeManifest: Codable, Sendable, Equatable {
         self.init(
             nodes: spec.allNodes.map(\.name),
             sockets: spec.sockets,
+            joints: spec.joints,
             colliders: spec.colliders,
             destructionGroups: spec.destructionGroups)
     }
@@ -37,6 +42,6 @@ public struct RuntimeManifest: Codable, Sendable, Equatable {
     }
 
     /// True when the manifest carries enough to drive runtime interaction:
-    /// at least one socket or collider.
-    public var isActionable: Bool { !sockets.isEmpty || !colliders.isEmpty }
+    /// at least one socket, collider, or joint.
+    public var isActionable: Bool { !sockets.isEmpty || !colliders.isEmpty || !joints.isEmpty }
 }

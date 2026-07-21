@@ -5,6 +5,7 @@ import USDCore
 import ViewportKit
 import ScriptingKit
 import DicyaninDesignSystem
+import SessionKit
 
 /// The editor shell: a top action bar, then outliner / viewport / inspector,
 /// with a collapsible validation drawer under the viewport and modal surfaces
@@ -57,6 +58,22 @@ public struct EditorShellView: View {
     let onOpenFile: () -> Void
     let onSave: () -> Void
     let onSaveAs: () -> Void
+
+    /// The app-session service, injected so the shell can capture its own
+    /// view state (camera, outliner expansion, panel visibility, playback) into
+    /// the session envelope — the parts the App can't see because they live in
+    /// this view's `@State` (specs/session-restoration.md). `nil` disables
+    /// capture (previews / tests).
+    let session: SessionController?
+
+    /// When restoring a previous session, the view state to reapply once this
+    /// shell appears — the shell-owned counterpart to the document-owned state
+    /// `SessionController.restore` already applied. `nil` for a normal open.
+    let restoredViewState: ViewState?
+
+    /// Observed to flush the session envelope when the window leaves the
+    /// foreground or the app quits.
+    @Environment(\.scenePhase) private var scenePhase
 
     @State private var searchText = ""
     @State private var collapsed: Set<PrimPath> = []
@@ -129,6 +146,12 @@ public struct EditorShellView: View {
     /// Owned/updated by the app; observed inside the activity panel subviews.
     let mcpActivity: MCPActivityModel?
 
+    /// The agent's reference image, shown in a panel above the inspector (nil
+    /// when the feature isn't wired, e.g. previews). Owned/updated by the app —
+    /// from the in-app MCP host or the on-launch hand-off file — and observed
+    /// inside the inspector column (specs/agent-live-editing.md).
+    let referenceImage: ReferenceImageModel?
+
     /// Persisted user preferences. When present, the viewport environment is
     /// seeded from the saved lighting on appear and re-saved as it's edited, so
     /// the environment survives relaunch (nil in previews/tests → transient).
@@ -153,6 +176,7 @@ public struct EditorShellView: View {
                 importingFileName: String? = nil,
                 tutorial: TutorialEngine? = nil,
                 mcpActivity: MCPActivityModel? = nil,
+                referenceImage: ReferenceImageModel? = nil,
                 settings: EditorSettings? = nil,
                 makeScriptExecutor: @escaping () -> (any ScriptExecuting)? = { nil },
                 onReimportFile: @escaping (URL) async -> Void = { _ in },
@@ -161,12 +185,15 @@ public struct EditorShellView: View {
                 onExport: @escaping (URL) async throws -> Void = { _ in },
                 onOpenFile: @escaping () -> Void = {},
                 onSave: @escaping () -> Void = {},
-                onSaveAs: @escaping () -> Void = {}) {
+                onSaveAs: @escaping () -> Void = {},
+                session: SessionController? = nil,
+                restoredViewState: ViewState? = nil) {
         self.document = document
         self.isImporting = isImporting
         self.importingFileName = importingFileName
         self.tutorial = tutorial
         self.mcpActivity = mcpActivity
+        self.referenceImage = referenceImage
         self.settings = settings
         self.makeScriptExecutor = makeScriptExecutor
         self.onReimportFile = onReimportFile
@@ -176,6 +203,62 @@ public struct EditorShellView: View {
         self.onOpenFile = onOpenFile
         self.onSave = onSave
         self.onSaveAs = onSaveAs
+        self.session = session
+        self.restoredViewState = restoredViewState
+    }
+
+    /// Panel/sheet visibility, as the stable keys the session envelope stores.
+    private var panelVisibility: [String: Bool] {
+        ["validation": showValidation, "diff": showDiff, "environment": showEnvironment,
+         "mcpActivity": showMCPActivity, "palette": showPalette]
+    }
+
+    /// Writes the full session envelope — document-owned state plus this view's
+    /// shell-owned state — so a relaunch restores the camera, outliner
+    /// expansion, panels, and playback alongside the scene and undo history.
+    private func captureSession() {
+        guard let document, let session else { return }
+        session.capture(
+            document,
+            collapsed: collapsed,
+            camera: ViewportCameraPose(camera: cameraLink.camera),
+            environment: environment,
+            panelVisibility: panelVisibility,
+            playbackPosition: playback.animationTime)
+    }
+
+    /// Reapplies shell-owned view state from a restored session (a no-op for a
+    /// normal open). Unknown/stale entries fall back to the current value.
+    private func applyRestoredViewState() {
+        guard let restoredViewState else { return }
+        if let snapshot = document?.snapshot {
+            collapsed = restoredViewState.restoredCollapsed(in: snapshot)
+        }
+        if let environmentSettings = restoredViewState.environment {
+            environment = environmentSettings
+        }
+        showValidation = restoredViewState.panelVisibility["validation"] ?? showValidation
+        showDiff = restoredViewState.panelVisibility["diff"] ?? showDiff
+        showEnvironment = restoredViewState.panelVisibility["environment"] ?? showEnvironment
+        showMCPActivity = restoredViewState.panelVisibility["mcpActivity"] ?? showMCPActivity
+        showPalette = restoredViewState.panelVisibility["palette"] ?? showPalette
+        if let pose = restoredViewState.restoredCameraPose {
+            // Reasserted through the same one-shot channel camera bookmarks use.
+            appliedBookmarkPose = pose
+        }
+    }
+
+    /// The right column: inspector alone, or — when the app wired a reference
+    /// model — the reference-image panel stacked above it. `InspectorColumn`
+    /// observes the model so the panel shows/hides as the agent sets or clears
+    /// the reference.
+    @ViewBuilder
+    private var inspectorColumn: some View {
+        if let referenceImage {
+            InspectorColumn(document: document, referenceImage: referenceImage)
+        } else {
+            InspectorView(document: document)
+        }
     }
 
     public var body: some View {
@@ -184,14 +267,30 @@ public struct EditorShellView: View {
             Divider().overlay(Palette.panelBorder.color)
             HSplitView {
                 outliner
-                    .frame(minWidth: 180, idealWidth: 210, maxWidth: 320)
+                    // maxHeight: .infinity keeps this column greedy on the
+                    // vertical axis. Without it the embedded List reports a
+                    // content-driven ideal height that grows per row and
+                    // propagates up through the HSplitView to the window root.
+                    .frame(minWidth: 180, idealWidth: 210, maxWidth: 320, maxHeight: .infinity)
                 centerColumn
                     .frame(minWidth: 480, maxWidth: .infinity, maxHeight: .infinity)
-                InspectorView(document: document)
-                    .frame(minWidth: 200, idealWidth: 230, maxWidth: 360)
+                inspectorColumn
+                    // Same rationale as the outliner: cap vertical growth so
+                    // the inspector's content height can't drive the window.
+                    .frame(minWidth: 200, idealWidth: 230, maxWidth: 360, maxHeight: .infinity)
             }
         }
         .background(Palette.windowBackground.color)
+        // Reapply a restored session's shell-owned view state when this shell
+        // first appears and whenever the document is swapped (initial: true).
+        .onChange(of: document.map(ObjectIdentifier.init), initial: true) {
+            applyRestoredViewState()
+        }
+        // Flush the session envelope (including this view's state) on
+        // background/quit; the WAL already captured edits per command.
+        .onChange(of: scenePhase) { _, phase in
+            if phase != .active { captureSession() }
+        }
         .sheet(item: $activeSheet) { sheet in
             switch sheet {
             case .convert: ConversionSheet(onClose: dismissSheet)
