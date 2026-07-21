@@ -131,6 +131,15 @@ import USDCore
             #"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}"#.utf8))!
         #expect(initResponse["result"]["protocolVersion"].stringValue == MCPServer.protocolVersion)
         #expect(initResponse["result"]["serverInfo"]["name"].stringValue == "openusdz-agent")
+        // The server advertises capability guidance the client folds into the
+        // system prompt — including proactively hinging objects that open.
+        let instructions = initResponse["result"]["instructions"].stringValue ?? ""
+        #expect(instructions.contains("create_joint"))
+        #expect(instructions == AgentInstructions.text)
+        // A server with no instructions set omits the field entirely.
+        let bare = MCPServer()
+        let bareInit = await bare.handle(request: JSONRPCRequest(id: .number(9), method: "initialize"))!
+        #expect(bareInit["result"]["instructions"] == .null)
 
         let ping = await server.handle(request: JSONRPCRequest(id: .number(2), method: "ping"))!
         #expect(ping["result"] == .object([:]))

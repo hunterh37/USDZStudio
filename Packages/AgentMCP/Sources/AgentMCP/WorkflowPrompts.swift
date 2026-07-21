@@ -55,7 +55,11 @@ public enum WorkflowPrompts {
             when you need confirmation rather than judgment.
             5. Every mutation returns an `undoToken` — snapshot one before risky steps and \
             roll back with `undo_to { token }` instead of hand-reversing mistakes.
-            6. Finish with `check_compliance {}` and `save {}`.
+            6. If the object realistically OPENS/CLOSES/SWINGS (a case or chest lid, a door, a \
+            laptop screen, a cap, a drawer), give the moving part a real hinge with `create_joint` \
+            (revolute) or slider (prismatic) and verify it with `set_joint_state` — don't ship it \
+            fused or fake the motion. See the `author-hinged-object` prompt.
+            7. Finish with `check_compliance {}` and `save {}`.
             """))
 
         server.register(MCPPrompt(
@@ -74,7 +78,10 @@ public enum WorkflowPrompts {
             materials, and a detailInventory whose every item is mapped to a component or material. \
             Declare each non-root component's `attachment` (weld/socket/pin) so nothing floats; \
             add `lights` (real UsdLux) and `lodTiers` for the lighting/optimization passes; give \
-            high-value details a `minScore`.
+            high-value details a `minScore`. If the object realistically opens/swings (case or \
+            chest lid, door, cap, drawer), declare its `joints` (revolute hinge / prismatic slider, \
+            with an axis + a pivot point on the hinge line) so the interaction pass authors real \
+            articulation — see the `author-hinged-object` prompt.
             3. `sculpt_validate_spec { strictQuality: true }` — if it returns an error, fix the \
             listed problems in the spec and re-author until it passes. No build happens until it does.
             4. For each locked pass, in order (blockout → structural → formRefinement → material → \

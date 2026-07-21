@@ -92,6 +92,7 @@ public enum AgentMCPServer {
         })
 
         WorkflowPrompts.register(on: server)
+        server.instructions = AgentInstructions.text
 
         // Announce the session to any attached activity observer, now that the
         // full tool set is registered (so toolCount/groups are final).

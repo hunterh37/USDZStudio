@@ -69,6 +69,11 @@ public final class MCPServer: @unchecked Sendable {
 
     public let serverName: String
     public let serverVersion: String
+    /// Server-level guidance surfaced to the model via the `initialize`
+    /// response's `instructions` field (MCP 2025-06-18). Clients fold this into
+    /// the agent's system prompt, so it is where cross-cutting "reach for this
+    /// capability when appropriate" advice belongs. Nil → field omitted.
+    public var instructions: String?
     private var tools: [MCPTool] = []
     private var resources: [MCPResource] = []
     private var prompts: [MCPPrompt] = []
@@ -141,7 +146,7 @@ public final class MCPServer: @unchecked Sendable {
     private func dispatch(_ request: JSONRPCRequest) async throws -> JSONValue {
         switch request.method {
         case "initialize":
-            return .object([
+            var result: [String: JSONValue] = [
                 "protocolVersion": .string(Self.protocolVersion),
                 "capabilities": .object([
                     "tools": .object([:]),
@@ -152,7 +157,9 @@ public final class MCPServer: @unchecked Sendable {
                     "name": .string(serverName),
                     "version": .string(serverVersion),
                 ]),
-            ])
+            ]
+            if let instructions { result["instructions"] = .string(instructions) }
+            return .object(result)
 
         case "ping":
             return .object([:])
