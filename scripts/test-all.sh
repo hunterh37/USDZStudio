@@ -15,11 +15,13 @@ PACKAGES=(
   Packages/QuickLookKit
   Packages/USDBridge
   Packages/MeshKit
+  Packages/MechanismKit
   Packages/EditingKit
   Packages/ValidationKit
   Packages/ConversionKit
   Packages/ScriptingKit
   Packages/SculptKit
+  Packages/SessionKit
   Packages/AgentMCP
   Packages/ViewportKit
   Packages/EditorUI

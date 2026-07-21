@@ -51,6 +51,10 @@ The USD-native analog of img2threejs's spec (`ObjectSculptSpec.swift`):
 - `DetailItem` gains an optional `minScore` — the per-feature acceptance
   threshold enforced by the feature-acceptance gate.
 - `sockets: [Socket]` — named attachment points for rigging/props.
+- `joints: [Joint]` — rigid articulations (hinges/sliders) that make a component
+  open/close/swing (lid, door, cap, drawer). Each `target` must name a component;
+  schema + geometry checks delegate to `MechanismKit`. Counts as an action-ready
+  runtime handle. See `specs/articulation-mechanisms.md`.
 - `colliders: [Collider]` — runtime collision volumes (`box|sphere|capsule|convexHull`)
   wrapping a named component. Part of the action-ready runtime layer.
 - `destructionGroups: [DestructionGroup]` — named component groups that break
@@ -93,7 +97,7 @@ spec fields are absent):
 | material | `create_material` for each painted node, plus the extra PBR channels (roughness/metallic scalars, emissive, and any texture maps + normalScale) as shader inputs on the created surface. |
 | surface | Authors a projected-texture / de-light descriptor (`sculptProjectedTexture` string attribute on the root) when the spec declares a `surfaceProjection` targeting a real component. |
 | lighting | Authors a real `UsdLux` light prim (with `inputs:intensity` + `inputs:color`) plus its placement for each declared `LightSpec`, under the sculpt root. |
-| interaction | Authors the action-ready runtime manifest (`sculptRuntime` string attribute on the root) when the spec exposes a socket or collider. |
+| interaction | Authors the action-ready runtime manifest (`sculptRuntime` string attribute on the root) when the spec exposes a socket, collider, or joint. |
 | optimization | Welds coincident vertices on each geometry leaf when the spec declares an `optimization` weld (a small epsilon that removes split/seam duplicates — MeshKit's welder refuses to collapse a mesh with nothing coincident), and authors the LOD manifest (`sculptLOD`) when it declares `lodTiers`. |
 
 `formRefinement` and `optimization` perform genuine geometry surgery through the

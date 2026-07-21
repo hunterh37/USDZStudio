@@ -287,6 +287,40 @@ struct SessionStoreTests {
         #expect(store.recoverableSessions().isEmpty)
     }
 
+    @Test func checkpointSavedFlattensLogButKeepsUndoHistory() throws {
+        let a = richStage()
+        let journal = InMemoryCommandJournal()
+        let stack = CommandStack(stage: a, journal: journal)
+        try stack.run(cmd("Hide", [.setActive(path: bodyPath, isActive: false)]))
+        stack.checkpointSaved(sourceURL: URL(fileURLWithPath: "/tmp/saved.usda"))
+        // The durable log is flattened to a single fresh checkpoint...
+        let records = try journal.readAll()
+        #expect(records.count == 1)
+        #expect(records.first == .checkpoint(sourceURL: URL(fileURLWithPath: "/tmp/saved.usda")))
+        // ...but the in-memory undo history survives so ⌘Z still works post-save.
+        #expect(stack.canUndo)
+    }
+
+    @Test func checkpointSavedIsNoOpWithoutJournal() throws {
+        let stack = CommandStack(stage: richStage())   // no journal
+        try stack.run(cmd("Hide", [.setActive(path: bodyPath, isActive: false)]))
+        stack.checkpointSaved(sourceURL: nil)          // must not crash
+        #expect(stack.canUndo)
+    }
+
+    @Test func journalForPlanReopensExistingWAL() throws {
+        let store = tempStore()
+        defer { try? FileManager.default.removeItem(at: store.root) }
+        let session = try store.startSession(for: nil)
+        try session.journal.append(.checkpoint(sourceURL: nil))
+        try session.journal.append(.command(label: "A", forward: [], inverse: []))
+        let plan = try #require(store.recoverableSessions().first)
+        // Reopening the plan's WAL keeps appending to the same log.
+        let journal = try store.journal(for: plan)
+        try journal.append(.undo)
+        #expect(try journal.readAll().count == 3)
+    }
+
     @Test func missingRootYieldsNoSessions() {
         let store = SessionStore(root: FileManager.default.temporaryDirectory
             .appendingPathComponent("does-not-exist-\(UUID())"))

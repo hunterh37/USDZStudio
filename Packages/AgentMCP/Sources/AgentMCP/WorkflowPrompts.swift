@@ -55,7 +55,11 @@ public enum WorkflowPrompts {
             when you need confirmation rather than judgment.
             5. Every mutation returns an `undoToken` — snapshot one before risky steps and \
             roll back with `undo_to { token }` instead of hand-reversing mistakes.
-            6. Finish with `check_compliance {}` and `save {}`.
+            6. If the object realistically OPENS/CLOSES/SWINGS (a case or chest lid, a door, a \
+            laptop screen, a cap, a drawer), give the moving part a real hinge with `create_joint` \
+            (revolute) or slider (prismatic) and verify it with `set_joint_state` — don't ship it \
+            fused or fake the motion. See the `author-hinged-object` prompt.
+            7. Finish with `check_compliance {}` and `save {}`.
             """))
 
         server.register(MCPPrompt(
@@ -78,7 +82,10 @@ public enum WorkflowPrompts {
             Declare each non-root component's `attachment` (weld/socket/pin) so nothing floats; \
             add `refinements` (real inset ops) for the formRefinement pass, `lights` (real UsdLux), \
             `lodTiers` and an `optimization` weld for the optimization pass; give high-value \
-            details a `minScore`.
+            details a `minScore`. If the object realistically opens/swings (case or chest lid, \
+            door, cap, drawer), declare its `joints` (revolute hinge / prismatic slider, with an \
+            axis + a pivot point on the hinge line) so the interaction pass authors real \
+            articulation — see the `author-hinged-object` prompt.
             3. `sculpt_validate_spec { strictQuality: true }` — if it returns an error, fix the \
             listed problems in the spec and re-author until it passes. No build happens until it does.
             4. For each locked pass, in order (blockout → structural → formRefinement → material → \
@@ -98,6 +105,34 @@ public enum WorkflowPrompts {
                   - `requestInput` pauses for the user; `stop` halts.
             5. Check progress any time with `sculpt_status {}` (shows the last measured similarity \
             and the floor). Finish with `check_compliance {}` and `save {}` once complete.
+            """))
+
+        server.register(MCPPrompt(
+            name: "author-hinged-object",
+            description: "Make a part open, close, or swing about a hinge/slider (lid, door, cap, drawer).",
+            text: """
+            Give a part a working hinge or slider so it opens, closes, or swings — an \
+            AirPods-case lid, a chest lid, a door, a bottle cap, a drawer. This authors proper \
+            Xform ops (PRD §5.3 "open the door"), RealityKit/QuickLook-clean, fully undoable.
+            1. Identify the MOVING part (a prim) with `query_scene` / `get_prim`, and read its \
+            world bbox — you place the hinge on one of its edges.
+            2. Pick the hinge geometry, both in the part's PARENT local space:
+               - `axis`: the direction the hinge line runs (a lid that flips up about its rear \
+            edge hinges around the X axis → [1, 0, 0]).
+               - `pivot`: a point ON that hinge line (the midpoint of the rear-top edge), NOT the \
+            part's centre — this is what makes it swing about the edge instead of spinning in place.
+            3. `create_joint { target, kind: "revolute", axis, pivot, openValue: 105 }` \
+            (degrees). For a drawer use `kind: "prismatic"` and `openValue` in scene units along \
+            the axis. It inserts a `<part>_pivot` Xform and leaves the part exactly where it was \
+            when closed; it returns `pivotPath` and the state names ["closed", "open"].
+            4. Preview: `set_joint_state { target: <pivotPath>, state: "open" }` then \
+            `render_views {}`; check the part swings about the intended edge. Flip back with \
+            `state: "closed"`, or scrub with `set_joint_state { target, value: 45 }`.
+            5. `validate {}` (zero new errors) and `check_compliance { profile: "arkit" }` \
+            (`isExportAllowed` must stay true — the hinge is standard Xform ops). Then `save {}`.
+            The default profile ships the part in its closed pose with the hinge described on the \
+            pivot for runtime tooling; switchable USD variants and baked swing animation are \
+            full-USD-profile enhancements.
             """))
 
         server.register(MCPPrompt(

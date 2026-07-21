@@ -18,6 +18,7 @@ let package = Package(
         .package(path: "../ConversionKit"),
         .package(path: "../ScriptingKit"),
         .package(path: "../MeshKit"),
+        .package(path: "../MechanismKit"),
         .package(path: "../SculptKit"),
     ],
     targets: [
@@ -25,7 +26,7 @@ let package = Package(
             name: "AgentMCP",
             dependencies: [
                 "USDCore", "USDBridge", "EditingKit", "ValidationKit",
-                "ConversionKit", "ScriptingKit", "MeshKit", "SculptKit",
+                "ConversionKit", "ScriptingKit", "MeshKit", "MechanismKit", "SculptKit",
             ],
             path: "Sources/AgentMCP"),
         .testTarget(

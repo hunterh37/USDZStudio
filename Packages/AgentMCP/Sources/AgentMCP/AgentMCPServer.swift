@@ -46,6 +46,7 @@ public enum AgentMCPServer {
 
         ReadTools.register(on: server, session: session)
         MutateTools.register(on: server, session: session)
+        JointTools.register(on: server, session: session)
         VerifyTools.register(on: server, session: session)
         RenderTools.register(
             on: server, session: session,
@@ -91,6 +92,7 @@ public enum AgentMCPServer {
         })
 
         WorkflowPrompts.register(on: server)
+        server.instructions = AgentInstructions.text
 
         // Announce the session to any attached activity observer, now that the
         // full tool set is registered (so toolCount/groups are final).
