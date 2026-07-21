@@ -128,7 +128,7 @@ public struct EditorShellView: View {
 
 
     private enum Sheet: String, Identifiable {
-        case convert, batch, scripts, library, console, export
+        case convert, batch, scripts, library, console, export, recolor
         var id: String { rawValue }
     }
 
@@ -136,7 +136,7 @@ public struct EditorShellView: View {
     /// menu shortcuts and toolbar buttons drive the same state.
     public enum MenuCommand: String {
         case convert, batch, scripts, library, console, validate, mcpActivity, export, sculptDemo
-        case commandPalette, diff
+        case commandPalette, diff, recolor
         public static let notification = Notification.Name("EditorUI.MenuCommand")
     }
 
@@ -202,6 +202,8 @@ public struct EditorShellView: View {
                 } else {
                     unavailableSheet("The Python console needs an open document and a Python runtime.")
                 }
+            case .recolor:
+                RecolorPanel(document: document, onClose: dismissSheet)
             case .export:
                 ExportPanel(sourceURL: modelURL,
                             // Re-evaluated per profile change against the live
@@ -234,6 +236,7 @@ public struct EditorShellView: View {
                 }
             case .commandPalette: openCommandPalette()
             case .diff: if document != nil { showDiff.toggle() }
+            case .recolor: if document != nil { activeSheet = .recolor }
             }
         }
         .overlay {
@@ -318,6 +321,9 @@ public struct EditorShellView: View {
             action("view.diff", showDiff ? "Hide Changes" : "Show Changes", "View",
                    shortcut: "⇧⌘D", keywords: ["diff", "compare", "changes"],
                    enabled: hasDocument) { if document != nil { showDiff.toggle() } },
+            action("edit.recolor", "Recolor…", "Edit", shortcut: "⇧⌘R",
+                   keywords: ["color", "colour", "material", "paint", "rebrand"],
+                   enabled: hasDocument) { if document != nil { activeSheet = .recolor } },
         ]
     }
 
@@ -365,6 +371,8 @@ public struct EditorShellView: View {
             }
             Divider().frame(height: 16).overlay(Palette.borderSubtle.color)
             actionButton("Library", systemImage: "square.grid.2x2") { activeSheet = .library }
+            actionButton("Recolor", systemImage: "paintpalette") { activeSheet = .recolor }
+                .disabled(document == nil)
             Spacer()
             if let mcpActivity {
                 MCPStatusAccessory(model: mcpActivity, showActivity: $showMCPActivity)

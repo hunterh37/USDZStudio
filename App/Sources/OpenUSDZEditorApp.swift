@@ -147,6 +147,9 @@ struct OpenUSDZEditorApp: App {
             CommandMenu("Convert") {
                 Button("Library…") { postMenu(.library) }
                     .keyboardShortcut("l", modifiers: [.command, .shift])
+                Button("Recolor…") { postMenu(.recolor) }
+                    .keyboardShortcut("r", modifiers: [.command, .shift])
+                    .disabled(document == nil)
                 Divider()
                 Button("Convert File…") { postMenu(.convert) }
                     .keyboardShortcut("k", modifiers: [.command, .shift])

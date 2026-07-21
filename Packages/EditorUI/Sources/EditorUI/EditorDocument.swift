@@ -770,6 +770,32 @@ public final class EditorDocument {
         return result
     }
 
+    /// Every distinct material in the stage, resolved once — the scope the
+    /// stage-wide recolor panel operates over. Walks from each top-level root so
+    /// per-part materials all surface, de-duplicated by the resolver.
+    public var allMaterials: [ResolvedMaterial] {
+        let roots = snapshot.allPrims().filter { $0.path.depth == 1 }.map(\.path)
+        return materials(under: roots)
+    }
+
+    /// The base albedo of a material: its authored `diffuseColor` when present,
+    /// else the UsdPreviewSurface fallback. Used to seed recolor swatches.
+    public func diffuseColor(of material: ResolvedMaterial) -> [Double] {
+        let input = PreviewSurfaceInput.named("diffuseColor")!
+        if case let .vector(v)? = materialInput(input, on: material), v.count == 3 {
+            return v
+        }
+        return [0.18, 0.18, 0.18]
+    }
+
+    /// Recolors a single material's base albedo, undoably. Convenience over
+    /// ``recolorMaterials(_:input:to:)`` for the per-material recolor panel rows.
+    @discardableResult
+    public func recolor(_ material: ResolvedMaterial, to rgb: [Double]) -> Bool {
+        recolorMaterials([material], input: PreviewSurfaceInput.named("diffuseColor")!,
+                         to: .vector(rgb))
+    }
+
     /// Creates a new UsdPreviewSurface material and binds it to `path`, undoably.
     /// Because bindings inherit down namespace, binding on a model's root gives
     /// every part under it the material — the "this model has no material yet,
