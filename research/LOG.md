@@ -9,5 +9,5 @@ build) · `building` (a PR is implementing it) · `landed` (shipped) · `superse
 
 | Date | Slug | Question (short) | Recommendation (one line) | Target module(s) | Roadmap slot | Status |
 |---|---|---|---|---|---|---|
-| 2026-07-21 | `lattice-deformer` | How to build a lattice/FFD cage deformer (control-point box gizmo) RealityKit-compatibly | Pure-Swift trivariate FFD in MeshKit, cage gizmo via the shared gizmo seam, bake deformed `points` on commit (no USD lattice schema) | MeshKit, EditingKit, ViewportKit, EditorUI | Phase 8 (mesh modeling), extends mesh-editing §Live vertex edit | planned |
+| 2026-07-21 | `lattice-deformer` | How to build a lattice/FFD cage deformer (control-point box gizmo) RealityKit-compatibly | Pure-Swift trivariate FFD in MeshKit, cage gizmo via the shared gizmo seam, bake deformed `points` on commit (no USD lattice schema) | MeshKit, EditingKit, ViewportKit, EditorUI | Phase 8 (mesh modeling), extends mesh-editing §Live vertex edit | building (PR #108) |
 | _example_ | `wireframe-overlay` | How to render wireframe-on-shaded in a RealityKit viewport | Metal line-overlay pass keyed off the debug-mode material swap | ViewportKit | Milestone 2 (viewer surface) | _example row — delete_ |
