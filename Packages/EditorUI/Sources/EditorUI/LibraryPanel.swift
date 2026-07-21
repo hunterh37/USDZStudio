@@ -129,16 +129,29 @@ struct LibraryPanel: View {
 
     private func insertSelected() {
         guard let entry = selectedEntry else { return }
+        status = Self.performInsert(entry, document: document,
+                                    createDocument: onCreateDocument, dismiss: onClose)
+    }
+
+    /// Inserts `entry` into the open document (creating a scratch scene when
+    /// none is open) and returns the status line to display. On success it also
+    /// fires `dismiss`, closing the sheet so keyboard focus returns to the
+    /// editor — otherwise the library sheet stays key and swallows the ⇥ the
+    /// user presses next to enter edit mode on the object they just added.
+    @MainActor
+    static func performInsert(_ entry: ShapeEntry,
+                              document: EditorDocument?,
+                              createDocument: () -> EditorDocument?,
+                              dismiss: () -> Void) -> String {
         // No file open yet? Start a fresh empty scene so the primitive has
         // somewhere to land, instead of silently doing nothing.
-        guard let document = document ?? onCreateDocument() else {
-            status = "Couldn’t create a scene to add \(entry.name) to."
-            return
+        guard let document = document ?? createDocument() else {
+            return "Couldn’t create a scene to add \(entry.name) to."
         }
         if let error = LibraryInsertion.insert(entry, into: document) {
-            status = error
-        } else {
-            status = "Added \(entry.name) to the scene."
+            return error
         }
+        dismiss()
+        return "Added \(entry.name) to the scene."
     }
 }
