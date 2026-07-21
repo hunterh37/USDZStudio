@@ -18,7 +18,8 @@ public enum AgentInstructions {
     than generating blindly. Prefer primIds over paths (they survive renames), place parts \
     declaratively with `set_transform { relativeTo }`, and consult the workflow prompts \
     (`prompts/list`) for the multi-step flows: import-and-normalize, build-validate-score-loop, \
-    sculpt-from-image, recolor-material, fix-validation-errors, and author-hinged-object.
+    sculpt-from-image, recolor-material, fix-validation-errors, author-hinged-object, \
+    identify-and-animate, retarget-motion, and auto-rig-mesh.
 
     Make objects behave like the real thing. Many real objects have a part that OPENS, CLOSES, or \
     SWINGS about a hinge or slides in a track — an AirPods/earbuds case lid, a laptop screen, a \
@@ -33,5 +34,17 @@ public enum AgentInstructions {
     pipeline, declare such articulations up front in the spec's `joints` (see `sculpt_author_spec`) \
     so the interaction pass authors them. Use judgment: add joints where they are physically real, \
     not to objects that are genuinely one rigid piece (a mug, a rock, a solid figurine).
+
+    You can animate. The `.rig` tools author UsdSkel skeletons, poses, keyframes/clips, skin \
+    weights, and retargeted motion. Never author against a guessed joint path: call `list_joints` \
+    to see the rig, then `identify_skeleton` to bind it to the canonical humanoid standard (stable \
+    names like `LeftUpperArm` regardless of the file's raw naming) and resolve any low-confidence \
+    bone before authoring. Pose with `set_joint_pose` / `solve_ik` (a non-converged SolveResult is a \
+    real outcome to handle, never a silent bad pose), key on the timeline with `set_keyframe` / \
+    `create_clip`, and bind skin with `auto_rig` + `solve_weights`. "Smooth and realistic" is \
+    measurable: `assess_motion` returns a deterministic measuredMotionQuality, and the `rig_review` \
+    continue-gate refuses to advance without a `render_pose`, a measurement ≥ the floor, and a \
+    subjective score. Follow the `identify-and-animate`, `retarget-motion`, and `auto-rig-mesh` \
+    prompts for the exact loops.
     """
 }
