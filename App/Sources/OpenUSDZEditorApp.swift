@@ -77,6 +77,7 @@ struct OpenUSDZEditorApp: App {
                             importingFileName: importingFileName,
                             tutorial: tutorial,
                             mcpActivity: mcp.model,
+                            referenceImage: mcp.referenceModel,
                             settings: settings,
                             makeScriptExecutor: {
                                 ProcessScriptExecutor(
@@ -169,6 +170,10 @@ struct OpenUSDZEditorApp: App {
                     return true
                 }
         }
+        // Size the window from the content's *minimum*, not its ideal, size.
+        // Guards against any panel's content-driven ideal height (e.g. the
+        // outliner List growing per row) pushing the window root larger.
+        .windowResizability(.contentMinSize)
         .commands {
             CommandGroup(replacing: .newItem) {
                 Button("Open…") { presentOpenPanel() }

@@ -155,6 +155,12 @@ public enum SculptBuildRunner {
         _ = authorAttribute(Attribute(name: "points", value: .float3Array(outPoints)), on: geoPath, to: document)
         _ = authorAttribute(Attribute(name: "faceVertexCounts", value: .intArray(out.faceVertexCounts)), on: geoPath, to: document)
         _ = authorAttribute(Attribute(name: "faceVertexIndices", value: .intArray(out.faceVertexIndices)), on: geoPath, to: document)
+        // Recompute normals for the deformed topology so shading stays correct
+        // rather than pointing at the pre-transform surface (sculpt-accuracy P5).
+        let outNormals = VertexNormals.smoothFlat(for: out)
+        if !outNormals.isEmpty {
+            _ = authorAttribute(Attribute(name: "normals", value: .float3Array(outNormals)), on: geoPath, to: document)
+        }
         return xformPath.description
     }
 
@@ -245,14 +251,20 @@ public enum SculptBuildRunner {
         var points: [Double] = []
         points.reserveCapacity(flat.points.count * 3)
         for p in flat.points { points += [p.x, p.y, p.z] }
-        let geo = Prim(
-            path: meshPath, typeName: "Mesh",
-            attributes: [
-                Attribute(name: "points", value: .float3Array(points)),
-                Attribute(name: "faceVertexCounts", value: .intArray(flat.faceVertexCounts)),
-                Attribute(name: "faceVertexIndices", value: .intArray(flat.faceVertexIndices)),
-                Attribute(name: "subdivisionScheme", value: .token("none"), isUniform: true),
-            ])
+        // Author real per-vertex normals at build time so freshly-sculpted meshes
+        // shade smoothly in RealityKit/QuickLook instead of falling back to
+        // faceted shading (sculpt-accuracy P5 / MissingNormalsRule).
+        var attributes = [
+            Attribute(name: "points", value: .float3Array(points)),
+            Attribute(name: "faceVertexCounts", value: .intArray(flat.faceVertexCounts)),
+            Attribute(name: "faceVertexIndices", value: .intArray(flat.faceVertexIndices)),
+            Attribute(name: "subdivisionScheme", value: .token("none"), isUniform: true),
+        ]
+        let normals = VertexNormals.smoothFlat(for: flat)
+        if !normals.isEmpty {
+            attributes.append(Attribute(name: "normals", value: .float3Array(normals)))
+        }
+        let geo = Prim(path: meshPath, typeName: "Mesh", attributes: attributes)
         return Prim(
             path: xformPath, typeName: "Xform",
             attributes: [Attribute(name: transformAttributeName, value: .matrix4(Matrix4.identity))],

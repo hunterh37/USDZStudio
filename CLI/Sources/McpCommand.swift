@@ -129,6 +129,18 @@ enum McpCommand {
             session.saveExecutor = saveExecutor
             session.bridgeExecutor = openExecutor
 
+            // No editor is running (we didn't relay above), so persist the
+            // agent's reference image to the hand-off file: an editor launched
+            // after this session picks it up on start and shows it in the
+            // reference panel. Clear any stale record from a prior session so
+            // the panel reflects this one (specs/agent-live-editing.md).
+            let referenceURL = MCPActivityPaths.referenceURL()
+            ReferenceImage.remove(at: referenceURL)
+            session.onReferenceImageChange = { image in
+                if let image { try? image.write(to: referenceURL) }
+                else { ReferenceImage.remove(at: referenceURL) }
+            }
+
             let locator = PythonRuntimeLocator()
             // `render_views` renders natively by default (SceneKit/Model I/O — the
             // same Apple frameworks the app's viewport uses), so it returns real
