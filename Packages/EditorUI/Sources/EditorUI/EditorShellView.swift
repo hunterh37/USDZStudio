@@ -704,6 +704,11 @@ public struct EditorShellView: View {
                 onPickFace: { [weak document] index, additive in
                     document?.pickMeshFace(index: index, additive: additive)
                 },
+                // Blender-style Tab: toggle edit mode when the viewport has
+                // focus. Reliable here (the viewport view catches the keyDown);
+                // the hidden `editModeToggleShortcut` button is the fallback for
+                // when focus sits in another pane.
+                onToggleEditMode: { [weak document] in document?.toggleMeshEditMode() },
                 hoverPreview: document?.meshEdit?.hoverPreviewEnabled ?? false,
                 onHoverFace: { [weak document] index in document?.hoverMeshFace(index: index) },
                 extrudeGizmo: document?.meshEditExtrudeGizmo,

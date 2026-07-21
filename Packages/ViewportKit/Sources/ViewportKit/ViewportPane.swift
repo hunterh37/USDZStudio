@@ -76,6 +76,9 @@ public struct ViewportPane: View {
     /// `editedMesh` is active. The second parameter is `true` when ⇧ was held
     /// (additive selection: toggle the face into/out of the current set).
     let onPickFace: ((Int, Bool) -> Void)?
+    /// Blender-style Tab toggle: fires when Tab is pressed while the viewport
+    /// has keyboard focus. Wired by the host to `document.toggleMeshEditMode()`.
+    let onToggleEditMode: (() -> Void)?
     /// Live hover preview: highlight the face under the cursor (the one a
     /// click / op would target). Reported up so the HUD can name it.
     let hoverPreview: Bool
@@ -134,6 +137,7 @@ public struct ViewportPane: View {
                 scene: ViewportScene? = nil,
                 editedMesh: EditedMeshData? = nil,
                 onPickFace: ((Int, Bool) -> Void)? = nil,
+                onToggleEditMode: (() -> Void)? = nil,
                 hoverPreview: Bool = false,
                 onHoverFace: ((Int?) -> Void)? = nil,
                 extrudeGizmo: ExtrudeGizmoDescriptor? = nil,
@@ -155,6 +159,7 @@ public struct ViewportPane: View {
         self.scene = scene
         self.editedMesh = editedMesh
         self.onPickFace = onPickFace
+        self.onToggleEditMode = onToggleEditMode
         self.hoverPreview = hoverPreview
         self.onHoverFace = onHoverFace
         self.extrudeGizmo = extrudeGizmo
@@ -178,6 +183,7 @@ public struct ViewportPane: View {
                                   livePrimPaths: livePrimPaths, sceneRevision: sceneRevision,
                                   scene: scene,
                                   editedMesh: editedMesh, onPickFace: onPickFace,
+                                  onToggleEditMode: onToggleEditMode,
                                   hoverPreview: hoverPreview, onHoverFace: onHoverFace,
                                   extrudeGizmo: extrudeGizmo, onGizmoDrag: onGizmoDrag,
                                   translateGizmo: translateGizmo,
@@ -267,6 +273,7 @@ struct ViewportRepresentable: NSViewRepresentable {
     let scene: ViewportScene?
     let editedMesh: EditedMeshData?
     let onPickFace: ((Int, Bool) -> Void)?
+    let onToggleEditMode: (() -> Void)?
     let hoverPreview: Bool
     let onHoverFace: ((Int?) -> Void)?
     let extrudeGizmo: ExtrudeGizmoDescriptor?
@@ -302,6 +309,10 @@ struct ViewportRepresentable: NSViewRepresentable {
         context.coordinator.onStats = { stats = $0 }
         context.coordinator.onError = { loadError = $0 }
         view.interactionMode = mode
+        // Bare-Tab hotkey lives on the first responder (the viewport view), not
+        // the SwiftUI key-equivalent fallback which AppKit's key-view loop
+        // pre-empts. Re-set each update so it tracks the current host closure.
+        view.onToggleEditMode = onToggleEditMode
         context.coordinator.load(url: modelURL)
         context.coordinator.applyScene(scene)
         if let livePrimPaths {
@@ -1725,6 +1736,12 @@ final class InteractiveARView: ARView {
     var onPan: ((Double, Double) -> Void)?
     var onDolly: ((Double) -> Void)?
     var onFrame: (() -> Void)?
+    /// Tab toggles object ⇄ mesh edit mode (Blender muscle memory). Handled here
+    /// in `keyDown` — while the viewport is first responder AppKit consumes bare
+    /// Tab for its key-view loop before it ever reaches the SwiftUI
+    /// `keyboardShortcut(.tab)` fallback, so the hotkey has to be caught on the
+    /// responder that actually has focus. `nil` outside edit-capable hosts.
+    var onToggleEditMode: (() -> Void)?
     /// Component picking in edit mode: fires with the click point in top-left
     /// view coordinates when a press releases without dragging. The Bool is
     /// `true` when ⇧ was held (additive multi-select).
@@ -1835,6 +1852,13 @@ final class InteractiveARView: ARView {
     }
 
     override func keyDown(with event: NSEvent) {
+        // Tab (keyCode 48) toggles edit mode. Match on keyCode rather than the
+        // character so a remapped field-editor Tab can't slip past, and swallow
+        // the event (no `super`) so AppKit doesn't also run its key-view loop.
+        if event.keyCode == 48, let onToggleEditMode {
+            onToggleEditMode()
+            return
+        }
         switch event.charactersIgnoringModifiers?.lowercased() {
         case "f": onFrame?()
         default: super.keyDown(with: event)
