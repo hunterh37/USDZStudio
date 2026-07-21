@@ -20,10 +20,17 @@ public enum BuildStep: Sendable, Equatable {
     /// carrying the full channel set (scalars + optional texture maps) so the
     /// executor authors real image channels, not just a flat colour.
     case createMaterial(targetPath: String, material: MaterialSpec)
+    /// Create a real `UsdLux` light of `kind` under the sculpt root. Emitted by
+    /// the lighting pass; the executor authors the typed light prim + channels.
+    case createLight(name: String, parentPath: String?, kind: LightSpec.Kind,
+                     intensity: Double, color: [Double])
     /// Author a projected-texture / de-light descriptor (camera pose + target
     /// UV set) as a `sculptProjectedTexture` string attribute on the sculpt
     /// root. Emitted by the surface pass; the executor realizes the projection.
     case projectTexture(rootPath: String, descriptorJSON: String)
+    /// Author the LOD manifest (tiers) as a `sculptLOD` string attribute on the
+    /// sculpt root. Emitted by the optimization pass.
+    case authorLOD(rootPath: String, manifestJSON: String)
     /// Author the action-ready runtime manifest (nodes/sockets/colliders/
     /// destruction groups) as a custom `sculptRuntime` string attribute on the
     /// sculpt root prim.
@@ -55,11 +62,45 @@ public enum BuildPlanner {
             return materialSteps(spec)
         case .surface:
             return surfaceSteps(spec)
+        case .lighting:
+            return lightingSteps(spec)
         case .interaction:
             return runtimeSteps(spec)
-        case .formRefinement, .lighting, .optimization:
+        case .optimization:
+            return optimizationSteps(spec)
+        case .formRefinement:
             return []
         }
+    }
+
+    // MARK: - Lighting: author real UsdLux lights
+
+    static func lightingSteps(_ spec: ObjectSculptSpec) -> [BuildStep] {
+        // Nothing to author unless the spec declares lights — stays review-only.
+        guard !spec.lights.isEmpty else { return [] }
+        let parent = "/" + spec.root.name
+        var steps: [BuildStep] = []
+        for light in spec.lights {
+            let lightPath = path(for: light.name, under: parent)
+            steps.append(.createLight(
+                name: light.name, parentPath: parent, kind: light.kind,
+                intensity: light.intensity, color: light.color))
+            // Place the light so directional kinds actually aim (structural pass
+            // never sees lights, so the lighting pass positions them itself).
+            steps.append(.setTransform(
+                path: lightPath, translation: light.translation,
+                rotationEulerDegrees: light.rotationEulerDegrees, scale: [1, 1, 1]))
+        }
+        return steps
+    }
+
+    // MARK: - Optimization: author the LOD manifest
+
+    static func optimizationSteps(_ spec: ObjectSculptSpec) -> [BuildStep] {
+        let manifest = LODManifest(spec: spec)
+        // Nothing to author when no tiers are declared — stays review-only.
+        guard manifest.hasTiers, let json = try? manifest.json() else { return [] }
+        return [.authorLOD(rootPath: "/" + spec.root.name, manifestJSON: json)]
     }
 
     // MARK: - Surface: projected-texture / de-light descriptor

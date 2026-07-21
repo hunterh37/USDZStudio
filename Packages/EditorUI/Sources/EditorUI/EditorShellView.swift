@@ -50,6 +50,14 @@ public struct EditorShellView: View {
     /// previews/tests can construct the shell without a bridge.
     let onExport: (URL) async throws -> Void
 
+    /// File-menu operations that live in the app target (they drive AppKit
+    /// panels / the document swap). Surfaced here so the command palette can list
+    /// and invoke the same File actions the menu bar does — the "menu/shortcut/
+    /// palette unification" the roadmap calls for. Default no-ops for previews.
+    let onOpenFile: () -> Void
+    let onSave: () -> Void
+    let onSaveAs: () -> Void
+
     @State private var searchText = ""
     @State private var collapsed: Set<PrimPath> = []
 
@@ -85,6 +93,12 @@ public struct EditorShellView: View {
     /// `makeConsoleController` when the console opens).
     @State private var consoleController: ReplController?
 
+    /// ⌘K command palette: `showPalette` gates the overlay; `paletteModel` holds
+    /// its query/results/selection. The action set is rebuilt against live
+    /// context each time the palette opens (see `openCommandPalette`).
+    @State private var showPalette = false
+    @State private var paletteModel = CommandPaletteModel()
+
     /// Output format for the one-click export, shared with the export panel and
     /// persisted across launches.
     @AppStorage("editor.export.format") private var exportFormatRaw = ExportFormat.usdz.rawValue
@@ -115,6 +129,7 @@ public struct EditorShellView: View {
     /// menu shortcuts and toolbar buttons drive the same state.
     public enum MenuCommand: String {
         case convert, batch, scripts, library, console, validate, mcpActivity, export, sculptDemo
+        case commandPalette
         public static let notification = Notification.Name("EditorUI.MenuCommand")
     }
 
@@ -127,7 +142,10 @@ public struct EditorShellView: View {
                 onReimportFile: @escaping (URL) async -> Void = { _ in },
                 makeConsoleController: @escaping () -> ReplController? = { nil },
                 onCreateDocument: @escaping () -> EditorDocument? = { nil },
-                onExport: @escaping (URL) async throws -> Void = { _ in }) {
+                onExport: @escaping (URL) async throws -> Void = { _ in },
+                onOpenFile: @escaping () -> Void = {},
+                onSave: @escaping () -> Void = {},
+                onSaveAs: @escaping () -> Void = {}) {
         self.document = document
         self.isImporting = isImporting
         self.importingFileName = importingFileName
@@ -138,6 +156,9 @@ public struct EditorShellView: View {
         self.makeConsoleController = makeConsoleController
         self.onCreateDocument = onCreateDocument
         self.onExport = onExport
+        self.onOpenFile = onOpenFile
+        self.onSave = onSave
+        self.onSaveAs = onSaveAs
     }
 
     public var body: some View {
@@ -202,8 +223,89 @@ public struct EditorShellView: View {
                     // Build the demo house live in the viewport, pass by pass.
                     Task { await SculptBuildRunner.playLive(SculptDemos.lowPolyHouse(), into: document) }
                 }
+            case .commandPalette: openCommandPalette()
             }
         }
+        .overlay {
+            if showPalette {
+                CommandPaletteBackdrop(model: paletteModel, onClose: dismissPalette)
+            }
+        }
+    }
+
+    // MARK: Command palette
+
+    /// Rebuilds the action set against the current document/context and opens the
+    /// palette fresh (cleared query, first row highlighted).
+    private func openCommandPalette() {
+        paletteModel.setActions(paletteActions())
+        paletteModel.reset()
+        showPalette = true
+    }
+
+    private func dismissPalette() { showPalette = false }
+
+    /// The unified action list backing the palette. Each entry mirrors an
+    /// existing menu/toolbar command so a command has exactly one behaviour
+    /// regardless of how it's invoked. `isEnabled` matches the menu's own
+    /// enablement; disabled rows still appear (greyed) so the palette is a
+    /// faithful mirror of what's available.
+    private func paletteActions() -> [PaletteAction] {
+        let hasDocument = document != nil
+        let hasStage = stage != nil
+        let canUndo = document?.canUndo ?? false
+        let canRedo = document?.canRedo ?? false
+
+        func action(_ id: String, _ title: String, _ category: String,
+                    shortcut: String? = nil, keywords: [String] = [],
+                    enabled: Bool = true, _ run: @escaping () -> Void) -> PaletteAction {
+            PaletteAction(item: ActionItem(id: id, title: title, category: category,
+                                           shortcut: shortcut, keywords: keywords,
+                                           isEnabled: enabled),
+                          run: run)
+        }
+
+        return [
+            action("file.open", "Open…", "File", shortcut: "⌘O",
+                   keywords: ["import", "load"]) { onOpenFile() },
+            action("file.save", "Save", "File", shortcut: "⌘S",
+                   enabled: hasDocument) { onSave() },
+            action("file.saveAs", "Save As…", "File", shortcut: "⇧⌘S",
+                   enabled: hasDocument) { onSaveAs() },
+            action("file.export", "Export…", "File", shortcut: "⇧⌘E",
+                   keywords: ["usdz", "share"], enabled: hasDocument) { activeSheet = .export },
+
+            action("edit.undo", "Undo", "Edit", shortcut: "⌘Z",
+                   enabled: canUndo) { document?.undo() },
+            action("edit.redo", "Redo", "Edit", shortcut: "⇧⌘Z",
+                   enabled: canRedo) { document?.redo() },
+
+            action("convert.file", "Convert File…", "Convert", shortcut: "⇧⌘K",
+                   keywords: ["glb", "gltf", "obj", "fbx"]) { activeSheet = .convert },
+            action("convert.batch", "Batch Convert…", "Convert", shortcut: "⇧⌘B") { activeSheet = .batch },
+            action("convert.library", "Library…", "Convert", shortcut: "⇧⌘L",
+                   keywords: ["shapes", "primitives", "insert"]) { activeSheet = .library },
+            action("convert.scripts", "Scripts…", "Convert",
+                   keywords: ["python", "run"]) { activeSheet = .scripts },
+            action("convert.console", "Python Console…", "Convert", shortcut: "⇧⌘P",
+                   keywords: ["repl", "terminal"], enabled: hasDocument) { openConsole() },
+            action("convert.sculpt", "Sculpt Demo House", "Convert", shortcut: "⇧⌘H",
+                   enabled: hasDocument) {
+                if let document {
+                    Task { await SculptBuildRunner.playLive(SculptDemos.lowPolyHouse(), into: document) }
+                }
+            },
+
+            action("view.validate", showValidation ? "Hide Issues" : "Validate Stage", "View",
+                   shortcut: "⌘U", keywords: ["diagnostics", "check", "compliance"],
+                   enabled: hasStage) { if stage != nil { showValidation.toggle() } },
+            action("view.environment", showEnvironment ? "Hide Environment" : "Environment…", "View",
+                   keywords: ["lighting", "ibl", "background", "hdr"]) { showEnvironment.toggle() },
+            action("view.agent", "Show Agent Activity", "View", shortcut: "⇧⌘M",
+                   keywords: ["mcp"], enabled: mcpActivity != nil) {
+                if mcpActivity != nil { showMCPActivity.toggle() }
+            },
+        ]
     }
 
     private func dismissSheet() { activeSheet = nil }

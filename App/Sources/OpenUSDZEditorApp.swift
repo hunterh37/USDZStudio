@@ -69,7 +69,10 @@ struct OpenUSDZEditorApp: App {
                                 document = doc
                                 return doc
                             },
-                            onExport: { url in try await export(to: url) })
+                            onExport: { url in try await export(to: url) },
+                            onOpenFile: { presentOpenPanel() },
+                            onSave: { save(to: document?.modelURL) },
+                            onSaveAs: { save(to: nil) })
                 .frame(minWidth: 1000, minHeight: 620)
                 .alert("Could Not Open File", isPresented: .constant(openError != nil)) {
                     Button("OK") { openError = nil }
@@ -141,7 +144,7 @@ struct OpenUSDZEditorApp: App {
                     .keyboardShortcut("l", modifiers: [.command, .shift])
                 Divider()
                 Button("Convert File…") { postMenu(.convert) }
-                    .keyboardShortcut("k")
+                    .keyboardShortcut("k", modifiers: [.command, .shift])
                 Button("Batch Convert…") { postMenu(.batch) }
                     .keyboardShortcut("b", modifiers: [.command, .shift])
                 Divider()
@@ -168,6 +171,10 @@ struct OpenUSDZEditorApp: App {
                     .disabled(tutorial != nil)
             }
             CommandGroup(after: .toolbar) {
+                // ⌘K opens the command palette — the single entry point that
+                // unifies menu/shortcut/palette (ROADMAP Phase 5 / Continuous).
+                Button("Command Palette…") { postMenu(.commandPalette) }
+                    .keyboardShortcut("k")
                 Button("Show Agent Activity") {
                     postMenu(.mcpActivity)
                 }
