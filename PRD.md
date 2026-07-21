@@ -97,13 +97,16 @@ Editing is the product. The editing surface is deliberately broad and grows alon
 - Full mesh modeling (primitives, extrude/inset/bevel/loop-cut, booleans, mirror/array, subdivision preview, retopology-lite). Repair/adjustment ops and the primitive + build-recipe pipeline already ship; broader modeling follows in the mesh-authoring phases.
 - MaterialX authoring and MaterialX→PreviewSurface baking (inspect/preserve today; author + bake on the roadmap).
 - Skeleton, skin-weight, and animation authoring (playback ships first; keyframe/clip authoring follows).
+- Production character rigging (IK/FK, constraints, control rigs), auto-rigging (automatic skeleton fit + weight solve), and humanoid motion retargeting with a clip/blend library. These are the late-stage animation spine (roadmap Phases 13–15, spec `specs/animation-rigging.md`); they build on the Phase 10 skeleton/keyframe authoring foundation and introduce the pure-Swift `RigKit` solver module.
 - Lighting, camera, and physics (RigidBody/Collider) schema authoring for RealityKit content.
 
 **Genuine non-goals** (these we do not intend to build):
 
 - Windows/Linux ports (architecture shouldn't preclude it, but no effort spent).
 - Cloud sync, accounts, telemetry. None. It's a local pro tool.
-- Digital-sculpting / voxel workflows and a general node-graph shading DCC UI — we author USD structures directly and with focused tools, not by reimplementing Blender or Substance.
+- A general node-graph shading DCC UI, and reimplementing the full surface area of Blender or Substance — we author USD structures directly and with focused tools.
+
+Note: direct mesh editing *is* in scope. Live vertex editing — a component edit mode that shows the vertex/edge point cloud and lets you click-drag points (with proportional / soft-selection falloff) to deform the mesh live, scaling to millions of vertices via GPU-resident geometry — is a first-class editor feature (see `specs/mesh-editing.md` §Live vertex edit). Focused brush-style sculpt tools (grab / inflate / smooth) are a permitted future extension of the same machinery; voxel/remesh sculpting engines remain out of scope.
 
 Everything the editor authors is measured against a selectable **export profile** (RealityKit/QuickLook by default; `lossless`/`full-USD` for advanced work), so "will this survive RealityKit?" is always answered explicitly rather than by refusing the edit.
 
@@ -151,6 +154,7 @@ Everything the editor authors is measured against a selectable **export profile*
 - `specs/scripting.md` — Python console, script library, CLI
 - `specs/recoloring.md` — part-level live recolor, perceptual texture recoloring
 - `specs/mesh-editing.md` — MeshKit, component-level ops (MVP+ phase)
+- `specs/animation-rigging.md` — RigKit, skeleton/rig/anim data model, IK/FK + constraint solvers, auto-rig, humanoid retargeting (Phases 10, 13–15)
 - `specs/testing.md` — coverage gates, test layers, CI pipeline
 - `specs/design-system.md` — DicyaninDesignSystem tokens & components
 - `ROADMAP.md` — phased delivery plan

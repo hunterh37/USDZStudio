@@ -59,18 +59,22 @@ See [`PRD.md`](PRD.md) for the full product spec, [`ROADMAP.md`](ROADMAP.md) for
 
 Modular SPM workspace under `Packages/`. Every package is built and tested on each push by the [unified CI pipeline](https://github.com/hunterh37/OpenUSDZEditor/actions/workflows/ci.yml) — a green [![CI](https://img.shields.io/github/actions/workflow/status/hunterh37/OpenUSDZEditor/ci.yml?branch=main&label=CI&logo=githubactions&logoColor=white)](https://github.com/hunterh37/OpenUSDZEditor/actions/workflows/ci.yml) badge means the whole matrix below passed its tests, coverage floors, dependency-lint, and module-governance gates.
 
-| Package | Role | Build & tests |
+Line-coverage floors are CI-enforced per module by [`scripts/coverage-gate.sh`](scripts/coverage-gate.sh) (mirrors [`specs/testing.md`](specs/testing.md)). `†` marks a ratchet floor pinned below its 90% spec target until the golden-image/snapshot harnesses land (tracked in ROADMAP Phase T).
+
+| Package | Role | Coverage floor |
 | --- | --- | --- |
-| `USDCore` | Pure Swift stage model — prim paths, prims, attributes, stage protocols | [![CI](https://img.shields.io/github/actions/workflow/status/hunterh37/OpenUSDZEditor/ci.yml?branch=main&label=passing&logo=swift&logoColor=white)](https://github.com/hunterh37/OpenUSDZEditor/actions/workflows/ci.yml) |
-| `USDBridge` | Python/`usd-core` bridge behind a swappable executor seam, graceful degradation when no runtime is present | [![CI](https://img.shields.io/github/actions/workflow/status/hunterh37/OpenUSDZEditor/ci.yml?branch=main&label=passing&logo=swift&logoColor=white)](https://github.com/hunterh37/OpenUSDZEditor/actions/workflows/ci.yml) |
-| `MeshKit` | Mesh editing operations (topology edits, bevel, …) — 100% coverage floor + fuzz corpus | [![CI](https://img.shields.io/github/actions/workflow/status/hunterh37/OpenUSDZEditor/ci.yml?branch=main&label=passing&logo=swift&logoColor=white)](https://github.com/hunterh37/OpenUSDZEditor/actions/workflows/ci.yml) |
-| `EditingKit` | Non-destructive edit operations on the stage | [![CI](https://img.shields.io/github/actions/workflow/status/hunterh37/OpenUSDZEditor/ci.yml?branch=main&label=passing&logo=swift&logoColor=white)](https://github.com/hunterh37/OpenUSDZEditor/actions/workflows/ci.yml) |
-| `ConversionKit` | Importers, IntermediateScene IR, texture pipeline, batch converter | [![CI](https://img.shields.io/github/actions/workflow/status/hunterh37/OpenUSDZEditor/ci.yml?branch=main&label=passing&logo=swift&logoColor=white)](https://github.com/hunterh37/OpenUSDZEditor/actions/workflows/ci.yml) |
-| `ValidationKit` | AR QuickLook / RealityKit compatibility validation | [![CI](https://img.shields.io/github/actions/workflow/status/hunterh37/OpenUSDZEditor/ci.yml?branch=main&label=passing&logo=swift&logoColor=white)](https://github.com/hunterh37/OpenUSDZEditor/actions/workflows/ci.yml) |
-| `ScriptingKit` | Python console and scripting surface | [![CI](https://img.shields.io/github/actions/workflow/status/hunterh37/OpenUSDZEditor/ci.yml?branch=main&label=passing&logo=swift&logoColor=white)](https://github.com/hunterh37/OpenUSDZEditor/actions/workflows/ci.yml) |
-| `ViewportKit` | RealityKit viewport, camera, selection | [![CI](https://img.shields.io/github/actions/workflow/status/hunterh37/OpenUSDZEditor/ci.yml?branch=main&label=passing&logo=swift&logoColor=white)](https://github.com/hunterh37/OpenUSDZEditor/actions/workflows/ci.yml) |
-| `EditorUI` | Outliner, inspectors, mesh-edit overlay, editor chrome | [![CI](https://img.shields.io/github/actions/workflow/status/hunterh37/OpenUSDZEditor/ci.yml?branch=main&label=passing&logo=swift&logoColor=white)](https://github.com/hunterh37/OpenUSDZEditor/actions/workflows/ci.yml) |
-| `DicyaninDesignSystem` | Design tokens (4pt grid, palette, type scale) + core controls | [![CI](https://img.shields.io/github/actions/workflow/status/hunterh37/OpenUSDZEditor/ci.yml?branch=main&label=passing&logo=swift&logoColor=white)](https://github.com/hunterh37/OpenUSDZEditor/actions/workflows/ci.yml) |
+| `USDCore` | Pure Swift stage model — prim paths, prims, attributes, stage protocols | 100% |
+| `USDBridge` | Python/`usd-core` bridge behind a swappable executor seam, graceful degradation when no runtime is present | 95% |
+| `MeshKit` | Mesh editing operations (topology edits, bevel, …) — plus fuzz corpus | 100% |
+| `EditingKit` | Non-destructive edit operations on the stage | 100% |
+| `ConversionKit` | Importers, IntermediateScene IR, texture pipeline, batch converter | 100% |
+| `ValidationKit` | AR QuickLook / RealityKit compatibility validation | 100% |
+| `ScriptingKit` | Python console and scripting surface | 100% |
+| `AgentMCP` | MCP server exposing the kits as agent tools (never `EditorUI`) | 100% |
+| `QuickLookKit` | Pure Swift render-plan logic for the QuickLook thumbnail `.appex` | 100% |
+| `ViewportKit` | RealityKit viewport, camera, selection | 50% † |
+| `EditorUI` | Outliner, inspectors, mesh-edit overlay, editor chrome | 34% † |
+| `DicyaninDesignSystem` | Design tokens (4pt grid, palette, type scale) + core controls | 95% |
 
 Plus the app shell (`App/`), the `openusdz` CLI (`CLI/`), and a headless editor harness (`Tools/EditorHarness`).
 

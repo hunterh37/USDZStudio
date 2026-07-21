@@ -251,13 +251,14 @@ Repair ops + primitives + build-recipes already ship. Grow into real modeling.
 
 ## Phase 10 — Skeleton & Animation Authoring (v1.5)
 
-Playback ships in Phase 1; this authors it.
+Playback ships in Phase 1; this authors it. This is the **data-authoring foundation** the production animation spine (Phases 13–15) builds on: raw UsdSkel joint/skin/blendshape/keyframe editing, no solvers yet. See `specs/animation-rigging.md`.
 
-- [ ] UsdSkel authoring: edit joint hierarchy, rest/bind transforms, re-bind skin weights (weight paint).
+- [ ] **Close the time-sampled-channel save gap first (prerequisite).** Today attributes the bridge surfaces as `.unsupported` — a purely time-sampled channel with no default-time value — are written as an "omitted" comment, so animation values are dropped on save (declared gap in `scripts/roundtrip-gate.sh` `EXPECTATIONS`, Milestone 4 note). `USDASerializer` must emit `.timeSamples` blocks for these channels and the gate expectation must be tightened. No animation authoring is trustworthy until open → save → open preserves the samples.
+- [ ] UsdSkel authoring: edit joint hierarchy, rest/bind transforms, re-bind skin weights (manual weight paint).
 - [ ] Keyframe authoring on transforms + timeline editor: create/trim/retime/blend animation clips.
 - [ ] Skinned-mesh editing lift — replace the Phase 6 hard refusal with weight-propagating edits.
 - [ ] Blendshape/target authoring for RealityKit.
-- **Harness:** joint-transform round-trip; deterministic sampled-pose golden frames; weight-sum-to-1 invariant.
+- **Harness:** joint-transform round-trip; time-sampled-channel round-trip (the closed gap, red-on-regression); deterministic sampled-pose golden frames; weight-sum-to-1 invariant.
 
 ## Phase 11 — Scene Authoring: Lights, Cameras, Physics (v1.6)
 
@@ -277,6 +278,44 @@ The comprehensive USD authoring endgame — always profile-flagged.
 - [ ] Custom schema / API-schema application UI; render-purpose authoring.
 - [ ] Instancing authoring (point instancers, scenegraph instancing) for volume scenes.
 - **Harness:** composed-vs-flattened equivalence tests; profile-degradation snapshots (what each construct becomes under RealityKit export).
+
+# Production Animation Spine (late-stage) — rigging, auto-rig, humanoid retargeting
+
+The endgame authoring domain: turn the raw UsdSkel data-authoring of Phase 10 into a **production-grade character animation toolset** — control rigs with IK/FK and constraints, one-click auto-rigging, and humanoid motion retargeting with a clip library. These are deliberately the last authoring phases: they depend on Phase 10's skeleton/keyframe/skin authoring being trustworthy (round-trip-clean), and on the mesh-authoring maturity of Phases 6/8.
+
+**New module `RigKit`** (pure Swift leaf, zero internal deps — a sibling to `MeshKit`) holds all deterministic solver math: FK/IK (analytic 2-bone, CCD, FABRIK), constraint evaluation, skin-weight solve (heat-diffusion / bone-glow), skeleton auto-fit, and retargeting transforms. No UI/GPU/Python, so it is provable-without-eyeballs: 100% coverage floor + fuzz corpus, exactly like MeshKit. `EditingKit` wraps its solves in undoable commands; `ViewportKit` consumes it for rig-handle overlays. Adding it obeys the module-governance ritual in the same PR (dependency-lint policy entry, `specs/architecture.md` layout+rules, `specs/testing.md` floor row, test target, `test-all.sh` entry, spec cross-reference). Heavy solves may use a bundled-Python assist path, but every invariant-checkable computation lives in `RigKit`. Contract: `specs/animation-rigging.md`. Every op is a pure-function command with its invariant/golden harness in the same PR; every construct carries its RealityKit export-profile degradation.
+
+## Phase 13 — Production Rigging & Skinning (v2.1) — extends Phase 10, introduces RigKit
+
+Author real control rigs on top of raw joints, and solve skin binding rather than paint it by hand.
+
+- [ ] IK/FK chains with solvers: analytic 2-bone (limbs), CCD and FABRIK (general chains), pole-vector targets, per-chain FK/IK blend, deterministic convergence.
+- [ ] Constraint authoring: parent / point / orient / aim / scale constraints with weights, evaluated in a defined dependency order.
+- [ ] Control-rig authoring: control curves/handles bound to joints, rig namespace convention, viewport rig-handle manipulation (reuses the gizmo seam).
+- [ ] Skin binding: automatic skin-weight **solve** (heat-diffusion) + normalize/prune/mirror tools, max-influences clamp for the RealityKit profile.
+- **Harness:** solver determinism + convergence invariants (same input → same pose; reaches target within tolerance or reports non-convergence); weight-sum-to-1 and influence-cap invariants; golden posed frames per solver; RigKit 100% floor + fuzz corpus.
+
+## Phase 14 — Auto-Rigging (v2.2) — extends Phase 13
+
+One-click rig for an unrigged mesh: fit a skeleton, solve weights, hand back an editable rig.
+
+- [ ] Skeleton auto-fit: geometry/landmark heuristics, symmetry-aware placement, humanoid landmark detection (head/spine/limbs/digits), scale-normalized.
+- [ ] Automatic weight solve on the fitted skeleton (Phase 13 solver), producing a RealityKit-clean bind.
+- [ ] "Confirm & adjust fit" UI: preview the proposed skeleton, nudge joints, re-solve; accept as an undoable rig-authoring command.
+- [ ] Generic (non-humanoid) fallback fit for arbitrary meshes.
+- **Harness:** golden fitted-skeleton fixtures over a mesh corpus (joint positions within tolerance); weight-quality metrics as golden values; left/right symmetry invariant; deterministic fit given a seed.
+
+## Phase 15 — Humanoid Retargeting & Motion Library (v2.3) — extends Phase 14
+
+Bring motion in, retarget it onto any rigged humanoid, blend and sequence clips.
+
+- [ ] Canonical **humanoid rig standard**: a named bone map (Mixamo/Unity-Humanoid-style) with a mapping UI to bind an arbitrary skeleton to the standard.
+- [ ] Motion import: BVH + skeletal FBX/glTF + mocap → normalized clip in the standard rig space.
+- [ ] Retargeting: map source motion onto a target humanoid rig (bone-map correspondence, rest-pose reconciliation, hip-height/scale normalization, foot-slide minimization).
+- [ ] Animation clip library + blending: blend/additive layers, clip trim/retime, and a state-machine / blend-graph authoring surface; bake to UsdSkel animation.
+- **Harness:** retarget round-trip (identity retarget onto a matched skeleton reproduces the source pose within tolerance); foot-slide / normalization metrics as golden values; deterministic sampled-pose golden frames per clip; export-profile degradation snapshot (what the blend graph bakes to under RealityKit).
+
+**Exit:** import a mocap clip, auto-rig a bare humanoid mesh, retarget the motion onto it, blend two clips, and export a RealityKit-clean animated USDZ — every step invariant-verified.
 
 ## Phase A — Agent MCP Layer (shipped; docs/AGENT_MCP_PLAN.md)
 
