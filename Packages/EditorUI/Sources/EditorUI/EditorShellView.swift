@@ -119,6 +119,11 @@ public struct EditorShellView: View {
     /// Owned/updated by the app; observed inside the activity panel subviews.
     let mcpActivity: MCPActivityModel?
 
+    /// Persisted user preferences. When present, the viewport environment is
+    /// seeded from the saved lighting on appear and re-saved as it's edited, so
+    /// the environment survives relaunch (nil in previews/tests → transient).
+    let settings: EditorSettings?
+
 
     private enum Sheet: String, Identifiable {
         case convert, batch, scripts, library, console, export
@@ -138,6 +143,7 @@ public struct EditorShellView: View {
                 importingFileName: String? = nil,
                 tutorial: TutorialEngine? = nil,
                 mcpActivity: MCPActivityModel? = nil,
+                settings: EditorSettings? = nil,
                 makeScriptExecutor: @escaping () -> (any ScriptExecuting)? = { nil },
                 onReimportFile: @escaping (URL) async -> Void = { _ in },
                 makeConsoleController: @escaping () -> ReplController? = { nil },
@@ -151,6 +157,7 @@ public struct EditorShellView: View {
         self.importingFileName = importingFileName
         self.tutorial = tutorial
         self.mcpActivity = mcpActivity
+        self.settings = settings
         self.makeScriptExecutor = makeScriptExecutor
         self.onReimportFile = onReimportFile
         self.makeConsoleController = makeConsoleController
@@ -736,7 +743,16 @@ public struct EditorShellView: View {
                 environment: environment,
                 animationTime: playback.animationTime)
                 .overlay(alignment: .topTrailing) { environmentButton }
-                .onAppear { playback.configure(from: stage?.metadata) }
+                .onAppear {
+                    playback.configure(from: stage?.metadata)
+                    // Seed the viewport lighting from the persisted settings so
+                    // the environment survives relaunch (specs/viewport.md).
+                    if let settings { environment = settings.loadEnvironment() }
+                }
+                .onChange(of: environment) { _, newValue in
+                    // Persist every lighting edit; a no-op when settings absent.
+                    settings?.saveEnvironment(newValue)
+                }
                 .onChange(of: stage?.metadata) { _, newValue in
                     playback.configure(from: newValue)
                 }
