@@ -53,6 +53,22 @@ jobs:
         # harnesses land — see ROADMAP Phase T). No override label, by design.
         run: bash scripts/coverage-gate.sh
 
+  sculpt-eval:
+    # Sculpt-accuracy regression (#93). Runs SculptEvalHarness over the frozen
+    # P0 labelled corpus and fails on any drift from the fixtures frozen in
+    # EvalRegressionTests.swift — the same metric the live continue-gate uses,
+    # so a gate-moving change is caught here first. SculptKit is pure Swift
+    # (no usd-core / GPU / imaging), so this needs neither the Python runtime
+    # nor the full test matrix and stays fast.
+    runs-on: macos-15
+    needs: lint
+    steps:
+      - uses: actions/checkout@v4
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode_16.4.app || true
+      - name: Sculpt-accuracy regression over the P0 corpus
+        run: bash scripts/sculpt-eval-gate.sh
+
   roundtrip:
     # T1 round-trip invariant layer (ROADMAP Milestone 4). Blocking and
     # red-on-failure: open→save→open must be a fixed point, open→edit→undo-all

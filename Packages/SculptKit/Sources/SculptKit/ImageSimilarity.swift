@@ -24,6 +24,16 @@ public struct RasterImage: Sendable, Equatable {
 /// floor that sits *under* the agent's subjective vision score. Every component
 /// is in 0...1; `aggregate` is the single number the continue-gate compares to
 /// the policy's `similarityFloor`.
+///
+/// Sculpt-accuracy integration (#93): the gate now consumes an explicit
+/// **shape / appearance split**. `shapeScore` is the concavity-preserving
+/// `ShapeMetric` term (silhouette IoU blended with symmetric contour agreement,
+/// so a blob filling a gapped reference cannot outscore a faithful, holed
+/// shape — the F2 fix); `appearanceScore` is the colour/tonal term, only
+/// trustworthy once a material is applied (F3). `aggregate` is a shape-dominant
+/// blend of the two (see `ImageSimilarity.weightShape`/`weightAppearance`),
+/// replacing the previous flat IoU/SSIM/luma blend. The three legacy
+/// components remain reported for diagnostics and back-compatible JSON.
 public struct SimilarityReport: Sendable, Equatable, Codable {
     /// Intersection-over-union of the two silhouettes (shape agreement).
     public var silhouetteIoU: Double
@@ -31,13 +41,22 @@ public struct SimilarityReport: Sendable, Equatable, Codable {
     public var luminanceCorrelation: Double
     /// Global structural similarity (SSIM) on luminance.
     public var ssim: Double
-    /// Weighted blend of the three, clamped to 0...1.
+    /// Concavity-preserving shape term (`ShapeMetric`): IoU blended with contour
+    /// agreement. Meaningful from the blockout pass on.
+    public var shapeScore: Double
+    /// Colour/tonal agreement term. Only trustworthy from the `material` pass.
+    public var appearanceScore: Double
+    /// Shape-dominant blend of `shapeScore` and `appearanceScore`, clamped to
+    /// 0...1 — the single number the continue-gate compares to the floor.
     public var aggregate: Double
 
-    public init(silhouetteIoU: Double, luminanceCorrelation: Double, ssim: Double, aggregate: Double) {
+    public init(silhouetteIoU: Double, luminanceCorrelation: Double, ssim: Double,
+                shapeScore: Double, appearanceScore: Double, aggregate: Double) {
         self.silhouetteIoU = silhouetteIoU
         self.luminanceCorrelation = luminanceCorrelation
         self.ssim = ssim
+        self.shapeScore = shapeScore
+        self.appearanceScore = appearanceScore
         self.aggregate = aggregate
     }
 }
@@ -55,24 +74,45 @@ public enum ImageSimilarity {
     /// counts as foreground (used when there is no usable alpha channel).
     static let opaqueForegroundDelta = 0.12
 
-    /// Relative weights of the three metrics in the aggregate. Shape (IoU) is
-    /// weighted highest because a wrong silhouette is the most visible failure.
-    static let weightIoU = 0.5
+    /// Relative weights of SSIM and luminance *within* the appearance term
+    /// (renormalised to sum to 1 by the appearance blend). SSIM dominates
+    /// because structural agreement is a stronger tonal cue than mean-luma
+    /// correlation. `ShapeMetric` reuses these to keep one appearance formula.
     static let weightSSIM = 0.35
     static let weightLuma = 0.15
 
+    /// Shape / appearance split for the gate `aggregate` (#93). Shape is
+    /// dominant: it is the F2-hardened, concavity-preserving signal and is
+    /// meaningful from the first grey pass, whereas appearance only pays off
+    /// once a material lands. Re-tuned against the P0 harness corpus — the
+    /// `policy.similarityFloor` is held, only the blend changed.
+    static let weightShape = 0.6
+    static let weightAppearance = 0.4
+
     /// Compare a reference image to a render, returning the fidelity report.
+    /// The reported `shapeScore`/`appearanceScore` are the split the gate
+    /// consumes; `aggregate` is their shape-dominant blend.
     public static func compare(reference: RasterImage, render: RasterImage) -> SimilarityReport {
         let side = gridSide
         let ref = Grid(image: reference, side: side)
         let ren = Grid(image: render, side: side)
 
+        // Legacy per-metric diagnostics (unchanged formulas, still reported).
         let iou = silhouetteIoU(ref, ren)
         let luma = luminanceCorrelation(ref, ren)
         let ssimValue = ssim(ref, ren)
-        let aggregate = clamp01(weightIoU * iou + weightSSIM * ssimValue + weightLuma * luma)
+
+        // Shape / appearance split. Both reuse the already-resampled grids so
+        // there is no redundant sampling. `appearance` is the same renormalised
+        // SSIM/luma blend `ShapeMetric.appearanceScore` computes.
+        let shape = ShapeMetric.shapeScore(reference: ref.foreground, render: ren.foreground, side: side).score
+        let appearance = clamp01(
+            (weightSSIM * ssimValue + weightLuma * luma) / (weightSSIM + weightLuma))
+        let aggregate = clamp01(weightShape * shape + weightAppearance * appearance)
+
         return SimilarityReport(
-            silhouetteIoU: iou, luminanceCorrelation: luma, ssim: ssimValue, aggregate: aggregate)
+            silhouetteIoU: iou, luminanceCorrelation: luma, ssim: ssimValue,
+            shapeScore: shape, appearanceScore: appearance, aggregate: aggregate)
     }
 
     /// The worst (minimum-aggregate) report across a set of reference/render

@@ -176,7 +176,8 @@ import Testing
     // MARK: - SimilarityReport codable
 
     @Test func reportRoundTrips() throws {
-        let report = SimilarityReport(silhouetteIoU: 0.8, luminanceCorrelation: 0.7, ssim: 0.6, aggregate: 0.75)
+        let report = SimilarityReport(silhouetteIoU: 0.8, luminanceCorrelation: 0.7, ssim: 0.6,
+                                      shapeScore: 0.82, appearanceScore: 0.65, aggregate: 0.75)
         let data = try JSONEncoder().encode(report)
         let back = try JSONDecoder().decode(SimilarityReport.self, from: data)
         #expect(back == report)

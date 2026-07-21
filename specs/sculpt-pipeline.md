@@ -150,15 +150,34 @@ processing and stays a pure leaf.
      gate** the subjective score cannot bypass (see below).
 3a. **Similarity floor** (`ImageSimilarity` + `RasterLoader`): `sculpt_comparison_sheet`
    decodes the reference and render PNGs and computes a deterministic fidelity
-   score — a weighted blend of silhouette IoU, SSIM, and luminance correlation
-   on a fixed 64×64 resample, so it is stable across machines and independent of
-   image resolution. Multi-view sheets (`views: [...]`) score the **worst**
-   angle, so a good view can't mask a bad one. The number is returned as
-   `measuredSimilarity` and fed back to `sculpt_review`; the continue gate
-   enforces it against `policy.similarityFloor`. When the images can't be
+   score on a fixed 64×64 resample, so it is stable across machines and
+   independent of image resolution. The score is an explicit **shape / appearance
+   split** (#93): `shapeScore` is the concavity-preserving `ShapeMetric` term
+   (silhouette IoU blended with symmetric contour agreement, so a blob filling a
+   gapped reference cannot outscore a faithful, holed shape — the F2 fix, which
+   is meaningful from the first grey pass); `appearanceScore` is the renormalised
+   SSIM/luminance colour-tone term, only trustworthy once a material lands (F3).
+   The gate `aggregate` is the shape-dominant blend `0.6·shapeScore +
+   0.4·appearanceScore` — re-tuned against the P0 harness corpus with
+   `policy.similarityFloor` **held** (the floor constant did not move; only the
+   blend did). All three legacy per-metric values (IoU, SSIM, luminance) plus the
+   split are returned for diagnostics. Multi-view sheets (`views: [...]`) score
+   the **worst** angle, so a good view can't mask a bad one. The number is
+   returned as `measuredSimilarity` and fed back to `sculpt_review`; the continue
+   gate enforces it against `policy.similarityFloor`. When the images can't be
    decoded the tool reports no measurement and the floor is not enforced for
    that pass (the subjective score still gates). SculptKit stays decode-free —
    `RasterLoader` (AgentMCP, ImageIO) is the only pixel-decoding seam.
+
+   **Accuracy regression gate** (`SculptEvalHarness` + `EvalCorpus`, CI job
+   `sculpt-eval` via `scripts/sculpt-eval-gate.sh`): the P0 labelled synthetic
+   corpus (≥ 10 procedurally-authored silhouettes with exact ground-truth masks
+   and poses) is run through `SculptEvalHarness.benchmark()` — the *same* metric
+   the live gate uses — and every measured quantity is frozen in
+   `EvalRegressionTests.swift`. The gate is red on drift in either direction, so
+   a change that would move the continue-gate is caught before it ships and a
+   metric change can never land without re-freezing the fixtures in the same
+   commit.
 3b. **AR-compliance completion gate**: when the assessment sets
    `requireCompliance`, the final `continue` runs the ARKit `ComplianceChecker`
    profile over the finished stage and blocks completion if it is not
