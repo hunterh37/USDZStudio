@@ -15,6 +15,15 @@ struct CoreTests {
         #expect(abs(cube.signedVolume - 1.0) < 1e-12)
     }
 
+    @Test func edgeSetMatchesCountAndKeys() {
+        let cube = Fixtures.cube()
+        // The undirected edge key set is the membership-only view used by
+        // recipe edge selection; it must agree with edgeCount and with the
+        // keys of the full edgeFaceMap.
+        #expect(cube.edgeSet.count == cube.edgeCount)
+        #expect(cube.edgeSet == Set(cube.edgeFaceMap.keys))
+    }
+
     @Test func gridIsHealthyOpenSurface() {
         let grid = Fixtures.grid(4)
         #expect(MeshInvariants.violations(in: grid).isEmpty)
@@ -52,6 +61,22 @@ struct CoreTests {
         let c = mesh.addVertex(SIMD3(7, 5, 0)) // collinear → zero area
         mesh.addFace([a, b, c])
         #expect(MeshInvariants.violations(in: mesh).contains { $0.rule == "degenerate" })
+    }
+
+    @Test func singleElementRemovalWrappers() {
+        // The single-element `removeFace`/`removeVertex` delegate to the batch
+        // primitives; ops delete in bulk, so exercise the scalar entry points
+        // (public API) directly.
+        var mesh = Fixtures.grid(2)
+        let face = mesh.faceOrder[0]
+        mesh.removeFace(face)
+        #expect(mesh.faceLoops[face] == nil)
+        #expect(!mesh.faceOrder.contains(face))
+        mesh.pruneIsolatedVertices()
+        let vertex = mesh.vertexOrder[0]
+        mesh.removeVertex(vertex)
+        #expect(mesh.positions[vertex] == nil)
+        #expect(!mesh.vertexOrder.contains(vertex))
     }
 
     @Test func copyOnWriteSnapshotIsIndependent() {

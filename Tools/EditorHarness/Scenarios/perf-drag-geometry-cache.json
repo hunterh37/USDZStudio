@@ -1,0 +1,35 @@
+{ "name": "perf-drag-geometry-cache",
+  "open": "Tests/Fixtures/mesh-panel.usda",
+  "steps": [
+    { "do": "select", "path": "/Rig/Panel" },
+    { "do": "expect", "faceCount": 1 },
+    { "do": "expect", "rendered": true, "path": "/Rig/Panel" },
+
+    { "do": "gizmo.drag", "axis": "x", "number": 2 },
+    { "do": "expect", "translation": [2, 0, 0], "path": "/Rig/Panel" },
+    { "do": "expect", "gizmoOrigin": [2, 0, 0] },
+    { "do": "expect", "rendered": true, "path": "/Rig/Panel" },
+
+    { "do": "gizmo.drag", "axis": "y", "number": 1.5 },
+    { "do": "expect", "translation": [2, 1.5, 0], "path": "/Rig/Panel" },
+    { "do": "expect", "rendered": true, "path": "/Rig/Panel" },
+
+    { "do": "undo" },
+    { "do": "undo" },
+    { "do": "expect", "translation": [0, 0, 0], "path": "/Rig/Panel" },
+    { "do": "expect", "rendered": true, "path": "/Rig/Panel" },
+
+    { "do": "mesh.enter", "path": "/Rig/Panel" },
+    { "do": "mesh.tool", "name": "extrude", "number": 0.5 },
+    { "do": "mesh.selectFaces", "faces": [0] },
+    { "do": "mesh.apply" },
+    { "do": "expect", "meshDiagnostic": "" },
+    { "do": "expect", "faceCount": 5 },
+    { "do": "mesh.exit", "commit": true },
+    { "do": "expect", "faceCount": 5 },
+    { "do": "expect", "rendered": true, "path": "/Rig/Panel" },
+
+    { "do": "undo" },
+    { "do": "expect", "faceCount": 1 },
+    { "do": "expect", "rendered": true, "path": "/Rig/Panel" }
+  ] }

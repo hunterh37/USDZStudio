@@ -154,6 +154,21 @@ struct SkinningAnimationTests {
         #expect(m[3] == 0 && m[7] == 10 && m[11] == 0)  // row-major translation
     }
 
+    @Test func samplerBinarySearchBracketsInteriorKeys() {
+        // ≥3 keys so the bracketing binary search iterates (two-key clips take
+        // the fast path and never enter the loop). Samples land in different
+        // intervals to hit both comparison branches, above and below the probe.
+        let sampler = AnimationSampler(
+            input: [0, 1, 2, 3], interpolation: .linear,
+            output: .vec3([SIMD3(0, 0, 0), SIMD3(0, 10, 0), SIMD3(0, 20, 0), SIMD3(0, 30, 0)]))
+        // t=2.5 → between keys 2 and 3 (probe walks the upper half).
+        #expect(sampler.sampledVec3(at: 2.5)?.y == 25)
+        // t=0.5 → between keys 0 and 1 (probe walks the lower half).
+        #expect(sampler.sampledVec3(at: 0.5)?.y == 5)
+        // Exact interior key time → zero blend factor, no extrapolation.
+        #expect(sampler.sampledVec3(at: 2)?.y == 20)
+    }
+
     @Test func warnsWhenMultipleClipsAndOnCubicSpline() async throws {
         var context = ConversionContext(
             sourceURL: URL(fileURLWithPath: "/in/s.glb"),

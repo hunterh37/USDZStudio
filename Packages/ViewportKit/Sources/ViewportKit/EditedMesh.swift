@@ -29,6 +29,42 @@ public struct EditedMeshData: Equatable, Sendable {
     }
 }
 
+/// What kind of viewport update a new `EditedMeshData` requires, relative to the
+/// one currently on screen. This is the seam that stops an interactive extrude /
+/// inset drag from tearing down and regenerating the whole edit mesh (and its
+/// pick BVH) on every pointer event: a drag moves vertices but keeps the face
+/// topology and selection fixed, so the viewport only needs to refresh vertex
+/// positions in place and can defer the BVH rebuild until the next pick.
+public enum EditedMeshUpdate: Equatable, Sendable {
+    /// Nothing meaningful changed — only the revision counter churned. No redraw.
+    case none
+    /// Only vertex positions moved (same prim, same faces, same selection, same
+    /// vertex count). Refresh positions in place; the BVH is now stale but no
+    /// pick happens mid-drag, so it can be rebuilt lazily.
+    case positions
+    /// Topology, selection, prim identity, or vertex count changed — a full
+    /// rebuild (regenerate mesh resources, rebuild the BVH) is required.
+    case rebuild
+}
+
+extension EditedMeshData {
+
+    /// Classifies the transition from `previous` to `self` (see
+    /// `EditedMeshUpdate`). `revision` is deliberately ignored: the editor bumps
+    /// it every event, so equality on it would force a full rebuild on every
+    /// drag frame — the exact cost this classification exists to avoid.
+    public func update(from previous: EditedMeshData?) -> EditedMeshUpdate {
+        guard let previous else { return .rebuild }
+        guard primPath == previous.primPath,
+              primName == previous.primName,
+              selectedFaces == previous.selectedFaces,
+              faceLoops == previous.faceLoops,
+              positions.count == previous.positions.count
+        else { return .rebuild }
+        return positions == previous.positions ? .none : .positions
+    }
+}
+
 /// Flat-shaded GPU buffers from face loops: vertices are duplicated per face
 /// so each face gets its own normal — the right look for component editing,
 /// where face boundaries must read clearly.
@@ -49,8 +85,16 @@ public enum MeshFlattener {
     /// scene-graph path, which describe meshes the same way.
     public static func flatten(positions: [SIMD3<Float>], faceLoops: [[Int]],
                                faces: [Int]? = nil) -> Buffers {
+        let selected = faces ?? Array(faceLoops.indices)
         var out = Buffers(positions: [], normals: [], triangleIndices: [])
-        for f in faces ?? Array(faceLoops.indices) {
+        // Pre-size the output buffers from the known corner budget so this
+        // per-revision (drag-time) rebuild doesn't repeatedly reallocate.
+        var corners = 0
+        for f in selected where faceLoops.indices.contains(f) { corners += faceLoops[f].count }
+        out.positions.reserveCapacity(corners)
+        out.normals.reserveCapacity(corners)
+        out.triangleIndices.reserveCapacity(corners * 3)
+        for f in selected {
             guard faceLoops.indices.contains(f) else { continue }
             let loop = faceLoops[f]
             guard loop.count >= 3, loop.allSatisfy({ positions.indices.contains($0) }) else { continue }
@@ -58,9 +102,11 @@ public enum MeshFlattener {
             let normal = newellNormal(pts)
             let base = UInt32(out.positions.count)
             out.positions.append(contentsOf: pts)
-            out.normals.append(contentsOf: Array(repeating: normal, count: pts.count))
+            for _ in pts { out.normals.append(normal) }
             for i in 1..<(pts.count - 1) {
-                out.triangleIndices.append(contentsOf: [base, base + UInt32(i), base + UInt32(i + 1)])
+                out.triangleIndices.append(base)
+                out.triangleIndices.append(base + UInt32(i))
+                out.triangleIndices.append(base + UInt32(i + 1))
             }
         }
         return out

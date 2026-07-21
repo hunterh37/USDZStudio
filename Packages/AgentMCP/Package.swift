@@ -18,13 +18,14 @@ let package = Package(
         .package(path: "../ConversionKit"),
         .package(path: "../ScriptingKit"),
         .package(path: "../MeshKit"),
+        .package(path: "../SculptKit"),
     ],
     targets: [
         .target(
             name: "AgentMCP",
             dependencies: [
                 "USDCore", "USDBridge", "EditingKit", "ValidationKit",
-                "ConversionKit", "ScriptingKit", "MeshKit",
+                "ConversionKit", "ScriptingKit", "MeshKit", "SculptKit",
             ],
             path: "Sources/AgentMCP"),
         .testTarget(

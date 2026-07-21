@@ -267,11 +267,19 @@ extension AnimationSampler {
         guard n > 1 else { return (0, 0, 0) }
         if t <= input[0] { return (0, 0, 0) }
         if t >= input[n - 1] { return (n - 1, n - 1, 0) }
-        for i in 0..<(n - 1) where t < input[i + 1] {
-            let span = input[i + 1] - input[i]
-            let f = span > 0 ? (t - input[i]) / span : 0
-            return (i, i + 1, f)
+        // Key times are sorted, so binary-search the bracketing interval rather
+        // than scanning linearly. Authoring evaluates every joint at the union
+        // of all key times, so a linear scan here is O(keys²) per channel.
+        // `lo` lands on the first key strictly greater than `t`; `t` is strictly
+        // inside (0, n-1) here, so `lo ∈ [1, n-1]` and `lo - 1` is its bracket.
+        var lo = 1, hi = n - 1
+        while lo < hi {
+            let mid = (lo + hi) / 2
+            if input[mid] <= t { lo = mid + 1 } else { hi = mid }
         }
-        return (n - 1, n - 1, 0)
+        let i = lo - 1
+        let span = input[i + 1] - input[i]
+        let f = span > 0 ? (t - input[i]) / span : 0
+        return (i, i + 1, f)
     }
 }

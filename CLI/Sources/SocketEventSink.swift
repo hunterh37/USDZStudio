@@ -1,12 +1,14 @@
 import AgentMCP
 import Foundation
-import Network
 
 /// The app's discovery record, written to
 /// `~/Library/Application Support/OpenUSDZEditor/mcp/endpoint.json` while the
-/// editor is running. The sink reads it to find the localhost activity port.
+/// editor is running. The sink reads it to find the editor's UNIX-domain socket.
+///
+/// The transport is an AF_UNIX socket (a file path), not loopback TCP: `port`
+/// is gone, replaced by `socketPath`. `pid`/`token` (liveness) are unchanged.
 struct MCPEndpointInfo: Codable, Equatable {
-    var port: Int
+    var socketPath: String
     var pid: Int
     var token: String?
 }
@@ -32,17 +34,26 @@ struct WireEvent: Encodable, Equatable {
     var summary: String?
 }
 
-/// Shared location of the app's endpoint-discovery file.
+/// Shared location of the app's endpoint-discovery file and UNIX socket.
 enum MCPActivityPaths {
-    static func endpointURL(
-        fileManager: FileManager = .default
-    ) -> URL {
+    /// Directory holding both the discovery file and the socket.
+    static func mcpDirectory(fileManager: FileManager = .default) -> URL {
         let base = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
             ?? fileManager.temporaryDirectory
         return base
             .appendingPathComponent("OpenUSDZEditor", isDirectory: true)
             .appendingPathComponent("mcp", isDirectory: true)
+    }
+
+    static func endpointURL(fileManager: FileManager = .default) -> URL {
+        mcpDirectory(fileManager: fileManager)
             .appendingPathComponent("endpoint.json", isDirectory: false)
+    }
+
+    /// The AF_UNIX socket the editor binds and the pump connects to.
+    static func socketURL(fileManager: FileManager = .default) -> URL {
+        mcpDirectory(fileManager: fileManager)
+            .appendingPathComponent("agent.sock", isDirectory: false)
     }
 }
 
@@ -55,7 +66,8 @@ final class SocketEventSink: MCPEventSink, @unchecked Sendable {
     private let endpointURL: URL
     private let pid: Int
     private let lock = NSLock()
-    private var connection: NWConnection?
+    private let queue = DispatchQueue(label: "openusdz.activity-sink")
+    private var connection: UnixSocketClient?
     private var lastSession: WireEvent?
 
     init(endpointURL: URL = MCPActivityPaths.endpointURL(),
@@ -110,54 +122,38 @@ final class SocketEventSink: MCPEventSink, @unchecked Sendable {
         close()
     }
 
-    // coverage:disable — real localhost socket IO + reconnect/liveness. The wire
+    // coverage:disable — real AF_UNIX socket IO + reconnect/liveness. The wire
     // encoding (`encodeLine`) and endpoint parsing (`readEndpoint`) are unit-tested;
-    // exercising NWConnection requires a live listener, covered by the end-to-end
-    // verification recipe, not in-process unit tests.
+    // exercising a live UNIX socket requires a listening editor, covered by the
+    // end-to-end verification recipe, not in-process unit tests.
     private func deliver(_ event: WireEvent) {
         let line = Self.encodeLine(event)
         lock.lock()
         let conn = connection ?? openConnection()
         lock.unlock()
         guard let conn else { return }
-        conn.send(content: line, completion: .contentProcessed { [weak self] error in
-            if error != nil { self?.dropConnection() }
-        })
+        conn.send(line)
     }
 
     /// Resolve the endpoint, verify the app process is alive, and open a
-    /// connection. Returns nil (no-op) when the app isn't reachable.
-    private func openConnection() -> NWConnection? {
+    /// UNIX-domain connection. Returns nil (no-op) when the app isn't reachable.
+    /// Caller holds `lock`.
+    private func openConnection() -> UnixSocketClient? {
         guard let info = Self.readEndpoint(from: endpointURL),
               isProcessAlive(info.pid),
-              let port = NWEndpoint.Port(rawValue: UInt16(info.port))
+              !info.socketPath.isEmpty,
+              let conn = UnixSocketClient.connect(path: info.socketPath, queue: queue)
         else { return nil }
-        let conn = NWConnection(host: "127.0.0.1", port: port, using: .tcp)
-        conn.stateUpdateHandler = { [weak self] state in
-            switch state {
-            case .failed, .cancelled: self?.dropConnection()
-            case .ready: self?.resendSession()
-            default: break
-            }
-        }
-        conn.start(queue: .global(qos: .utility))
+        conn.startReceiving(onData: { _ in }, onClose: { [weak self] in self?.dropConnection() })
         connection = conn
+        // Replay `session_start` so a late-launched app still learns what's served.
+        if let session = lastSession { conn.send(Self.encodeLine(session)) }
         return conn
-    }
-
-    /// On a fresh connection, replay `session_start` so a late-launched app
-    /// still learns what's being served.
-    private func resendSession() {
-        lock.lock()
-        let session = lastSession
-        lock.unlock()
-        guard let session else { return }
-        connection?.send(content: Self.encodeLine(session), completion: .idempotent)
     }
 
     private func dropConnection() {
         lock.lock()
-        connection?.cancel()
+        connection?.close()
         connection = nil
         lock.unlock()
     }

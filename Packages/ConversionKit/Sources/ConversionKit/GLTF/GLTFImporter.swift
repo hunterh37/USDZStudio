@@ -230,10 +230,12 @@ public struct GLTFImporter: AssetImporter {
                 let output: AnimationSampler.Output
                 switch path {
                 case .translation, .scale:
-                    let raw = try floatVectors(accessor: sampler.output, components: 3).map { SIMD3($0[0], $0[1], $0[2]) }
+                    let f = try floatVectors(accessor: sampler.output, components: 3)
+                    let raw = (0..<f.count / 3).map { SIMD3(f[$0 * 3], f[$0 * 3 + 1], f[$0 * 3 + 2]) }
                     output = .vec3(pickValues(raw, stride: stride))
                 case .rotation:
-                    let raw = try floatVectors(accessor: sampler.output, components: 4).map { SIMD4($0[0], $0[1], $0[2], $0[3]) }
+                    let f = try floatVectors(accessor: sampler.output, components: 4)
+                    let raw = (0..<f.count / 4).map { SIMD4(f[$0 * 4], f[$0 * 4 + 1], f[$0 * 4 + 2], f[$0 * 4 + 3]) }
                     output = .rotation(pickValues(raw, stride: stride))
                 case .weights:
                     output = .scalar(try scalarFloats(accessor: sampler.output))
@@ -314,18 +316,22 @@ public struct GLTFImporter: AssetImporter {
                 throw GLTFError.indexOutOfRange(what: "material", index: material)
             }
 
-            mesh.positions = try floatVectors(accessor: positionAccessor, components: 3).map { SIMD3($0[0], $0[1], $0[2]) }
+            let positions = try floatVectors(accessor: positionAccessor, components: 3)
+            mesh.positions = stride(from: 0, to: positions.count, by: 3).map { SIMD3(positions[$0], positions[$0 + 1], positions[$0 + 2]) }
             if let normal = primitive.attributes["NORMAL"] {
-                mesh.normals = try floatVectors(accessor: normal, components: 3).map { SIMD3($0[0], $0[1], $0[2]) }
+                let n = try floatVectors(accessor: normal, components: 3)
+                mesh.normals = stride(from: 0, to: n.count, by: 3).map { SIMD3(n[$0], n[$0 + 1], n[$0 + 2]) }
             }
             if let uv = primitive.attributes["TEXCOORD_0"] {
-                mesh.uvs = try floatVectors(accessor: uv, components: 2).map { SIMD2($0[0], $0[1]) }
+                let uvs = try floatVectors(accessor: uv, components: 2)
+                mesh.uvs = stride(from: 0, to: uvs.count, by: 2).map { SIMD2(uvs[$0], uvs[$0 + 1]) }
             }
             if let joints = primitive.attributes["JOINTS_0"] {
                 mesh.jointIndices = try jointIndices(accessor: joints)
             }
             if let weights = primitive.attributes["WEIGHTS_0"] {
-                mesh.jointWeights = try floatVectors(accessor: weights, components: 4).map { SIMD4($0[0], $0[1], $0[2], $0[3]) }
+                let w = try floatVectors(accessor: weights, components: 4)
+                mesh.jointWeights = stride(from: 0, to: w.count, by: 4).map { SIMD4(w[$0], w[$0 + 1], w[$0 + 2], w[$0 + 3]) }
             }
             let handled: Set = ["POSITION", "NORMAL", "TEXCOORD_0", "JOINTS_0", "WEIGHTS_0"]
             for attribute in primitive.attributes.keys.sorted() where !handled.contains(attribute) {
@@ -351,19 +357,27 @@ public struct GLTFImporter: AssetImporter {
             return accessors[index]
         }
 
-        /// Reads a float VEC2/VEC3/VEC4 accessor (componentType 5126), honoring byteStride.
-        private mutating func floatVectors(accessor index: Int, components: Int) throws -> [[Float]] {
+        /// Reads a float VEC2/VEC3/VEC4 accessor (componentType 5126), honoring
+        /// byteStride, into a single flat, densely-packed `[Float]` buffer of
+        /// `count * components` elements. Callers slice it into SIMD vectors —
+        /// reading straight into one pre-sized buffer avoids the per-vertex
+        /// inner-array allocation this incurred when it returned `[[Float]]`.
+        private mutating func floatVectors(accessor index: Int, components: Int) throws -> [Float] {
             let accessor = try self.accessor(index)
             let expectedType = ["VEC2", "VEC3", "VEC4"][components - 2]
             guard accessor.componentType == 5126, accessor.type == expectedType else {
                 throw GLTFError.unsupportedAccessor("accessor \(index): \(accessor.type)/\(accessor.componentType), expected \(expectedType)/float")
             }
             let bytes = try viewData(for: accessor, elementSize: components * 4)
-            return (0..<accessor.count).map { element in
-                (0..<components).map { component in
-                    bytes.data.readFloat(at: bytes.start + element * bytes.stride + component * 4)
+            var out = [Float]()
+            out.reserveCapacity(accessor.count * components)
+            for element in 0..<accessor.count {
+                let base = bytes.start + element * bytes.stride
+                for component in 0..<components {
+                    out.append(bytes.data.readFloat(at: base + component * 4))
                 }
             }
+            return out
         }
 
         /// Reads a float SCALAR accessor (5126) — animation key times, weights.

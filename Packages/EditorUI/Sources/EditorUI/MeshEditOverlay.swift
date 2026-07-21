@@ -321,6 +321,9 @@ public struct MeshEditOverlay: View {
                     paramField("Fraction", value: Binding(
                         get: { document.meshEdit?.insetFraction ?? 0.2 },
                         set: { document.meshEdit?.insetFraction = $0 }))
+                    paramField("Depth", value: Binding(
+                        get: { document.meshEdit?.insetDepth ?? -0.1 },
+                        set: { document.meshEdit?.insetDepth = $0 }))
                 case .merge:
                     paramField("Distance", value: Binding(
                         get: { document.meshEdit?.mergeDistance ?? 0.001 },

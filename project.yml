@@ -38,6 +38,8 @@ packages:
     path: Packages/USDCore
   QuickLookKit:
     path: Packages/QuickLookKit
+  AgentMCP:
+    path: Packages/AgentMCP
 
 targets:
   OpenUSDZEditor:
@@ -60,6 +62,10 @@ targets:
         product: USDBridge
       - package: USDCore
         product: USDCore
+      # In-app MCP host: the app serves agent editing tools against its open
+      # document so agent edits render live (specs/agent-live-editing.md).
+      - package: AgentMCP
+        product: AgentMCP
       # Finder-level QuickLook extensions, embedded in Contents/PlugIns.
       - target: USDAThumbnailExtension
         embed: true

@@ -97,6 +97,10 @@ public struct MeshEditState {
     /// Parameter HUD values.
     public var extrudeDistance: Double = 0.1
     public var insetFraction: Double = 0.2
+    /// Signed inset depth along the face normal (negative pushes the inner
+    /// face inward — the visible "punched-in panel" deform). Defaults to a
+    /// small inward offset so the tool visibly deforms out of the box.
+    public var insetDepth: Double = -0.1
     public var mergeDistance: Double = 0.001
     public var bevelWidth: Double = 0.05
     /// HUD edge-picker position (sorted edge order) for the Bevel tool.
@@ -270,7 +274,8 @@ extension EditorDocument {
                 entry = "Extrude"
             case .inset:
                 result = try InsetFaces.apply(mesh, selection: state.componentSelection,
-                                              params: .init(fraction: state.insetFraction))
+                                              params: .init(fraction: state.insetFraction,
+                                                            depth: state.insetDepth))
                 entry = "Inset"
             case .delete:
                 result = try DeleteComponents.apply(mesh, selection: state.componentSelection)
