@@ -166,6 +166,38 @@ struct InsetTests {
             }
         }
     }
+
+    @Test func depthOffsetsInnerFaceAlongNormalAndDeforms() throws {
+        let cube = Fixtures.cube()
+        let t = 0.4, depth = -0.3
+        let flat = try InsetFaces.apply(cube, selection: .faces([Fixtures.cubeTop]),
+                                        params: .init(fraction: t))
+        let deep = try InsetFaces.apply(cube, selection: .faces([Fixtures.cubeTop]),
+                                        params: .init(fraction: t, depth: depth))
+        // Same topology delta — depth only moves vertices, never adds/removes.
+        #expect(deep.delta == flat.delta)
+        // In-plane inset is volume-neutral; a nonzero depth is not — pushing
+        // the inner face inward removes volume, so the tool visibly deforms.
+        #expect(abs(flat.mesh.signedVolume - 1.0) < 1e-9)
+        #expect(deep.mesh.signedVolume < 1.0 - 1e-6)
+        // The inner ring is offset by exactly `depth` along the +up normal.
+        guard case .faces(let fi) = flat.resultSelection, let ff = fi.first,
+              case .faces(let di) = deep.resultSelection, let df = di.first else {
+            Issue.record("no inner face returned"); return
+        }
+        let dz = deep.mesh.faceCentroid(df).z - flat.mesh.faceCentroid(ff).z
+        #expect(abs(dz - depth) < 1e-9)
+        #expect(MeshInvariants.violations(in: deep.mesh, allowBoundaries: false).isEmpty)
+    }
+
+    @Test func depthDefaultsToZeroCoplanarInset() throws {
+        let cube = Fixtures.cube()
+        let a = try InsetFaces.apply(cube, selection: .faces([Fixtures.cubeTop]),
+                                     params: .init(fraction: 0.4))
+        let b = try InsetFaces.apply(cube, selection: .faces([Fixtures.cubeTop]),
+                                     params: .init(fraction: 0.4, depth: 0))
+        #expect(abs(a.mesh.signedVolume - b.mesh.signedVolume) < 1e-12)
+    }
 }
 
 @Suite("FillHole")
