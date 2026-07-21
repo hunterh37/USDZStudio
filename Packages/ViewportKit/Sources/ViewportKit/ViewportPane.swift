@@ -54,6 +54,13 @@ public struct ViewportCameraPose: Equatable, Sendable {
         self.azimuth = azimuth
         self.elevation = elevation
     }
+
+    /// Captures the current orbit-camera state as a pose — how a camera bookmark
+    /// snapshots the live view (read from ``ViewportCameraLink/camera``).
+    public init(camera: OrbitCamera) {
+        self.init(target: camera.target, distance: camera.distance,
+                  azimuth: camera.azimuth, elevation: camera.elevation)
+    }
 }
 
 public struct ViewportPane: View {
@@ -129,7 +136,16 @@ public struct ViewportPane: View {
     @State private var loadError: String?
     @State private var cameraMode: CameraInteractionMode = .rotate
     @State private var debugMode: DebugViewMode = .shaded
-    @StateObject private var cameraLink = ViewportCameraLink()
+    /// The pane's own camera channel, used when the host injects none.
+    @StateObject private var ownCameraLink = ViewportCameraLink()
+    /// A host-supplied camera channel (camera bookmarks read the live pose from
+    /// it). When present it replaces the pane's own link; otherwise the pane
+    /// owns one, so nothing changes for callers that don't need read-out.
+    private let injectedCameraLink: ViewportCameraLink?
+
+    /// The active camera channel: the injected one when supplied, else the
+    /// pane's own.
+    private var cameraLink: ViewportCameraLink { injectedCameraLink ?? ownCameraLink }
 
     public init(modelURL: URL?,
                 livePrimPaths: Set<String>? = nil,
@@ -152,7 +168,9 @@ public struct ViewportPane: View {
                 liveTransforms: [String: float4x4]? = nil,
                 materialOverrides: [String: MaterialOverride]? = nil,
                 environment: EnvironmentSettings = EnvironmentSettings(),
-                animationTime: Double? = nil) {
+                animationTime: Double? = nil,
+                cameraLink: ViewportCameraLink? = nil) {
+        self.injectedCameraLink = cameraLink
         self.modelURL = modelURL
         self.livePrimPaths = livePrimPaths
         self.sceneRevision = sceneRevision

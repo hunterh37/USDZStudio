@@ -32,6 +32,10 @@ struct OpenUSDZEditorApp: App {
     @State private var document: EditorDocument?
     @State private var openError: String?
 
+    /// App-wide persisted preferences, shared by the editor shell and the
+    /// Settings (⌘,) window.
+    @State private var settings = EditorSettings()
+
     /// True while an opened/dropped file is importing through the USD bridge;
     /// drives the viewport's circular progress overlay.
     @State private var isImporting = false
@@ -55,6 +59,7 @@ struct OpenUSDZEditorApp: App {
                             importingFileName: importingFileName,
                             tutorial: tutorial,
                             mcpActivity: mcp.model,
+                            settings: settings,
                             makeScriptExecutor: {
                                 ProcessScriptExecutor(
                                     bridge: ProcessBridgeExecutor(scriptPath: Self.snapshotScriptPath))
@@ -142,6 +147,9 @@ struct OpenUSDZEditorApp: App {
             CommandMenu("Convert") {
                 Button("Library…") { postMenu(.library) }
                     .keyboardShortcut("l", modifiers: [.command, .shift])
+                Button("Recolor…") { postMenu(.recolor) }
+                    .keyboardShortcut("r", modifiers: [.command, .shift])
+                    .disabled(document == nil)
                 Divider()
                 Button("Convert File…") { postMenu(.convert) }
                     .keyboardShortcut("k", modifiers: [.command, .shift])
@@ -150,6 +158,9 @@ struct OpenUSDZEditorApp: App {
                 Divider()
                 Button("Validate Stage") { postMenu(.validate) }
                     .keyboardShortcut("u")
+                    .disabled(document == nil)
+                Button("Show Changes…") { postMenu(.diff) }
+                    .keyboardShortcut("d", modifiers: [.command, .shift])
                     .disabled(document == nil)
                 Divider()
                 Button("Sculpt Demo House") { postMenu(.sculptDemo) }
@@ -188,6 +199,11 @@ struct OpenUSDZEditorApp: App {
             MCPMenuBarLabel(model: mcp.model)
         }
         .menuBarExtraStyle(.window)
+
+        // Standard macOS Settings (⌘,) window over the shared preferences model.
+        Settings {
+            SettingsView(settings: settings)
+        }
     }
 
     /// Swaps in the tour's sandbox document; the user's document (if any)
