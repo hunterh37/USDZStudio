@@ -204,15 +204,17 @@ public enum USDASerializer {
 
     private static func vectorArrayLiteral(_ flat: [Double], arity: Int) -> String? {
         guard flat.count % arity == 0 else { return nil }
+        // Slice into `flat` per vector rather than copying each group into a
+        // fresh `Array` — this runs over every point/normal/UV on save.
         let elements = stride(from: 0, to: flat.count, by: arity)
-            .map { tuple(Array(flat[$0..<($0 + arity)])) }
+            .map { tuple(flat[$0..<($0 + arity)]) }
             .joined(separator: ", ")
         return "[\(elements)]"
     }
 
     private static func matrixLiteral(_ flat: [Double], base: Int) -> String {
         let rows = stride(from: base, to: base + 16, by: 4)
-            .map { tuple(Array(flat[$0..<($0 + 4)])) }
+            .map { tuple(flat[$0..<($0 + 4)]) }
             .joined(separator: ", ")
         return "( \(rows) )"
     }
@@ -225,7 +227,9 @@ public enum USDASerializer {
             : String(value)
     }
 
-    static func tuple(_ values: [Double]) -> String {
+    /// Accepts any `Double` sequence (`[Double]` or an `ArraySlice` view) so
+    /// callers can pass a slice of a flat buffer without allocating a copy.
+    static func tuple<S: Sequence>(_ values: S) -> String where S.Element == Double {
         "(" + values.map(number).joined(separator: ", ") + ")"
     }
 
