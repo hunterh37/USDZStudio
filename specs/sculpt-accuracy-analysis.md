@@ -130,6 +130,12 @@ Ordered by measured leverage. Each item states a hypothesis, method, and
   renders are correctly shaded (removes the 24 `mesh.normals` diagnostics).
   *Acceptance:* zero `mesh.normals` info diagnostics; appearance-term SSIM
   improvement quantified at the `material` pass.
+  *Status:* the sculpt build path authors normals via `MeshKit.VertexNormals`
+  (PR #87). The remaining authoring paths — library insertion, the tutorial
+  scene, the import/convert `USDAuthorStage`, and `MeshEditCommand` re-authoring
+  — route through the same `VertexNormals` helper (issue #95), and the editor's
+  `mesh.normals` quick-fix delegates to it too, so the smooth-normal math has a
+  single home in `MeshKit`.
 
 ## 5. Non-goals / guardrails
 

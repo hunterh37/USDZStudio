@@ -37,7 +37,7 @@ OpenUSDZEditor/
 ```
 App ─▶ EditorUI ─▶ {ViewportKit, EditingKit, ConversionKit, ValidationKit, ScriptingKit} ─▶ USDCore
 USDBridge ─▶ USDCore          (bridge implements USDCore protocols)
-{EditingKit, ViewportKit} ─▶ MeshKit   (MeshKit itself imports nothing internal)
+{EditingKit, ViewportKit, ConversionKit} ─▶ MeshKit   (MeshKit itself imports nothing internal; ConversionKit uses MeshKit.VertexNormals to derive smooth normals for normal-less imports — issue #95)
 MechanismKit imports nothing internal (pure leaf, like MeshKit); its consumers ({EditingKit, SculptKit, AgentMCP}) import it for rigid-joint authoring (specs/articulation-mechanisms.md)
 RigKit imports nothing internal (pure leaf, like MeshKit/MechanismKit); its consumers ({EditingKit, ViewportKit, AgentMCP}) import it for skeletal rig/skinning/motion authoring (specs/animation-rigging.md)
 SessionKit ─▶ {USDCore, ViewportKit, EditingKit}; consumed by EditorUI/App only — cross-launch session envelope + restore (reuses ViewportKit value types + the EditingKit WAL; authors no stage itself), specs/session-restoration.md

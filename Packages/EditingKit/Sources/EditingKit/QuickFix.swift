@@ -1,5 +1,6 @@
 import USDCore
 import ValidationKit
+import MeshKit
 
 /// A one-click remediation for a `Diagnostic`: a human-readable title plus the
 /// undoable `EditCommand` that resolves it (specs/validation.md — quick-fixes).
@@ -187,63 +188,28 @@ enum MeshNormals {
     /// Area-weighted smooth vertex normals as a flat `[x, y, z, …]` array
     /// parallel to `points`.
     ///
-    /// Each face contributes its Newell normal — whose magnitude is proportional
-    /// to face area — to every vertex it touches, so large faces dominate the
-    /// blend the way they visually should. Normals are then unit-length.
-    ///
-    /// Returns `nil` for topology this cannot honestly interpret: missing or
-    /// mismatched arrays, faces under 3 corners, or out-of-range indices. A
-    /// vertex touched by no face (or by faces that exactly cancel) gets a zero
-    /// normal rather than a fabricated direction — USD treats that as
-    /// unshaded, which is the truthful answer.
+    /// The geometry math is not duplicated here: this reads the prim's authored
+    /// topology into a `MeshKit.FlatMesh` and defers to `VertexNormals`, the
+    /// single source of truth for smooth-normal math (issue #95). Returns `nil`
+    /// for topology that cannot be honestly interpreted — a non-mesh prim,
+    /// missing/mismatched arrays, faces under 3 corners, or out-of-range indices
+    /// — so a `mesh.normals` fix is offered only when it can be authored
+    /// correctly; a degenerate mesh is a `mesh.topology` problem instead.
     static func smoothVertexNormals(of prim: Prim) -> [Double]? {
         guard prim.typeName == "Mesh",
               let points = points(of: prim), !points.isEmpty, points.count % 3 == 0,
               let counts = intArray(prim, "faceVertexCounts"),
-              let indices = intArray(prim, "faceVertexIndices"),
-              counts.reduce(0, +) == indices.count,
-              !counts.contains(where: { $0 < 3 }) else { return nil }
+              let indices = intArray(prim, "faceVertexIndices") else { return nil }
 
-        let pointCount = points.count / 3
-        guard !indices.contains(where: { $0 < 0 || $0 >= pointCount }) else { return nil }
-
-        func point(_ i: Int) -> (Double, Double, Double) {
-            (points[i * 3], points[i * 3 + 1], points[i * 3 + 2])
+        var vertices: [SIMD3<Double>] = []
+        vertices.reserveCapacity(points.count / 3)
+        for i in stride(from: 0, to: points.count, by: 3) {
+            vertices.append(SIMD3(points[i], points[i + 1], points[i + 2]))
         }
-
-        var accumulated = [Double](repeating: 0, count: points.count)
-        var cursor = 0
-        for count in counts {
-            let corners = indices[cursor ..< (cursor + count)]
-            cursor += count
-
-            // Newell's method: robust for non-planar and concave polygons, and
-            // its magnitude is twice the projected face area — exactly the
-            // weight we want.
-            var nx = 0.0, ny = 0.0, nz = 0.0
-            for (offset, current) in corners.enumerated() {
-                let next = corners[corners.startIndex + (offset + 1) % count]
-                let (cx, cy, cz) = point(current)
-                let (nx2, ny2, nz2) = point(next)
-                nx += (cy - ny2) * (cz + nz2)
-                ny += (cz - nz2) * (cx + nx2)
-                nz += (cx - nx2) * (cy + ny2)
-            }
-            for corner in corners {
-                accumulated[corner * 3] += nx
-                accumulated[corner * 3 + 1] += ny
-                accumulated[corner * 3 + 2] += nz
-            }
-        }
-
-        for vertex in 0 ..< pointCount {
-            let x = accumulated[vertex * 3], y = accumulated[vertex * 3 + 1], z = accumulated[vertex * 3 + 2]
-            let length = (x * x + y * y + z * z).squareRoot()
-            guard length > 0 else { continue }
-            accumulated[vertex * 3] = x / length
-            accumulated[vertex * 3 + 1] = y / length
-            accumulated[vertex * 3 + 2] = z / length
-        }
-        return accumulated
+        let flat = FlatMesh(points: vertices, faceVertexCounts: counts, faceVertexIndices: indices)
+        let normals = VertexNormals.smoothFlat(for: flat)
+        // `VertexNormals` returns an empty array for topology it declines; that
+        // is precisely the "not a normals fix" case, so map it back to `nil`.
+        return normals.isEmpty ? nil : normals
     }
 }

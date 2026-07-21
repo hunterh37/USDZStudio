@@ -126,6 +126,40 @@ struct USDAuthorStageTests {
         #expect(material.attribute(named: "inputs:opacity") == nil)
     }
 
+    /// A source mesh with geometry but no normals gets smooth per-vertex
+    /// normals derived from its topology (issue #95), so the authored stage
+    /// never emits a mesh that trips the `mesh.normals` diagnostic.
+    @Test func derivesNormalsWhenSourceHasNone() async throws {
+        let scene = IntermediateScene(
+            name: "Tri",
+            rootNodes: [SceneNode(name: "N", meshIndices: [0])],
+            meshes: [MeshData(
+                name: "M",
+                positions: [SIMD3(0, 0, 0), SIMD3(1, 0, 0), SIMD3(0, 1, 0)],
+                normals: [], // source omits normals
+                indices: [0, 1, 2])])
+        let stage = try await author(scene)
+        let mesh = try #require(stage.prim(at: PrimPath("/Tri/N/M")!))
+        // A CCW triangle in the z=0 plane → unit +Z normal at every vertex.
+        #expect(mesh.attribute(named: "normals")?.value == .doubleArray([0, 0, 1, 0, 0, 1, 0, 0, 1]))
+    }
+
+    /// Degenerate topology (indices out of range) can't yield honest normals,
+    /// so none are authored rather than fabricating a direction.
+    @Test func authorsNoNormalsForUnderivableTopology() async throws {
+        let scene = IntermediateScene(
+            name: "Bad",
+            rootNodes: [SceneNode(name: "N", meshIndices: [0])],
+            meshes: [MeshData(
+                name: "M",
+                positions: [SIMD3(0, 0, 0), SIMD3(1, 0, 0), SIMD3(0, 1, 0)],
+                normals: [],
+                indices: [0, 1, 9])]) // index 9 is out of range
+        let stage = try await author(scene)
+        let mesh = try #require(stage.prim(at: PrimPath("/Bad/N/M")!))
+        #expect(mesh.attribute(named: "normals") == nil)
+    }
+
     @Test func authorsAlphaModes() async throws {
         let scene = IntermediateScene(name: "A", materials: [
             PBRMaterial(name: "Masked", baseColorFactor: SIMD4(1, 1, 1, 0.5), alphaMode: .mask(threshold: 0.25)),
