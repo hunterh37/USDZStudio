@@ -77,6 +77,18 @@ enum CLIRunner {
                                verdict as a machine-readable report; branch on
                                its `exportAllowed` field.
 
+      recolor <in-image> <out.png> --color '#RRGGBB' [--mode direct|calibrated]
+                     [--source-space sRGB|linear|displayP3]
+                     [--target-space sRGB|linear|displayP3]
+                     [--lightness-bias N] [--chroma-preservation N]
+                     [--preserve-hue-variation] [--mask-uv u,v]
+                     [--mask-threshold N] [--json]
+                               Perceptually recolor an albedo texture toward a
+                               target color, preserving grain/shading (OKLab).
+                               --mode calibrated iterates to ΔE < 2.0 against the
+                               target; --mask-uv seeds a similarity mask so only
+                               the clicked region recolors. Writes lossless PNG.
+
       --preset NAME            Base texture settings before other flags apply.
                                NAME is one of: quicklook-strict (default),
                                ecommerce, lossless.
@@ -137,6 +149,9 @@ enum CLIRunner {
             return await validate(
                 arguments: Array(arguments.dropFirst()),
                 openStage: openStage, print: output, printError: printError)
+        case "recolor":
+            return RecolorCommand.run(arguments: Array(arguments.dropFirst()),
+                                      print: output, printError: printError)
         default:
             printError("unknown subcommand: \(subcommand)\n" + usage)
             return 2
