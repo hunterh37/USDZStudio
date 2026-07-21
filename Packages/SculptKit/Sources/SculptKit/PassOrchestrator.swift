@@ -9,6 +9,8 @@ public enum AdvanceError: Error, Equatable, CustomStringConvertible {
     case continueRequiresComparisonSheet
     case continueRequiresScore
     case scoreBelowThreshold(score: Double, threshold: Double)
+    case continueRequiresMeasuredSimilarity
+    case similarityBelowFloor(measured: Double, floor: Double)
 
     public var description: String {
         switch self {
@@ -22,6 +24,10 @@ public enum AdvanceError: Error, Equatable, CustomStringConvertible {
             return "continue requires a vision score"
         case .scoreBelowThreshold(let score, let threshold):
             return "vision score \(score) is below the acceptance threshold \(threshold)"
+        case .continueRequiresMeasuredSimilarity:
+            return "continue requires a measured similarity (this assessment sets a similarity floor)"
+        case .similarityBelowFloor(let measured, let floor):
+            return "measured similarity \(measured) is below the acceptance floor \(floor)"
         }
     }
 }
@@ -43,7 +49,7 @@ public enum AdvanceResult: Sendable, Equatable {
 /// The locked-pass state machine. Holds the current pass and enforces the
 /// gate on `continue`; `refineSpec`/`refineCode` keep the same pass unlocked;
 /// `requestInput`/`stop` pause or halt. Value type so callers can snapshot it.
-public struct PassOrchestrator: Sendable, Equatable {
+public struct PassOrchestrator: Sendable, Equatable, Codable {
     public private(set) var current: SculptPass
     public private(set) var isComplete: Bool
     public private(set) var isHalted: Bool
@@ -58,9 +64,16 @@ public struct PassOrchestrator: Sendable, Equatable {
     public var isActive: Bool { !isComplete && !isHalted }
 
     /// Apply a review's decision. `threshold` is the minimum passing score for
-    /// `continue` (typically `assessment.policy.minScore`).
+    /// `continue` (typically `assessment.policy.minScore`); `similarityFloor`
+    /// (typically `assessment.policy.similarityFloor`) is the minimum *measured*
+    /// reference-vs-render similarity. When the floor is > 0 a `continue` must
+    /// carry a `measuredSimilarity` that meets it — the deterministic gate that
+    /// the subjective score cannot bypass. A floor of 0 disables the check,
+    /// preserving pre-floor behaviour.
     @discardableResult
-    public mutating func advance(after review: PassReview, threshold: Double) throws -> AdvanceResult {
+    public mutating func advance(
+        after review: PassReview, threshold: Double, similarityFloor: Double = 0
+    ) throws -> AdvanceResult {
         guard isActive else {
             throw AdvanceError.notContinuablePass(current)
         }
@@ -71,6 +84,14 @@ public struct PassOrchestrator: Sendable, Equatable {
             guard let score = review.score else { throw AdvanceError.continueRequiresScore }
             guard score >= threshold else {
                 throw AdvanceError.scoreBelowThreshold(score: score, threshold: threshold)
+            }
+            if similarityFloor > 0 {
+                guard let measured = review.measuredSimilarity else {
+                    throw AdvanceError.continueRequiresMeasuredSimilarity
+                }
+                guard measured >= similarityFloor else {
+                    throw AdvanceError.similarityBelowFloor(measured: measured, floor: similarityFloor)
+                }
             }
             if let next = current.next {
                 current = next

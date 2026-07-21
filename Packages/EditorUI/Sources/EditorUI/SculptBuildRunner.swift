@@ -96,7 +96,66 @@ public enum SculptBuildRunner {
         case .authorRuntime(let rootPath, let manifestJSON):
             return authorRootAttribute(name: "sculptRuntime", value: manifestJSON,
                                        rootPath: rootPath, to: document)
+
+        case .refineMesh(let path, let ops):
+            return applyMeshTransform(at: path, to: document) { mesh in
+                var current = mesh
+                for op in ops {
+                    switch op {
+                    case let .inset(fraction, depth):
+                        let faces = Set(current.faceLoops.keys)
+                        current = try InsetFaces.apply(
+                            current, selection: .faces(faces),
+                            params: .init(fraction: fraction, depth: depth)).mesh
+                    }
+                }
+                return current
+            }
+
+        case .decimateMesh(let path, let weldDistance):
+            return applyMeshTransform(at: path, to: document) { mesh in
+                let vertices = Set(mesh.positions.keys)
+                return try MergeVertices.apply(
+                    mesh, selection: .vertices(vertices), params: .byDistance(weldDistance)).mesh
+            }
         }
+    }
+
+    /// Read an authored prim's `Geo` mesh back into a `HalfEdgeMesh`, apply a
+    /// real MeshKit transform, and re-author the resulting topology onto the geo
+    /// prim through the command stack. Best-effort: a missing prim, unreadable
+    /// topology, or a failed op is skipped (returns nil) so a partial pass still
+    /// renders — matching the rest of this runner.
+    static func applyMeshTransform(
+        at rawPath: String, to document: EditorDocument,
+        _ transform: (HalfEdgeMesh) throws -> HalfEdgeMesh
+    ) -> String? {
+        // Geometry is authored as an Xform with a child `Geo` Mesh (see meshPrim).
+        guard let xformPath = PrimPath(rawPath),
+              let geoPath = xformPath.appending("Geo"),
+              let geo = document.snapshot.prim(at: geoPath),
+              case .float3Array(let rawPoints)? = geo.attribute(named: "points")?.value,
+              case .intArray(let counts)? = geo.attribute(named: "faceVertexCounts")?.value,
+              case .intArray(let indices)? = geo.attribute(named: "faceVertexIndices")?.value
+        else { return nil }
+        var points: [SIMD3<Double>] = []
+        points.reserveCapacity(rawPoints.count / 3)
+        var i = 0
+        while i + 2 < rawPoints.count {
+            points.append(SIMD3(rawPoints[i], rawPoints[i + 1], rawPoints[i + 2]))
+            i += 3
+        }
+        let flat = FlatMesh(points: points, faceVertexCounts: counts, faceVertexIndices: indices)
+        guard let mesh = try? MeshIO.mesh(from: flat),
+              let result = try? transform(mesh) else { return nil }
+        let out = MeshIO.flat(from: result)
+        var outPoints: [Double] = []
+        outPoints.reserveCapacity(out.points.count * 3)
+        for p in out.points { outPoints += [p.x, p.y, p.z] }
+        _ = authorAttribute(Attribute(name: "points", value: .float3Array(outPoints)), on: geoPath, to: document)
+        _ = authorAttribute(Attribute(name: "faceVertexCounts", value: .intArray(out.faceVertexCounts)), on: geoPath, to: document)
+        _ = authorAttribute(Attribute(name: "faceVertexIndices", value: .intArray(out.faceVertexIndices)), on: geoPath, to: document)
+        return xformPath.description
     }
 
     /// Build a typed `UsdLux` light prim with intensity/colour channels and an

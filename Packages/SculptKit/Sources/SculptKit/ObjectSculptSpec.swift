@@ -275,6 +275,9 @@ public struct ComponentNode: Codable, Sendable, Equatable, Identifiable {
     /// How this node joins its parent (img2threejs's "declare a join method").
     /// Decode-defaults to nil; the attachment gate treats nil as unspecified.
     public var attachment: AttachmentKind?
+    /// Real geometry-refinement ops the `formRefinement` pass applies to this
+    /// node's authored mesh (executed via MeshKit). Decode-defaults to `[]`.
+    public var refinements: [MeshRefinement]
     public var children: [ComponentNode]
 
     public init(
@@ -287,6 +290,7 @@ public struct ComponentNode: Codable, Sendable, Equatable, Identifiable {
         materialID: String? = nil,
         repetition: RepetitionSystem? = nil,
         attachment: AttachmentKind? = nil,
+        refinements: [MeshRefinement] = [],
         children: [ComponentNode] = []
     ) {
         self.name = name
@@ -302,7 +306,33 @@ public struct ComponentNode: Codable, Sendable, Equatable, Identifiable {
         self.materialID = materialID
         self.repetition = repetition
         self.attachment = attachment
+        self.refinements = refinements
         self.children = children
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case name, shape, translation, rotationEulerDegrees, scale
+        case width, height, depth, radius, segments
+        case materialID, repetition, attachment, refinements, children
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        name = try c.decode(String.self, forKey: .name)
+        shape = try c.decode(ShapeKind.self, forKey: .shape)
+        translation = try c.decodeIfPresent([Double].self, forKey: .translation) ?? [0, 0, 0]
+        rotationEulerDegrees = try c.decodeIfPresent([Double].self, forKey: .rotationEulerDegrees) ?? [0, 0, 0]
+        scale = try c.decodeIfPresent([Double].self, forKey: .scale) ?? [1, 1, 1]
+        width = try c.decodeIfPresent(Double.self, forKey: .width) ?? 1
+        height = try c.decodeIfPresent(Double.self, forKey: .height) ?? 1
+        depth = try c.decodeIfPresent(Double.self, forKey: .depth) ?? 1
+        radius = try c.decodeIfPresent(Double.self, forKey: .radius) ?? 0.5
+        segments = try c.decodeIfPresent(Int.self, forKey: .segments) ?? 16
+        materialID = try c.decodeIfPresent(String.self, forKey: .materialID)
+        repetition = try c.decodeIfPresent(RepetitionSystem.self, forKey: .repetition)
+        attachment = try c.decodeIfPresent(AttachmentKind.self, forKey: .attachment)
+        refinements = try c.decodeIfPresent([MeshRefinement].self, forKey: .refinements) ?? []
+        children = try c.decodeIfPresent([ComponentNode].self, forKey: .children) ?? []
     }
 
     /// This node plus all descendants, in depth-first order.
@@ -332,6 +362,9 @@ public struct ObjectSculptSpec: Codable, Sendable, Equatable {
     public var lights: [LightSpec]
     /// Level-of-detail tiers authored by the optimization pass.
     public var lodTiers: [LODTier]
+    /// Real vertex-welding decimation applied to every geometry leaf by the
+    /// optimization pass. Decode-defaults to nil (LOD-manifest-only behaviour).
+    public var optimization: OptimizationSpec?
     public var detailInventory: DetailInventory
     public var reviewHistory: [PassReview]
 
@@ -341,6 +374,7 @@ public struct ObjectSculptSpec: Codable, Sendable, Equatable {
         colliders: [Collider] = [], destructionGroups: [DestructionGroup] = [],
         surfaceProjection: SurfaceProjection? = nil, landmarks: [Landmark] = [],
         lights: [LightSpec] = [], lodTiers: [LODTier] = [],
+        optimization: OptimizationSpec? = nil,
         detailInventory: DetailInventory = DetailInventory(),
         reviewHistory: [PassReview] = []
     ) {
@@ -355,6 +389,7 @@ public struct ObjectSculptSpec: Codable, Sendable, Equatable {
         self.landmarks = landmarks
         self.lights = lights
         self.lodTiers = lodTiers
+        self.optimization = optimization
         self.detailInventory = detailInventory
         self.reviewHistory = reviewHistory
     }
@@ -364,7 +399,7 @@ public struct ObjectSculptSpec: Codable, Sendable, Equatable {
     private enum CodingKeys: String, CodingKey {
         case name, objectClass, root, materials, sockets
         case colliders, destructionGroups, surfaceProjection, landmarks
-        case lights, lodTiers, detailInventory, reviewHistory
+        case lights, lodTiers, optimization, detailInventory, reviewHistory
     }
 
     public init(from decoder: Decoder) throws {
@@ -380,6 +415,7 @@ public struct ObjectSculptSpec: Codable, Sendable, Equatable {
         landmarks = try c.decodeIfPresent([Landmark].self, forKey: .landmarks) ?? []
         lights = try c.decodeIfPresent([LightSpec].self, forKey: .lights) ?? []
         lodTiers = try c.decodeIfPresent([LODTier].self, forKey: .lodTiers) ?? []
+        optimization = try c.decodeIfPresent(OptimizationSpec.self, forKey: .optimization)
         detailInventory = try c.decodeIfPresent(DetailInventory.self, forKey: .detailInventory) ?? DetailInventory()
         reviewHistory = try c.decodeIfPresent([PassReview].self, forKey: .reviewHistory) ?? []
     }
