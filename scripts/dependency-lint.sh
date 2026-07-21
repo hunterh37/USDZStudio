@@ -39,7 +39,7 @@ policy_for() {
     ScriptingKit)         echo "USDCore" ;;
     ViewportKit)          echo "USDCore MeshKit" ;;     # component-overlay rendering (specs/mesh-editing.md)
     EditingKit)           echo "USDCore ValidationKit MeshKit MechanismKit" ;;  # QuickFixRegistry maps Diagnostics -> undoable commands; MechanismKit: rigid-joint authoring commands
-    SculptKit)            echo "USDCore MeshKit" ;;     # pure staged-sculpt pipeline logic (specs/sculpt-pipeline.md)
+    SculptKit)            echo "USDCore MeshKit MechanismKit" ;;     # pure staged-sculpt pipeline logic (specs/sculpt-pipeline.md); MechanismKit: articulation in the spec/runtime layer
     AgentMCP)             echo "USDCore USDBridge EditingKit ValidationKit ConversionKit ScriptingKit MeshKit MechanismKit SculptKit" ;;  # MCP adapter over the kits (docs/AGENT_MCP_PLAN.md); never EditorUI
     EditorUI)             echo "USDCore USDBridge ConversionKit ViewportKit EditingKit ValidationKit ScriptingKit DicyaninDesignSystem MeshKit SculptKit" ;;  # SculptKit: in-app staged-sculpt runner (specs/sculpt-pipeline.md)
     App)                  echo "USDCore USDBridge ConversionKit ViewportKit EditingKit ValidationKit ScriptingKit EditorUI DicyaninDesignSystem MeshKit AgentMCP" ;;  # App hosts the in-app MCP editing session (specs/agent-live-editing.md); composition root, like CLI

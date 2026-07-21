@@ -10,9 +10,10 @@ let package = Package(
     dependencies: [
         .package(path: "../USDCore"),
         .package(path: "../MeshKit"),
+        .package(path: "../MechanismKit"),
     ],
     targets: [
-        .target(name: "SculptKit", dependencies: ["USDCore", "MeshKit"], path: "Sources/SculptKit"),
+        .target(name: "SculptKit", dependencies: ["USDCore", "MeshKit", "MechanismKit"], path: "Sources/SculptKit"),
         .testTarget(name: "SculptKitTests", dependencies: ["SculptKit"], path: "Tests/SculptKitTests"),
     ]
 )
