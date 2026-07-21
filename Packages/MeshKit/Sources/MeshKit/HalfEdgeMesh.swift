@@ -80,7 +80,20 @@ public struct HalfEdgeMesh: Equatable, Sendable {
 
     public var vertexCount: Int { positions.count }
     public var faceCount: Int { faceLoops.count }
-    public var edgeCount: Int { edgeFaceMap.count }
+    /// Unique undirected edge count. Counts edge keys directly instead of
+    /// materialising the full `edgeFaceMap` (which allocates a `[FaceID]`
+    /// value array per edge) — this is read once per op via `OpSupport.verify`.
+    public var edgeCount: Int {
+        var edges = Set<EdgeKey>()
+        edges.reserveCapacity(faceLoops.count * 2)
+        for f in faceOrder {
+            guard let loop = faceLoops[f] else { continue }
+            for i in loop.indices {
+                edges.insert(EdgeKey(loop[i], loop[(i + 1) % loop.count]))
+            }
+        }
+        return edges.count
+    }
 
     // MARK: Mutation primitives (used by ops; keep order arrays coherent)
 
@@ -104,16 +117,28 @@ public struct HalfEdgeMesh: Equatable, Sendable {
         return id
     }
 
-    public mutating func removeFace(_ id: FaceID) {
-        faceLoops.removeValue(forKey: id)
-        faceCornerUVs.removeValue(forKey: id)
-        faceOrder.removeAll { $0 == id }
-        for key in subsets.keys { subsets[key]?.remove(id) }
+    public mutating func removeFace(_ id: FaceID) { removeFaces([id]) }
+
+    /// Batch face removal. Filters `faceOrder` (and each subset) in a single
+    /// pass, so deleting k faces is O(faceCount + subsets) rather than the
+    /// O(k · faceCount) of calling `removeFace` in a loop.
+    public mutating func removeFaces(_ ids: Set<FaceID>) {
+        guard !ids.isEmpty else { return }
+        for id in ids {
+            faceLoops.removeValue(forKey: id)
+            faceCornerUVs.removeValue(forKey: id)
+        }
+        faceOrder.removeAll { ids.contains($0) }
+        for key in subsets.keys { subsets[key]?.subtract(ids) }
     }
 
-    public mutating func removeVertex(_ id: VertexID) {
-        positions.removeValue(forKey: id)
-        vertexOrder.removeAll { $0 == id }
+    public mutating func removeVertex(_ id: VertexID) { removeVertices([id]) }
+
+    /// Batch vertex removal — single-pass `vertexOrder` filter (see `removeFaces`).
+    public mutating func removeVertices(_ ids: Set<VertexID>) {
+        guard !ids.isEmpty else { return }
+        for id in ids { positions.removeValue(forKey: id) }
+        vertexOrder.removeAll { ids.contains($0) }
     }
 
     public mutating func setPosition(_ p: SIMD3<Double>, for id: VertexID) {
@@ -138,7 +163,7 @@ public struct HalfEdgeMesh: Equatable, Sendable {
     public mutating func pruneIsolatedVertices() {
         var referenced = Set<VertexID>()
         for loop in faceLoops.values { referenced.formUnion(loop) }
-        for v in positions.keys where !referenced.contains(v) { removeVertex(v) }
+        removeVertices(Set(positions.keys.lazy.filter { !referenced.contains($0) }))
     }
 
     // MARK: Derived adjacency
@@ -146,6 +171,7 @@ public struct HalfEdgeMesh: Equatable, Sendable {
     /// Undirected edge → adjacent faces (in face-order for determinism).
     public var edgeFaceMap: [EdgeKey: [FaceID]] {
         var map: [EdgeKey: [FaceID]] = [:]
+        map.reserveCapacity(faceLoops.count * 2)
         for f in faceOrder {
             guard let loop = faceLoops[f] else { continue }
             for i in loop.indices {
@@ -157,6 +183,7 @@ public struct HalfEdgeMesh: Equatable, Sendable {
 
     public var vertexFaceMap: [VertexID: [FaceID]] {
         var map: [VertexID: [FaceID]] = [:]
+        map.reserveCapacity(positions.count)
         for f in faceOrder {
             for v in faceLoops[f] ?? [] { map[v, default: []].append(f) }
         }
@@ -192,7 +219,8 @@ public struct HalfEdgeMesh: Equatable, Sendable {
     }
 
     public func faceArea(_ id: FaceID) -> Double {
-        (faceNormalArea(id) * faceNormalArea(id)).sum().squareRoot()
+        let n = faceNormalArea(id)
+        return (n * n).sum().squareRoot()
     }
 
     /// Signed volume via divergence theorem (valid for closed meshes).

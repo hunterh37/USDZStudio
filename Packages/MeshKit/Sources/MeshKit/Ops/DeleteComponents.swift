@@ -38,11 +38,11 @@ public enum DeleteComponents: MeshOp {
         }
 
         var out = mesh
-        for f in facesToDelete { out.removeFace(f) }
+        out.removeFaces(facesToDelete)
         out.pruneIsolatedVertices()
         // Extra rule for explicit vertex deletion: the vertices themselves go too.
         if case .vertices(let verts) = selection {
-            for v in verts where out.positions[v] != nil { out.removeVertex(v) }
+            out.removeVertices(verts.filter { out.positions[$0] != nil })
         }
 
         let delta = TopologyDelta(vertices: out.vertexCount - mesh.vertexCount,
