@@ -80,10 +80,11 @@ public struct HalfEdgeMesh: Equatable, Sendable {
 
     public var vertexCount: Int { positions.count }
     public var faceCount: Int { faceLoops.count }
-    /// Unique undirected edge count. Counts edge keys directly instead of
-    /// materialising the full `edgeFaceMap` (which allocates a `[FaceID]`
-    /// value array per edge) — this is read once per op via `OpSupport.verify`.
-    public var edgeCount: Int {
+    /// The set of unique undirected edges, derived from face loops. Building the
+    /// key set directly avoids materialising the full `edgeFaceMap` (which
+    /// allocates a `[FaceID]` value array per edge) when the caller only needs
+    /// membership or a count — e.g. recipe edge-existence checks and `edgeCount`.
+    public var edgeSet: Set<EdgeKey> {
         var edges = Set<EdgeKey>()
         edges.reserveCapacity(faceLoops.count * 2)
         for f in faceOrder {
@@ -92,8 +93,11 @@ public struct HalfEdgeMesh: Equatable, Sendable {
                 edges.insert(EdgeKey(loop[i], loop[(i + 1) % loop.count]))
             }
         }
-        return edges.count
+        return edges
     }
+
+    /// Unique undirected edge count. Read once per op via `OpSupport.verify`.
+    public var edgeCount: Int { edgeSet.count }
 
     // MARK: Mutation primitives (used by ops; keep order arrays coherent)
 
