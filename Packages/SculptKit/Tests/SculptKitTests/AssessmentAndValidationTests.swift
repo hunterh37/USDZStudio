@@ -50,7 +50,7 @@ import Testing
 @Suite struct SpecValidatorTests {
 
     func validSpec() -> ObjectSculptSpec {
-        let leaf = ComponentNode(name: "Body", shape: .primitive(.cylinder), materialID: "wood")
+        let leaf = ComponentNode(name: "Body", shape: .primitive(.cylinder), materialID: "wood", attachment: .weld)
         let root = ComponentNode(name: "Barrel", shape: .group, children: [leaf])
         return ObjectSculptSpec(
             name: "Barrel", objectClass: .object, root: root,

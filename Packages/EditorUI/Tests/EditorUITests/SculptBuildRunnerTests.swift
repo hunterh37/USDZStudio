@@ -139,4 +139,34 @@ struct SculptBuildRunnerTests {
         let result = SpecValidator.validate(spec, assessment: assessment, strictQuality: true)
         #expect(result.isValid)
     }
+
+    @Test func lightingPassAuthorsRealLightPrim() {
+        let doc = EditorDocument(snapshot: StageSnapshot(rootPrims: []))
+        let spec = house()
+        SculptBuildRunner.apply(pass: .blockout, of: spec, to: doc)   // creates /House
+        // createLight + setTransform both resolve to the light prim path.
+        let authored = SculptBuildRunner.apply(pass: .lighting, of: spec, to: doc)
+        #expect(authored == ["/House/Sun", "/House/Sun"])
+        let light = doc.snapshot.prim(at: PrimPath("/House/Sun")!)
+        #expect(light?.typeName == "DistantLight")
+        #expect(light?.attribute(named: "inputs:intensity") != nil)
+        #expect(light?.attribute(named: "inputs:color") != nil)
+    }
+
+    @Test func optimizationPassAuthorsLODManifest() {
+        let doc = EditorDocument(snapshot: StageSnapshot(rootPrims: []))
+        let spec = house()
+        SculptBuildRunner.apply(pass: .blockout, of: spec, to: doc)
+        let authored = SculptBuildRunner.apply(pass: .optimization, of: spec, to: doc)
+        #expect(authored == ["/House"])
+        #expect(doc.snapshot.prim(at: PrimPath("/House")!)?.attribute(named: "sculptLOD") != nil)
+    }
+
+    @Test func lightPrimSkipsInvalidPath() {
+        let doc = EditorDocument(snapshot: StageSnapshot(rootPrims: []))
+        // Unparseable path → skipped (PrimPath init fails on the space).
+        #expect(SculptBuildRunner.apply(
+            step: .createLight(name: "bad name", parentPath: nil, kind: .dome,
+                               intensity: 1, color: [1, 1, 1]), to: doc) == nil)
+    }
 }
