@@ -35,6 +35,7 @@ OpenUSDZEditor/
 App ─▶ EditorUI ─▶ {ViewportKit, EditingKit, ConversionKit, ValidationKit, ScriptingKit} ─▶ USDCore
 USDBridge ─▶ USDCore          (bridge implements USDCore protocols)
 {EditingKit, ViewportKit} ─▶ MeshKit   (MeshKit itself imports nothing internal)
+SessionKit (planned) ─▶ {USDCore, ViewportKit, EditingKit}; consumed by EditorUI/App only — cross-launch session envelope + restore, landed with its governance entry when Phase 1 begins (specs/session-restoration.md)
 DicyaninDesignSystem ◀─ EditorUI only
 QuickLookKit — leaf, zero internal deps (pure render-plan logic; App QuickLook .appex targets consume it)
 CLI ─▶ kits (never EditorUI)
