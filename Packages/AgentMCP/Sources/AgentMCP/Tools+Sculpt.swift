@@ -317,23 +317,69 @@ public enum SculptTools {
             _ = try session.mutate(SetTransformCommand(path: primPath, newTRS: trs, oldAttribute: old))
             return primPath.description
 
-        case .createMaterial(let targetPath, let baseColor):
+        case .createMaterial(let targetPath, let material):
             let primPath = try resolvePath(targetPath, session: session)
-            guard let command = CreateMaterialCommand.make(bindingTo: primPath, baseColor: baseColor, in: session.stage) else {
+            guard let command = CreateMaterialCommand.make(bindingTo: primPath, baseColor: material.baseColor, in: session.stage) else {
                 // coverage:disable — make() returns nil only for a missing target, which resolvePath already rejects.
                 throw ToolError.invalidParams("cannot bind material to \(targetPath)")
                 // coverage:enable
             }
             _ = try session.mutate(command)
+            // Author the remaining PBR channels (scalars + texture maps) onto
+            // the surface shader created above, each as its own undoable edit.
+            for attribute in materialChannelAttributes(material) {
+                try authorAttribute(attribute, on: command.surfacePath, session: session)
+            }
             return command.materialPath.description
 
+        case .projectTexture(let rootPath, let descriptorJSON):
+            return try authorRootAttribute(
+                name: "sculptProjectedTexture", value: descriptorJSON,
+                rootPath: rootPath, session: session)
+
         case .authorRuntime(let rootPath, let manifestJSON):
-            let primPath = try resolvePath(rootPath, session: session)
-            let attribute = Attribute(name: "sculptRuntime", value: .string(manifestJSON))
-            let old = session.stage.prim(at: primPath)?.attribute(named: "sculptRuntime")
-            _ = try session.mutate(SetAttributeCommand(path: primPath, newAttribute: attribute, oldAttribute: old))
-            return primPath.description
+            return try authorRootAttribute(
+                name: "sculptRuntime", value: manifestJSON,
+                rootPath: rootPath, session: session)
         }
+    }
+
+    /// The extra shader-input attributes for a material beyond the base colour
+    /// authored by `CreateMaterialCommand`: roughness/metallic scalars, an
+    /// optional emissive colour, and any texture-map asset paths + normal scale.
+    static func materialChannelAttributes(_ material: MaterialSpec) -> [Attribute] {
+        var attributes: [Attribute] = [
+            Attribute(name: "inputs:roughness", value: .double(material.roughness)),
+            Attribute(name: "inputs:metallic", value: .double(material.metallic)),
+        ]
+        if let emissive = material.emissive {
+            attributes.append(Attribute(name: "inputs:emissiveColor", value: .vector(emissive)))
+        }
+        let maps: [(String?, String)] = [
+            (material.albedoMap, "inputs:albedoMap"), (material.normalMap, "inputs:normalMap"),
+            (material.roughnessMap, "inputs:roughnessMap"), (material.emissiveMap, "inputs:emissiveMap"),
+        ]
+        for (path, name) in maps {
+            if let path { attributes.append(Attribute(name: name, value: .string(path))) }
+        }
+        if let scale = material.normalScale {
+            attributes.append(Attribute(name: "inputs:normalScale", value: .double(scale)))
+        }
+        return attributes
+    }
+
+    /// Set one attribute on an existing prim through the mutation funnel.
+    static func authorAttribute(_ attribute: Attribute, on path: PrimPath, session: EditSession) throws {
+        let old = session.stage.prim(at: path)?.attribute(named: attribute.name)
+        _ = try session.mutate(SetAttributeCommand(path: path, newAttribute: attribute, oldAttribute: old))
+    }
+
+    /// Author a string attribute onto the resolved sculpt-root prim (shared by
+    /// the runtime-manifest and projected-texture descriptor steps).
+    static func authorRootAttribute(name: String, value: String, rootPath: String, session: EditSession) throws -> String {
+        let primPath = try resolvePath(rootPath, session: session)
+        try authorAttribute(Attribute(name: name, value: .string(value)), on: primPath, session: session)
+        return primPath.description
     }
 
     static func insertMesh(_ mesh: HalfEdgeMesh, name: String, parentPath: String?, session: EditSession) throws -> String {

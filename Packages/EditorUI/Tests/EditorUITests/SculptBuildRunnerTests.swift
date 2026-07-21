@@ -80,6 +80,58 @@ struct SculptBuildRunnerTests {
             step: .authorRuntime(rootPath: "/Ghost", manifestJSON: "{}"), to: doc) == nil)
     }
 
+    /// A spec whose leaf carries a fully-textured material, exercising every
+    /// extra channel the material pass authors onto the surface shader.
+    private func texturedSpec() -> ObjectSculptSpec {
+        let body = ComponentNode(name: "Body", shape: .primitive(.box), materialID: "pbr")
+        let root = ComponentNode(name: "Obj", shape: .group, children: [body])
+        return ObjectSculptSpec(
+            name: "Obj", objectClass: .object, root: root,
+            materials: [MaterialSpec(
+                id: "pbr", baseColor: [0.5, 0.5, 0.5], roughness: 0.4, metallic: 0.2,
+                emissive: [0.1, 0, 0], albedoMap: "albedo.png", normalMap: "normal.png",
+                roughnessMap: "rough.png", emissiveMap: "emit.png", normalScale: 0.75)])
+    }
+
+    @Test func materialPassAuthorsTextureChannels() {
+        let doc = EditorDocument(snapshot: StageSnapshot(rootPrims: []))
+        let spec = texturedSpec()
+        SculptBuildRunner.apply(pass: .blockout, of: spec, to: doc)
+        let materials = SculptBuildRunner.apply(pass: .material, of: spec, to: doc)
+        #expect(!materials.isEmpty)
+        let surface = doc.snapshot.prim(at: PrimPath("/Looks/Material/Surface")!)
+        #expect(surface?.attribute(named: "inputs:roughness") != nil)
+        #expect(surface?.attribute(named: "inputs:metallic") != nil)
+        #expect(surface?.attribute(named: "inputs:emissiveColor") != nil)
+        #expect(surface?.attribute(named: "inputs:albedoMap") != nil)
+        #expect(surface?.attribute(named: "inputs:normalMap") != nil)
+        #expect(surface?.attribute(named: "inputs:roughnessMap") != nil)
+        #expect(surface?.attribute(named: "inputs:emissiveMap") != nil)
+        #expect(surface?.attribute(named: "inputs:normalScale") != nil)
+    }
+
+    @Test func surfacePassAuthorsProjectedTextureDescriptor() {
+        let doc = EditorDocument(snapshot: StageSnapshot(rootPrims: []))
+        var spec = texturedSpec()
+        spec.surfaceProjection = SurfaceProjection(
+            targetComponent: "Body",
+            camera: CameraPose(position: [0, 0, 5], target: [0, 0, 0]))
+        SculptBuildRunner.apply(pass: .blockout, of: spec, to: doc)
+        let authored = SculptBuildRunner.apply(pass: .surface, of: spec, to: doc)
+        #expect(authored == ["/Obj"])
+        #expect(doc.snapshot.prim(at: PrimPath("/Obj")!)?.attribute(named: "sculptProjectedTexture") != nil)
+    }
+
+    @Test func projectTextureSkipsMissingAndInvalidRoot() {
+        let doc = EditorDocument(snapshot: StageSnapshot(rootPrims: []))
+        // Missing root prim → skipped.
+        #expect(SculptBuildRunner.apply(
+            step: .projectTexture(rootPath: "/Ghost", descriptorJSON: "{}"), to: doc) == nil)
+        // Unparseable path → skipped (PrimPath init fails).
+        #expect(SculptBuildRunner.apply(
+            step: .projectTexture(rootPath: "", descriptorJSON: "{}"), to: doc) == nil)
+    }
+
     @Test func demoHouseSpecIsStrictQualityValid() {
         let spec = house()
         let assessment = PreSpecAssessment.assess(

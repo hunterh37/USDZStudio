@@ -65,6 +65,7 @@ public enum SpecValidator {
             if material.metallic < 0 || material.metallic > 1 {
                 issues.append(.init(.error, "material '\(material.id)' metallic must be in 0...1"))
             }
+            issues.append(contentsOf: textureIssues(material))
         }
 
         var seenNames = Set<String>()
@@ -78,6 +79,10 @@ public enum SpecValidator {
         // Runtime-layer schema: colliders/destruction groups must reference
         // real components and be well-formed.
         issues.append(contentsOf: runtimeSchemaIssues(spec, componentNames: seenNames))
+
+        // Surface-projection + character-landmark schema (always).
+        issues.append(contentsOf: surfaceSchemaIssues(spec, componentNames: seenNames))
+        issues.append(contentsOf: landmarkSchemaIssues(spec, componentNames: seenNames))
 
         // ── Strict-quality gate (opt-in) ──────────────────────────────────
         if strictQuality {
@@ -162,6 +167,63 @@ public enum SpecValidator {
         return issues
     }
 
+    // MARK: - Material texture schema
+
+    /// Validate the optional texture channels: every declared map path must be
+    /// non-empty, and `normalScale` (when present) must be >= 0.
+    static func textureIssues(_ material: MaterialSpec) -> [SpecIssue] {
+        var issues: [SpecIssue] = []
+        let maps: [(String?, String)] = [
+            (material.albedoMap, "albedoMap"), (material.normalMap, "normalMap"),
+            (material.roughnessMap, "roughnessMap"), (material.emissiveMap, "emissiveMap"),
+        ]
+        for (path, label) in maps where path != nil {
+            if path!.isEmpty {
+                issues.append(.init(.error, "material '\(material.id)' \(label) path must not be empty"))
+            }
+        }
+        if let scale = material.normalScale, scale < 0 {
+            issues.append(.init(.error, "material '\(material.id)' normalScale must be >= 0"))
+        }
+        return issues
+    }
+
+    // MARK: - Surface-projection schema
+
+    static func surfaceSchemaIssues(_ spec: ObjectSculptSpec, componentNames: Set<String>) -> [SpecIssue] {
+        guard let projection = spec.surfaceProjection else { return [] }
+        var issues: [SpecIssue] = []
+        if !componentNames.contains(projection.targetComponent) {
+            issues.append(.init(.error, "surface projection references unknown component '\(projection.targetComponent)'"))
+        }
+        if projection.uvSet.isEmpty {
+            issues.append(.init(.error, "surface projection uvSet must not be empty"))
+        }
+        for (vec, label) in [(projection.camera.position, "camera position"),
+                             (projection.camera.target, "camera target"),
+                             (projection.camera.up, "camera up")] {
+            if vec.count != 3 {
+                issues.append(.init(.error, "surface projection \(label) must be [x, y, z]"))
+            }
+        }
+        return issues
+    }
+
+    // MARK: - Character-landmark schema
+
+    static func landmarkSchemaIssues(_ spec: ObjectSculptSpec, componentNames: Set<String>) -> [SpecIssue] {
+        var issues: [SpecIssue] = []
+        for landmark in spec.landmarks {
+            if !componentNames.contains(landmark.component) {
+                issues.append(.init(.error, "landmark '\(landmark.name)' references unknown component '\(landmark.component)'"))
+            }
+            if landmark.position.count != 3 {
+                issues.append(.init(.error, "landmark '\(landmark.name)' position must be [x, y, z]"))
+            }
+        }
+        return issues
+    }
+
     // MARK: - Action-ready gate
 
     /// img2threejs's "Action-Ready Gate": confirms the object exposes a usable
@@ -185,6 +247,12 @@ public enum SpecValidator {
         if !inventory.isFullyMapped {
             let names = inventory.unmapped.map(\.id).joined(separator: ", ")
             issues.append(.init(.error, "strict-quality: \(inventory.unmapped.count) detail item(s) unmapped: \(names)"))
+        }
+
+        // Character track: a character spec must declare proportion-lock
+        // landmarks so its proportions stay deterministic across rebuilds.
+        if spec.objectClass == .character, spec.landmarks.isEmpty {
+            issues.append(.init(.error, "strict-quality: character spec declares no proportion-lock landmarks"))
         }
 
         guard let policy = assessment?.policy else {
