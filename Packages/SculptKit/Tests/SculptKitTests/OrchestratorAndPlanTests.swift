@@ -155,7 +155,9 @@ import Testing
     @Test func materialPassBindsOnlyPaintedNodes() {
         let steps = BuildPlanner.plan(for: Self.spec(), pass: .material)
         #expect(steps.count == 1)
-        #expect(steps[0] == .createMaterial(targetPath: "/Barrel/Body", baseColor: [0.4, 0.2, 0.1]))
+        #expect(steps[0] == .createMaterial(
+            targetPath: "/Barrel/Body",
+            material: MaterialSpec(id: "wood", baseColor: [0.4, 0.2, 0.1])))
     }
 
     @Test func materialPassSkipsDanglingMaterialRef() {
@@ -168,6 +170,28 @@ import Testing
         for pass: SculptPass in [.formRefinement, .surface, .lighting, .interaction, .optimization] {
             #expect(BuildPlanner.plan(for: Self.spec(), pass: pass).isEmpty)
         }
+    }
+
+    @Test func surfacePassAuthorsProjectionWhenTargeted() {
+        var spec = Self.spec()
+        spec.surfaceProjection = SurfaceProjection(
+            targetComponent: "Body",
+            camera: CameraPose(position: [0, 0, 5], target: [0, 0, 0]))
+        let steps = BuildPlanner.plan(for: spec, pass: .surface)
+        #expect(steps.count == 1)
+        if case .projectTexture(let rootPath, let json) = steps[0] {
+            #expect(rootPath == "/Barrel")
+            #expect(json.contains("Body"))
+        } else { Issue.record("expected projectTexture step") }
+    }
+
+    @Test func surfacePassEmptyWhenTargetMissing() {
+        var spec = Self.spec()
+        // Projection targeting an unknown component → no step (review-only).
+        spec.surfaceProjection = SurfaceProjection(
+            targetComponent: "Ghost",
+            camera: CameraPose(position: [0, 0, 5], target: [0, 0, 0]))
+        #expect(BuildPlanner.plan(for: spec, pass: .surface).isEmpty)
     }
 
     @Test func pathHelper() {

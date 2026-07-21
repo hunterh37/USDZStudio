@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 @testable import SculptKit
 
@@ -91,5 +92,76 @@ import Testing
     @Test func passDecisionEquatable() {
         #expect(PassDecision.continue == PassDecision.continue)
         #expect(PassDecision.stop != PassDecision.continue)
+    }
+
+    // MARK: - Material texture channels
+
+    @Test func materialHasTextures() {
+        let flat = MaterialSpec(id: "m", baseColor: [1, 0, 0])
+        #expect(flat.hasTextures == false)
+        let textured = MaterialSpec(id: "m", baseColor: [1, 0, 0], albedoMap: "a.png")
+        #expect(textured.hasTextures)
+        #expect(MaterialSpec(id: "m", baseColor: [1, 0, 0], normalMap: "n.png").hasTextures)
+        #expect(MaterialSpec(id: "m", baseColor: [1, 0, 0], roughnessMap: "r.png").hasTextures)
+        #expect(MaterialSpec(id: "m", baseColor: [1, 0, 0], emissiveMap: "e.png").hasTextures)
+    }
+
+    @Test func texturedMaterialRoundTrips() throws {
+        var spec = Self.sampleSpec()
+        spec.materials[0] = MaterialSpec(
+            id: "wood", baseColor: [0.4, 0.2, 0.1], roughness: 0.7, metallic: 0.2,
+            emissive: [0.1, 0, 0], albedoMap: "albedo.png", normalMap: "normal.png",
+            roughnessMap: "rough.png", emissiveMap: "emit.png", normalScale: 0.5)
+        let back = try ObjectSculptSpec.decoded(from: spec.encoded())
+        #expect(back == spec)
+        #expect(back.materials[0].hasTextures)
+    }
+
+    @Test func materialDecodeDefaultsMissingScalarsAndMaps() throws {
+        // Legacy material JSON lacking roughness/metallic/maps decode-defaults.
+        let legacy = #"{"id":"m","baseColor":[0.2,0.3,0.4]}"#
+        let mat = try JSONDecoder().decode(MaterialSpec.self, from: Data(legacy.utf8))
+        #expect(mat.roughness == 0.5)
+        #expect(mat.metallic == 0)
+        #expect(mat.emissive == nil)
+        #expect(mat.albedoMap == nil)
+        #expect(mat.normalMap == nil)
+        #expect(mat.roughnessMap == nil)
+        #expect(mat.emissiveMap == nil)
+        #expect(mat.normalScale == nil)
+        #expect(mat.hasTextures == false)
+    }
+
+    // MARK: - Surface projection + landmarks
+
+    @Test func surfaceProjectionJSONAndDefaults() throws {
+        let cam = CameraPose(position: [0, 0, 5], target: [0, 0, 0])
+        #expect(cam.up == [0, 1, 0])   // default up
+        let projection = SurfaceProjection(targetComponent: "Body", camera: cam)
+        #expect(projection.uvSet == "st")
+        #expect(projection.delight == true)
+        let json = try projection.json()
+        #expect(json.contains("Body"))
+        #expect(json.contains("st"))
+    }
+
+    @Test func surfaceAndLandmarksRoundTrip() throws {
+        var spec = Self.sampleSpec()
+        spec.surfaceProjection = SurfaceProjection(
+            targetComponent: "Body",
+            camera: CameraPose(position: [0, 1, 4], target: [0, 1, 0], up: [0, 1, 0]),
+            uvSet: "st", delight: false)
+        spec.landmarks = [Landmark(name: "top", component: "Body", position: [0, 2, 0])]
+        let back = try ObjectSculptSpec.decoded(from: spec.encoded())
+        #expect(back == spec)
+        #expect(back.surfaceProjection?.delight == false)
+        #expect(back.landmarks.first?.name == "top")
+    }
+
+    @Test func legacySpecDecodesWithoutSurfaceOrLandmarks() throws {
+        let legacy = #"{"name":"L","objectClass":"object","root":{"name":"Root","shape":{"group":{}},"translation":[0,0,0],"rotationEulerDegrees":[0,0,0],"scale":[1,1,1],"width":1,"height":1,"depth":1,"radius":0.5,"segments":16,"children":[]}}"#
+        let decoded = try ObjectSculptSpec.decoded(from: Data(legacy.utf8))
+        #expect(decoded.surfaceProjection == nil)
+        #expect(decoded.landmarks.isEmpty)
     }
 }

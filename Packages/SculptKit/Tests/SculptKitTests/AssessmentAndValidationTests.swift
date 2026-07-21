@@ -195,6 +195,93 @@ import Testing
         #expect(result.isValid)
     }
 
+    // MARK: - Material texture channels
+
+    @Test func acceptsValidTextureChannels() {
+        var spec = validSpec()
+        spec.materials[0] = MaterialSpec(
+            id: "wood", baseColor: [0.4, 0.2, 0.1], albedoMap: "a.png",
+            normalMap: "n.png", roughnessMap: "r.png", emissiveMap: "e.png", normalScale: 1)
+        #expect(SpecValidator.validate(spec).isValid)
+    }
+
+    @Test func rejectsEmptyMapPathsAndNegativeNormalScale() {
+        var spec = validSpec()
+        spec.materials[0].albedoMap = ""
+        spec.materials[0].normalMap = ""
+        spec.materials[0].roughnessMap = ""
+        spec.materials[0].emissiveMap = ""
+        spec.materials[0].normalScale = -0.5
+        let errs = SpecValidator.validate(spec).errors.map(\.message)
+        #expect(errs.filter { $0.contains("path must not be empty") }.count == 4)
+        #expect(errs.contains { $0.contains("normalScale must be >= 0") })
+    }
+
+    // MARK: - Surface projection schema
+
+    func surfaceSpec(_ projection: SurfaceProjection) -> ObjectSculptSpec {
+        var spec = validSpec()
+        spec.surfaceProjection = projection
+        return spec
+    }
+
+    @Test func acceptsValidSurfaceProjection() {
+        let ok = surfaceSpec(SurfaceProjection(
+            targetComponent: "Body",
+            camera: CameraPose(position: [0, 0, 5], target: [0, 0, 0])))
+        #expect(SpecValidator.validate(ok).isValid)
+    }
+
+    @Test func rejectsBadSurfaceProjection() {
+        // Unknown target component.
+        let ghost = surfaceSpec(SurfaceProjection(
+            targetComponent: "Ghost", camera: CameraPose(position: [0, 0, 5], target: [0, 0, 0])))
+        #expect(SpecValidator.validate(ghost).errors.contains { $0.message.contains("unknown component 'Ghost'") })
+
+        // Empty uvSet.
+        let noUV = surfaceSpec(SurfaceProjection(
+            targetComponent: "Body", camera: CameraPose(position: [0, 0, 5], target: [0, 0, 0]), uvSet: ""))
+        #expect(SpecValidator.validate(noUV).errors.contains { $0.message.contains("uvSet must not be empty") })
+
+        // Bad camera vector arity (position, target, up).
+        let badCam = surfaceSpec(SurfaceProjection(
+            targetComponent: "Body", camera: CameraPose(position: [0, 0], target: [0], up: [1])))
+        let msgs = SpecValidator.validate(badCam).errors.map(\.message)
+        #expect(msgs.contains { $0.contains("camera position") })
+        #expect(msgs.contains { $0.contains("camera target") })
+        #expect(msgs.contains { $0.contains("camera up") })
+    }
+
+    // MARK: - Character landmarks
+
+    @Test func rejectsBadLandmarks() {
+        var spec = validSpec()
+        spec.landmarks = [
+            Landmark(name: "top", component: "Ghost", position: [0, 1, 0]),
+            Landmark(name: "hip", component: "Body", position: [0, 1]),
+        ]
+        let msgs = SpecValidator.validate(spec).errors.map(\.message)
+        #expect(msgs.contains { $0.contains("landmark 'top' references unknown component") })
+        #expect(msgs.contains { $0.contains("landmark 'hip' position must be [x, y, z]") })
+    }
+
+    @Test func strictQualityRequiresCharacterLandmarks() {
+        let assessment = PreSpecAssessment(
+            objectClass: .character, complexity: 1,
+            policy: FeatureAcceptancePolicy(minScore: 0.8, minDetailItems: 0,
+                                            minComponents: 1, requireMaterials: false))
+        let body = ComponentNode(name: "Body", shape: .primitive(.box))
+        let root = ComponentNode(name: "Hero", shape: .group, children: [body])
+        var spec = ObjectSculptSpec(name: "Hero", objectClass: .character, root: root)
+        // No landmarks → strict-quality error.
+        #expect(SpecValidator.validate(spec, assessment: assessment, strictQuality: true)
+            .errors.contains { $0.message.contains("no proportion-lock landmarks") })
+        // Declaring one clears the character check.
+        spec.landmarks = [Landmark(name: "head", component: "Body", position: [0, 1, 0])]
+        #expect(!SpecValidator.validate(spec, assessment: assessment, strictQuality: true)
+            .errors.contains { $0.message.contains("landmarks") })
+    }
+
     // MARK: - PrimName
 
     @Test func primNameValidation() {

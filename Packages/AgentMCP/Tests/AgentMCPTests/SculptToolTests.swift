@@ -185,7 +185,9 @@ import USDCore
             session: session)
         #expect(mesh == "/G/M")
         let mat = try await SculptTools.execute(
-            step: .createMaterial(targetPath: "/G/M", baseColor: [0.2, 0.2, 0.2]), session: session)
+            step: .createMaterial(targetPath: "/G/M",
+                                  material: MaterialSpec(id: "m", baseColor: [0.2, 0.2, 0.2])),
+            session: session)
         #expect(mat!.contains("Material"))
         let xf = try await SculptTools.execute(
             step: .setTransform(path: "/G/M", translation: [1, 2, 3],
@@ -207,7 +209,9 @@ import USDCore
         }
         await #expect(throws: (any Error).self) {
             try await SculptTools.execute(
-                step: .createMaterial(targetPath: "/Nope", baseColor: [0, 0, 0]), session: session)
+                step: .createMaterial(targetPath: "/Nope",
+                                      material: MaterialSpec(id: "m", baseColor: [0, 0, 0])),
+                session: session)
         }
     }
 
@@ -273,6 +277,89 @@ import USDCore
         await #expect(throws: (any Error).self) {
             try await SculptTools.execute(
                 step: .authorRuntime(rootPath: "/Ghost", manifestJSON: "{}"), session: session)
+        }
+    }
+
+    // MARK: - Material depth (texture channels)
+
+    /// A spec whose single painted leaf carries a fully-textured material, so
+    /// the material pass authors every extra channel onto the surface shader.
+    static func texturedSpec() -> ObjectSculptSpec {
+        let body = ComponentNode(name: "Body", shape: .primitive(.box), materialID: "pbr")
+        let root = ComponentNode(name: "Obj", shape: .group, children: [body])
+        return ObjectSculptSpec(
+            name: "Obj", objectClass: .object, root: root,
+            materials: [MaterialSpec(
+                id: "pbr", baseColor: [0.5, 0.5, 0.5], roughness: 0.4, metallic: 0.2,
+                emissive: [0.1, 0, 0], albedoMap: "albedo.png", normalMap: "normal.png",
+                roughnessMap: "rough.png", emissiveMap: "emit.png", normalScale: 0.75)])
+    }
+
+    @Test func materialPassAuthorsTextureChannels() async {
+        let session = Fixtures.session()
+        let server = Fixtures.server(session: session)
+        _ = await callOK(server, "sculpt_author_spec", ["spec": Self.specArg(Self.texturedSpec())])
+        _ = await callOK(server, "sculpt_build_pass")                     // blockout
+        _ = await callOK(server, "sculpt_review", passingReview())        // → structural
+        _ = await callOK(server, "sculpt_build_pass")                     // structural
+        _ = await callOK(server, "sculpt_review", passingReview())        // → formRefinement
+        _ = await callOK(server, "sculpt_review", passingReview())        // → material
+        let material = await callOK(server, "sculpt_build_pass")
+        #expect(material["stepCount"].doubleValue == 1)
+
+        // Every extra channel landed on the surface shader.
+        let surface = session.stage.prim(at: PrimPath("/Looks/Material/Surface")!)
+        #expect(surface?.attribute(named: "inputs:roughness") != nil)
+        #expect(surface?.attribute(named: "inputs:metallic") != nil)
+        #expect(surface?.attribute(named: "inputs:emissiveColor") != nil)
+        #expect(surface?.attribute(named: "inputs:albedoMap") != nil)
+        #expect(surface?.attribute(named: "inputs:normalMap") != nil)
+        #expect(surface?.attribute(named: "inputs:roughnessMap") != nil)
+        #expect(surface?.attribute(named: "inputs:emissiveMap") != nil)
+        #expect(surface?.attribute(named: "inputs:normalScale") != nil)
+    }
+
+    // MARK: - Surface pass (projected-texture descriptor)
+
+    /// A spec declaring a surface projection so the surface pass authors the
+    /// projected-texture descriptor.
+    static func surfaceSpec() -> ObjectSculptSpec {
+        let body = ComponentNode(name: "Body", shape: .primitive(.box))
+        let root = ComponentNode(name: "Obj", shape: .group, children: [body])
+        return ObjectSculptSpec(
+            name: "Obj", objectClass: .object, root: root,
+            surfaceProjection: SurfaceProjection(
+                targetComponent: "Body",
+                camera: CameraPose(position: [0, 0, 5], target: [0, 0, 0])))
+    }
+
+    @Test func surfacePassAuthorsProjectedTextureDescriptor() async {
+        let session = Fixtures.session()
+        let server = Fixtures.server(session: session)
+        _ = await callOK(server, "sculpt_author_spec", ["spec": Self.specArg(Self.surfaceSpec())])
+        _ = await callOK(server, "sculpt_build_pass")             // blockout
+        // Advance blockout → structural → formRefinement → material → surface.
+        for _ in 0..<4 { _ = await callOK(server, "sculpt_review", passingReview()) }
+        let status = await callOK(server, "sculpt_status")
+        #expect(status["currentPass"].stringValue == "surface")
+        let built = await callOK(server, "sculpt_build_pass")
+        #expect(built["pass"].stringValue == "surface")
+        #expect(built["stepCount"].doubleValue == 1)
+        let attr = session.stage.prim(at: PrimPath("/Obj")!)?.attribute(named: "sculptProjectedTexture")
+        #expect(attr != nil)
+    }
+
+    @Test func executeProjectTextureStep() async throws {
+        let session = Fixtures.session()
+        _ = try await SculptTools.execute(step: .createGroup(name: "Rt", parentPath: nil), session: session)
+        let path = try await SculptTools.execute(
+            step: .projectTexture(rootPath: "/Rt", descriptorJSON: "{\"uvSet\":\"st\"}"), session: session)
+        #expect(path == "/Rt")
+        #expect(session.stage.prim(at: PrimPath("/Rt")!)?.attribute(named: "sculptProjectedTexture") != nil)
+        // A missing root prim throws.
+        await #expect(throws: (any Error).self) {
+            try await SculptTools.execute(
+                step: .projectTexture(rootPath: "/Ghost", descriptorJSON: "{}"), session: session)
         }
     }
 
