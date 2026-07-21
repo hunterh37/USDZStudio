@@ -211,7 +211,7 @@ Targeted mesh repair & adjustment — extrude a mounting tab, close a hole, merg
 **Exit:** open a vendor USDZ, Tab into the bumper, extrude a mounting tab, fill a hole, export — all invariant-verified.
 
 ### v1.15 follow-up
-- [ ] LoopCut (quad-strip traversal)
+- [x] LoopCut (quad-strip traversal) — single edge-loop cut over a quad strip: walks opposite edges in both directions from a seed edge, closing on itself (a ring, e.g. around a cube) or terminating at boundaries (an open strip, e.g. across a grid). Places a midpoint per crossed rung and splits each strip quad into two. Strict v1 preconditions fail loudly (single seed edge, quads-only strip, manifold rungs, single segment); new faces inherit the split face's subsets. χ-preserving (ΔV−ΔE+ΔF=0) and volume-neutral on closed meshes (analytic-tested on the cube ring); in the fuzz rotation with a pinned regression seed. 100% MeshKit line coverage held (three reviewed defensive exclusions).
 - [ ] Multi-segment bevel, skin-weight propagation investigation
 
 # Editing-Tools Spine (post-1.0) — the authoring roadmap
