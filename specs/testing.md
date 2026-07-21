@@ -54,12 +54,13 @@
 8. **Snapshot UI:** every DesignSystem component state; every inspector/outliner panel configuration.
 9. **XCUITest smoke flows:** open → select part → move → hide → export → re-open exported file; batch convert; console script run. Run on CI per PR (headless), full matrix nightly.
 10. **CLI matrix:** every subcommand × {valid input, invalid input, warning input} × {default, --json, --strict}; exit codes asserted.
+11. **E2E feature flows** (blocking CI job `e2e`, `scripts/e2e-gate.sh`, spec `specs/e2e-testing.md`). Whole user journeys driven through the real product seam — the `openusdz mcp` JSON-RPC server (`--no-relay`, headless) against the real embedded usd-core bridge — one scenario per major feature: author-from-scratch (create geometry → bind material → validate → save), edit/undo/redo neutrality, variant selection, and validation + ARKit compliance gating. Scenarios are authored as data (`Tests/E2E/scenarios/*.json`), asserted on the tools' structured results, and governed by the same bidirectional `EXPECTATIONS` ratchet as the round-trip gate: a declared-pass flow that fails is a regression, a declared-fail flow that starts passing forces the table to tighten. This layer asserts *cross-feature* correctness — that composing the feature tools end to end produces the right scene, verdicts, and history — which per-module line coverage cannot see, so it is a flow gate, not a coverage-floored module. Each scenario runs against a throwaway copy of the fixtures so a `save` step never mutates committed files. New major features add a scenario here as their definition-of-done.
 
 ## CI Pipeline (GitHub Actions, macOS runner)
 
 ```
 lint (SwiftLint + dependency-lint) → build → unit (coverage gate per module)
-→ bridge+conversion integration → golden/snapshot → XCUITest smoke → coverage report comment on PR
+→ bridge+conversion integration → round-trip + e2e flow gates → golden/snapshot → XCUITest smoke → coverage report comment on PR
 ```
 
 - Coverage delta posted as a PR comment; any module below floor = red X, no override label exists on purpose.

@@ -1,0 +1,28 @@
+#usda 1.0
+(
+    defaultPrim = "Widget"
+    upAxis = "Y"
+)
+
+def Xform "Widget" (
+    prepend variantSets = "color"
+    variants = {
+        string color = "red"
+    }
+)
+{
+    variantSet "color" = {
+        "blue" {
+            def Sphere "Body"
+            {
+                color3f[] primvars:displayColor = [(0, 0, 1)]
+            }
+        }
+        "red" {
+            def Sphere "Body"
+            {
+                color3f[] primvars:displayColor = [(1, 0, 0)]
+            }
+        }
+    }
+}

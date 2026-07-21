@@ -1,0 +1,19 @@
+{
+  "name": "validation",
+  "description": "Validation + compliance-gate flow: run the rule catalog and the ARKit export gate over a stage, and confirm malformed operands are rejected as structured tool errors rather than crashing the session.",
+  "open": "../fixtures/cube.usda",
+  "strictness": "warn",
+  "steps": [
+    { "call": "validate",
+      "expect": { "isError": false } },
+    { "call": "check_compliance",
+      "args": { "profile": "arkit" },
+      "expect": { "path": ["profile"], "equals": "arkit" } },
+    { "call": "get_prim",
+      "args": { "path": "/Cube/Geom" },
+      "expect": { "path": ["type"], "equals": "Mesh" } },
+    { "call": "get_prim",
+      "args": { "path": "/Does/Not/Exist" },
+      "expect": { "isError": true } }
+  ]
+}
