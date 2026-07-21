@@ -10,38 +10,65 @@ import Testing
 
     // MARK: - Orchestrator similarity floor
 
-    func passingReview(similarity: Double? = nil) -> PassReview {
-        PassReview(pass: .blockout, decision: .continue, score: 0.95,
+    func passingReview(pass: SculptPass = .material, similarity: Double? = nil) -> PassReview {
+        PassReview(pass: pass, decision: .continue, score: 0.95,
                    renderPath: "/tmp/r.png", comparisonSheetPath: "/tmp/c.png",
                    measuredSimilarity: similarity)
     }
 
-    @Test func floorOfZeroKeepsLegacyBehaviour() throws {
+    /// An orchestrator advanced to `material` — the first pass the similarity
+    /// floor gates (blockout/structural/formRefinement are untextured, so the
+    /// colour-dependent floor is deferred). Each prior step clears its score
+    /// gate with a passing score + evidence.
+    func orchestratorAtMaterial() throws -> PassOrchestrator {
         var orchestrator = PassOrchestrator()
-        // No measuredSimilarity, floor 0 → advances just like before.
-        let result = try orchestrator.advance(after: passingReview(), threshold: 0.7, similarityFloor: 0)
-        #expect(result == .advanced(to: .structural))
+        while orchestrator.current != .material {
+            _ = try orchestrator.advance(
+                after: PassReview(pass: orchestrator.current, decision: .continue, score: 0.95,
+                                  renderPath: "/tmp/r.png", comparisonSheetPath: "/tmp/c.png"),
+                threshold: 0.7, similarityFloor: 0.5)
+        }
+        return orchestrator
     }
 
-    @Test func floorRequiresMeasuredSimilarity() {
-        var orchestrator = PassOrchestrator()
+    @Test func floorOfZeroKeepsLegacyBehaviour() throws {
+        var orchestrator = try orchestratorAtMaterial()
+        // No measuredSimilarity, floor 0 → advances just like before.
+        let result = try orchestrator.advance(after: passingReview(), threshold: 0.7, similarityFloor: 0)
+        #expect(result == .advanced(to: .surface))
+    }
+
+    @Test func floorRequiresMeasuredSimilarity() throws {
+        var orchestrator = try orchestratorAtMaterial()
         #expect(throws: AdvanceError.continueRequiresMeasuredSimilarity) {
             try orchestrator.advance(after: passingReview(), threshold: 0.7, similarityFloor: 0.5)
         }
     }
 
-    @Test func floorRejectsLowSimilarity() {
-        var orchestrator = PassOrchestrator()
+    @Test func floorRejectsLowSimilarity() throws {
+        var orchestrator = try orchestratorAtMaterial()
         #expect(throws: AdvanceError.similarityBelowFloor(measured: 0.3, floor: 0.5)) {
             try orchestrator.advance(after: passingReview(similarity: 0.3), threshold: 0.7, similarityFloor: 0.5)
         }
     }
 
     @Test func floorAcceptsSufficientSimilarity() throws {
-        var orchestrator = PassOrchestrator()
+        var orchestrator = try orchestratorAtMaterial()
         let result = try orchestrator.advance(
             after: passingReview(similarity: 0.72), threshold: 0.7, similarityFloor: 0.5)
-        #expect(result == .advanced(to: .structural))
+        #expect(result == .advanced(to: .surface))
+    }
+
+    @Test func geometryPassesDeferFloor() throws {
+        // structural + formRefinement are untextured: even with a floor set, a
+        // passing score with NO measured similarity advances (floor deferred).
+        var orchestrator = PassOrchestrator()
+        _ = try orchestrator.advance(after: passingReview(pass: .blockout), threshold: 0.7, similarityFloor: 0.5)
+        #expect(orchestrator.current == .structural)
+        _ = try orchestrator.advance(after: passingReview(pass: .structural), threshold: 0.7, similarityFloor: 0.5)
+        #expect(orchestrator.current == .formRefinement)
+        _ = try orchestrator.advance(after: passingReview(pass: .formRefinement), threshold: 0.7, similarityFloor: 0.5)
+        #expect(orchestrator.current == .material)
     }
 
     @Test func floorErrorsHaveDescriptions() {

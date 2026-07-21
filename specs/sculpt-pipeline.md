@@ -129,12 +129,25 @@ processing and stays a pure leaf.
    strict-quality gate additionally requires that a `.character` spec declare at
    least one proportion-lock landmark, keeping character proportions
    deterministic across rebuilds.
-3. **Continue gate** (`PassOrchestrator.advance`): `continue` requires a
-   render, a comparison sheet, **and** a vision score ≥ the assessed threshold
-   (`policy.minScore`). Missing evidence or a low score is rejected. When the
-   assessment sets a `similarityFloor` (> 0), `continue` additionally requires a
-   `measuredSimilarity` ≥ that floor — the **deterministic fidelity gate** the
-   subjective score cannot bypass (see below).
+3. **Continue gate** (`PassOrchestrator.advance`): `continue` always requires
+   the full **evidence bundle** — a render, a comparison sheet, **and** a vision
+   score — out of every pass; missing evidence is rejected. On top of that, two
+   gates fire independently, each only where it is fair to compare:
+   - **Score gate** (`SculptPass.enforcesScoreGate`, vision score ≥
+     `policy.minScore`): the agent's subjective *shape* judgment. Exempt only for
+     `blockout`, whose render is an origin-collapsed massing (placement is the
+     `structural` pass's job); from `structural` onward the shape is placed and
+     judgeable, so the score is gated.
+   - **Similarity floor** (`SculptPass.enforcesSimilarityFloor`, deterministic
+     `measuredSimilarity` ≥ `policy.similarityFloor` when the floor is > 0):
+     engages only from the **`material`** pass onward. The metric blends
+     silhouette IoU with SSIM and luminance correlation — pixel-intensity
+     comparisons — so the untextured geometry passes (`blockout`, `structural`,
+     `formRefinement`) render as uniform clay and would score arbitrarily low
+     against a full-colour reference photo regardless of geometric fidelity.
+     Deferring the colour-dependent floor to the first textured pass keeps it a
+     meaningful, non-deadlocking gate. The floor is the **deterministic fidelity
+     gate** the subjective score cannot bypass (see below).
 3a. **Similarity floor** (`ImageSimilarity` + `RasterLoader`): `sculpt_comparison_sheet`
    decodes the reference and render PNGs and computes a deterministic fidelity
    score — a weighted blend of silhouette IoU, SSIM, and luminance correlation

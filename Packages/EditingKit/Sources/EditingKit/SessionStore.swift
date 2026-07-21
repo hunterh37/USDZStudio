@@ -136,4 +136,11 @@ public final class SessionStore: Sendable {
     public func discard(_ plan: RecoveryPlan, fileManager: FileManager = .default) {
         try? fileManager.removeItem(at: plan.directory)
     }
+
+    /// Reopens the write-ahead log for a recovered `plan` so the restored
+    /// document keeps appending to the *same* session (continued crash-safety and
+    /// session capture) instead of starting a fresh one.
+    public func journal(for plan: RecoveryPlan) throws -> FileCommandJournal {
+        try FileCommandJournal(url: plan.directory.appendingPathComponent(Self.journalName))
+    }
 }

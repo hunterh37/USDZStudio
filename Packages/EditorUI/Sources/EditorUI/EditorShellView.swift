@@ -5,6 +5,7 @@ import USDCore
 import ViewportKit
 import ScriptingKit
 import DicyaninDesignSystem
+import SessionKit
 
 /// The editor shell: a top action bar, then outliner / viewport / inspector,
 /// with a collapsible validation drawer under the viewport and modal surfaces
@@ -57,6 +58,22 @@ public struct EditorShellView: View {
     let onOpenFile: () -> Void
     let onSave: () -> Void
     let onSaveAs: () -> Void
+
+    /// The app-session service, injected so the shell can capture its own
+    /// view state (camera, outliner expansion, panel visibility, playback) into
+    /// the session envelope — the parts the App can't see because they live in
+    /// this view's `@State` (specs/session-restoration.md). `nil` disables
+    /// capture (previews / tests).
+    let session: SessionController?
+
+    /// When restoring a previous session, the view state to reapply once this
+    /// shell appears — the shell-owned counterpart to the document-owned state
+    /// `SessionController.restore` already applied. `nil` for a normal open.
+    let restoredViewState: ViewState?
+
+    /// Observed to flush the session envelope when the window leaves the
+    /// foreground or the app quits.
+    @Environment(\.scenePhase) private var scenePhase
 
     @State private var searchText = ""
     @State private var collapsed: Set<PrimPath> = []
@@ -161,7 +178,9 @@ public struct EditorShellView: View {
                 onExport: @escaping (URL) async throws -> Void = { _ in },
                 onOpenFile: @escaping () -> Void = {},
                 onSave: @escaping () -> Void = {},
-                onSaveAs: @escaping () -> Void = {}) {
+                onSaveAs: @escaping () -> Void = {},
+                session: SessionController? = nil,
+                restoredViewState: ViewState? = nil) {
         self.document = document
         self.isImporting = isImporting
         self.importingFileName = importingFileName
@@ -176,6 +195,49 @@ public struct EditorShellView: View {
         self.onOpenFile = onOpenFile
         self.onSave = onSave
         self.onSaveAs = onSaveAs
+        self.session = session
+        self.restoredViewState = restoredViewState
+    }
+
+    /// Panel/sheet visibility, as the stable keys the session envelope stores.
+    private var panelVisibility: [String: Bool] {
+        ["validation": showValidation, "diff": showDiff, "environment": showEnvironment,
+         "mcpActivity": showMCPActivity, "palette": showPalette]
+    }
+
+    /// Writes the full session envelope — document-owned state plus this view's
+    /// shell-owned state — so a relaunch restores the camera, outliner
+    /// expansion, panels, and playback alongside the scene and undo history.
+    private func captureSession() {
+        guard let document, let session else { return }
+        session.capture(
+            document,
+            collapsed: collapsed,
+            camera: ViewportCameraPose(camera: cameraLink.camera),
+            environment: environment,
+            panelVisibility: panelVisibility,
+            playbackPosition: playback.animationTime)
+    }
+
+    /// Reapplies shell-owned view state from a restored session (a no-op for a
+    /// normal open). Unknown/stale entries fall back to the current value.
+    private func applyRestoredViewState() {
+        guard let restoredViewState else { return }
+        if let snapshot = document?.snapshot {
+            collapsed = restoredViewState.restoredCollapsed(in: snapshot)
+        }
+        if let environmentSettings = restoredViewState.environment {
+            environment = environmentSettings
+        }
+        showValidation = restoredViewState.panelVisibility["validation"] ?? showValidation
+        showDiff = restoredViewState.panelVisibility["diff"] ?? showDiff
+        showEnvironment = restoredViewState.panelVisibility["environment"] ?? showEnvironment
+        showMCPActivity = restoredViewState.panelVisibility["mcpActivity"] ?? showMCPActivity
+        showPalette = restoredViewState.panelVisibility["palette"] ?? showPalette
+        if let pose = restoredViewState.restoredCameraPose {
+            // Reasserted through the same one-shot channel camera bookmarks use.
+            appliedBookmarkPose = pose
+        }
     }
 
     public var body: some View {
@@ -192,6 +254,16 @@ public struct EditorShellView: View {
             }
         }
         .background(Palette.windowBackground.color)
+        // Reapply a restored session's shell-owned view state when this shell
+        // first appears and whenever the document is swapped (initial: true).
+        .onChange(of: document.map(ObjectIdentifier.init), initial: true) {
+            applyRestoredViewState()
+        }
+        // Flush the session envelope (including this view's state) on
+        // background/quit; the WAL already captured edits per command.
+        .onChange(of: scenePhase) { _, phase in
+            if phase != .active { captureSession() }
+        }
         .sheet(item: $activeSheet) { sheet in
             switch sheet {
             case .convert: ConversionSheet(onClose: dismissSheet)

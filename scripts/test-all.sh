@@ -22,6 +22,7 @@ PACKAGES=(
   Packages/ConversionKit
   Packages/ScriptingKit
   Packages/SculptKit
+  Packages/SessionKit
   Packages/AgentMCP
   Packages/ViewportKit
   Packages/EditorUI
