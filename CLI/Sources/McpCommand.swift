@@ -15,6 +15,11 @@ enum McpCommand {
         var groups: Set<ToolGroup>
         var strictness: ValidationStrictness
         var libraryDirectories: [URL]
+        /// Serve the file directly instead of relaying to a running editor.
+        /// Deterministic headless serving for tests/CI (the e2e flow gate) and
+        /// scripted automation that must not attach to whatever document a
+        /// developer happens to have open.
+        var noRelay: Bool = false
     }
 
     /// Pure, testable flag parsing. Returns nil (after printing) on usage errors.
@@ -23,10 +28,14 @@ enum McpCommand {
         var groups = Set(ToolGroup.allCases)
         var strictness = ValidationStrictness.warn
         var libraries: [URL] = []
+        var noRelay = false
         var index = 0
         while index < arguments.count {
             let argument = arguments[index]
             switch argument {
+            case "--no-relay":
+                noRelay = true
+                index += 1
             case "--groups":
                 guard index + 1 < arguments.count else {
                     printError("error: --groups needs a comma-separated list (\(ToolGroup.allCases.map(\.rawValue).joined(separator: ",")))")
@@ -72,14 +81,15 @@ enum McpCommand {
             }
         }
         guard positional.count == 1 else {
-            printError("usage: openusdz mcp <file.usd[z|a|c]> [--groups a,b,c] [--strictness off|warn|strict] [--library DIR]")
+            printError("usage: openusdz mcp <file.usd[z|a|c]> [--groups a,b,c] [--strictness off|warn|strict] [--library DIR] [--no-relay]")
             return nil
         }
         return Resolution(
             fileURL: URL(fileURLWithPath: positional[0]),
             groups: groups,
             strictness: strictness,
-            libraryDirectories: libraries)
+            libraryDirectories: libraries,
+            noRelay: noRelay)
     }
 
     // coverage:disable — composition root: opens the real Python bridge, locates usdrecord, and blocks on the stdio loop; each seam (resolve, AgentMCP tools, transport line handling) is unit-tested in isolation.
@@ -91,7 +101,7 @@ enum McpCommand {
         // OPEN document — become a thin stdin↔socket↔stdout pump so the agent
         // edits (and the user watches) the live viewport (specs/agent-live-editing.md).
         let endpointURL = MCPActivityPaths.endpointURL()
-        if let pump = RelayPump.make(endpointURL: endpointURL) {
+        if !resolution.noRelay, let pump = RelayPump.make(endpointURL: endpointURL) {
             FileHandle.standardError.write(Data(
                 "openusdz mcp: editor is live — relaying to the open document\n".utf8))
             return await pump.run()
