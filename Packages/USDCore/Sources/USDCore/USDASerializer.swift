@@ -54,23 +54,33 @@ public enum USDASerializer {
         if prim.visibility == .invisible {
             lines.append("\(inner)token visibility = \"invisible\"")
         }
-        var hasTransformOp = false
+        // `xformOpOrder` is regenerated from the actual `xformOp:*` attributes
+        // (below), so any stored copy is skipped here — emitting it verbatim
+        // produced a second, conflicting declaration (`string[]` alongside the
+        // `uniform token[]`), which makes USD reject the layer on reopen/render.
+        var xformOpNames: [String] = []
         for attribute in prim.attributes {
+            if attribute.name == "xformOpOrder" { continue }
+            if attribute.name.hasPrefix("xformOp:") { xformOpNames.append(attribute.name) }
             if let attributeLines = attributeLines(for: attribute, pad: inner) {
                 lines.append(contentsOf: attributeLines)
-                if attribute.name == "xformOp:transform" { hasTransformOp = true }
             } else {
                 lines.append("\(inner)# unsupported attribute \(quoted(attribute.name)) (\(attribute.value.typeLabel)) omitted")
             }
         }
-        if hasTransformOp {
-            lines.append("\(inner)uniform token[] xformOpOrder = [\"xformOp:transform\"]")
+        if !xformOpNames.isEmpty {
+            let ops = xformOpNames.map { quoted($0) }.joined(separator: ", ")
+            lines.append("\(inner)uniform token[] xformOpOrder = [\(ops)]")
         }
         for relationship in prim.relationships {
-            let uniform = relationship.isUniform ? "uniform " : ""
+            // Relationships are uniform by definition in USD's data model, and
+            // the text syntax has no `uniform rel` form — emitting one (as
+            // usd-core-loaded bindings, whose `isUniform` is true, otherwise
+            // would) is a parse error: `Expected } at 'uniform rel …'`. Always
+            // write a bare `rel`.
             let targets = relationship.targets.map { "<\($0.description)>" }
             let rhs = targets.count == 1 ? targets[0] : "[\(targets.joined(separator: ", "))]"
-            lines.append("\(inner)\(uniform)rel \(relationship.name) = \(rhs)")
+            lines.append("\(inner)rel \(relationship.name) = \(rhs)")
         }
         if !prim.metadata.isEmpty {
             lines.append("\(inner)custom string[] dicyanin:metadata = ["

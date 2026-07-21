@@ -120,11 +120,16 @@ enum McpCommand {
             session.bridgeExecutor = openExecutor
 
             let locator = PythonRuntimeLocator()
-            let renderer: (any RenderExecuting)? = ThumbnailCommand.locateUsdrecord(
+            // `render_views` renders natively by default (SceneKit/Model I/O — the
+            // same Apple frameworks the app's viewport uses), so it returns real
+            // pixels out of the box without `usd-core`/`usdrecord`. Storm is strictly
+            // opt-in via `DICYANIN_USDRECORD`: auto-detecting a `usdrecord` beside the
+            // interpreter used to win silently and, when that binary was a stub
+            // without imaging support (e.g. the one shipped by the `usd-core` wheel
+            // or system Python), it failed every render instead of falling back.
+            let renderer: (any RenderExecuting)? = NativeRendererSelection.make(
                 environment: ProcessInfo.processInfo.environment,
-                locatePython: { locator.locate() },
-                fileExists: { FileManager.default.fileExists(atPath: $0) }
-            ).map { UsdrecordRenderer(usdrecordPath: $0) }
+                fileExists: { FileManager.default.fileExists(atPath: $0) })
 
             let scriptExecutor: (any ScriptExecuting)? = locator.locate()
                 .map { PythonProcessExecutor(pythonPath: $0) }
