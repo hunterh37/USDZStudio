@@ -44,6 +44,7 @@ MODULES=(
   # Spec floors — met and enforced.
   "USDCore|Packages/USDCore|Sources/USDCore|100"
   "MeshKit|Packages/MeshKit|Sources/MeshKit|100"
+  "MechanismKit|Packages/MechanismKit|Sources/MechanismKit|100"
   "EditingKit|Packages/EditingKit|Sources/EditingKit|100"
   "ValidationKit|Packages/ValidationKit|Sources/ValidationKit|100"
   "ConversionKit|Packages/ConversionKit|Sources/ConversionKit|100"

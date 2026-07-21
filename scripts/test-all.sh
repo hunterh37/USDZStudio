@@ -15,6 +15,7 @@ PACKAGES=(
   Packages/QuickLookKit
   Packages/USDBridge
   Packages/MeshKit
+  Packages/MechanismKit
   Packages/EditingKit
   Packages/ValidationKit
   Packages/ConversionKit

@@ -30,6 +30,7 @@ policy_for() {
   case "$1" in
     USDCore)              echo "" ;;
     MeshKit)              echo "" ;;                    # pure Swift, zero deps (specs/mesh-editing.md)
+    MechanismKit)         echo "" ;;                    # pure Swift, zero deps — rigid articulation math (specs/articulation-mechanisms.md)
     DicyaninDesignSystem) echo "" ;;
     QuickLookKit)         echo "" ;;                    # pure Swift render-plan logic for the QuickLook .appex (specs/quicklook.md)
     USDBridge)            echo "USDCore" ;;
@@ -93,7 +94,7 @@ for entry in $TARGETS; do
   fi
 
   # 4. Framework bans: pure-Swift modules stay free of UI/GPU/Python frameworks.
-  if [[ "$key" == "USDCore" || "$key" == "MeshKit" ]]; then
+  if [[ "$key" == "USDCore" || "$key" == "MeshKit" || "$key" == "MechanismKit" ]]; then
     while IFS=: read -r file _ line; do
       [[ -z "$file" ]] && continue
       mod=$(echo "$line" | sed -E 's/^[[:space:]]*(@testable )?import +([A-Za-z_][A-Za-z0-9_]*).*/\2/')
