@@ -4,8 +4,8 @@ import USDCore
 import ViewportKit
 @testable import SessionKit
 
-/// Value-model coverage: CameraState, ViewState, SessionState, DocumentSession —
-/// construction, Codable round-trips, and lenient decoding.
+/// Value-model coverage: CameraState, ViewState, DocumentSession — construction,
+/// Codable round-trips, lenient decoding, and on-disk change detection.
 struct ModelTests {
 
     // MARK: CameraState
@@ -26,8 +26,7 @@ struct ModelTests {
     @Test func cameraStateIsCodable() throws {
         let state = CameraState(target: [0, 1, 0], distance: 2, azimuth: 1, elevation: 0.2)
         let data = try JSONEncoder().encode(state)
-        let decoded = try JSONDecoder().decode(CameraState.self, from: data)
-        #expect(decoded == state)
+        #expect(try JSONDecoder().decode(CameraState.self, from: data) == state)
     }
 
     // MARK: ViewState
@@ -46,8 +45,7 @@ struct ModelTests {
             environment: EnvironmentSettings(exposureEV: 1),
             playbackPosition: 2.5)
         let data = try JSONEncoder().encode(state)
-        let decoded = try JSONDecoder().decode(ViewState.self, from: data)
-        #expect(decoded == state)
+        #expect(try JSONDecoder().decode(ViewState.self, from: data) == state)
     }
 
     @Test func viewStateDefaultsWhenEmptyJSON() throws {
@@ -76,48 +74,27 @@ struct ModelTests {
         #expect(state.gizmoMode == nil)
     }
 
-    // MARK: SessionState
+    // MARK: DocumentSession
 
-    @Test func sessionStateDefaults() {
-        let state = SessionState()
-        #expect(state.schemaVersion == SessionState.currentSchemaVersion)
-        #expect(state.documents.isEmpty)
-        #expect(state.primaryDocument == nil)
-    }
-
-    @Test func sessionStateSingleDocumentConvenience() {
-        let doc = DocumentSession(journalRelativePath: "journal.jsonl")
-        let state = SessionState(document: doc)
-        #expect(state.documents.count == 1)
-        #expect(state.primaryDocument == doc)
-    }
-
-    @Test func sessionStateRoundTrip() throws {
+    @Test func documentSessionRoundTrip() throws {
         let doc = DocumentSession(
             source: SourceReference(bookmark: nil, path: "/tmp/x.usdz"),
             fingerprint: SourceFingerprint(size: 10, modified: Date(timeIntervalSince1970: 100)),
-            journalRelativePath: "journal.jsonl",
             savedRevision: 3,
             embeddedSnapshot: nil,
             viewState: ViewState(selectionPaths: ["/A"]))
-        let state = SessionState(document: doc)
-        let data = try JSONEncoder().encode(state)
-        let decoded = try JSONDecoder().decode(SessionState.self, from: data)
-        #expect(decoded == state)
+        let data = try JSONEncoder().encode(doc)
+        #expect(try JSONDecoder().decode(DocumentSession.self, from: data) == doc)
     }
 
-    // MARK: DocumentSession
-
     @Test func scratchSceneNeverReportsSourceChange() {
-        let doc = DocumentSession(journalRelativePath: "j.jsonl")
-        #expect(doc.sourceChangedOnDisk() == false)
+        #expect(DocumentSession().sourceChangedOnDisk() == false)
     }
 
     @Test func nilFingerprintNeverReportsSourceChange() {
         let doc = DocumentSession(
             source: SourceReference(bookmark: nil, path: "/tmp/does-not-matter"),
-            fingerprint: nil,
-            journalRelativePath: "j.jsonl")
+            fingerprint: nil)
         #expect(doc.sourceChangedOnDisk() == false)
     }
 
@@ -125,16 +102,27 @@ struct ModelTests {
         // Both bookmark and path nil → resolve() is nil → the guard's false path.
         let doc = DocumentSession(
             source: SourceReference(bookmark: nil, path: nil),
-            fingerprint: SourceFingerprint(size: 1, modified: .distantPast),
-            journalRelativePath: "j.jsonl")
+            fingerprint: SourceFingerprint(size: 1, modified: .distantPast))
         #expect(doc.sourceChangedOnDisk() == false)
     }
 
+    @Test func changedFileReportsSourceChange() throws {
+        let file = FileManager.default.temporaryDirectory
+            .appendingPathComponent("sk-doc-\(UUID().uuidString).usdz")
+        try Data(repeating: 0x41, count: 4).write(to: file)
+        defer { try? FileManager.default.removeItem(at: file) }
+        let doc = DocumentSession(
+            source: SourceReference(url: file),
+            fingerprint: try SourceFingerprint.make(for: file))
+        #expect(doc.sourceChangedOnDisk() == false)
+        try Data(repeating: 0x42, count: 99).write(to: file)   // grow the file
+        #expect(doc.sourceChangedOnDisk())
+    }
+
     @Test func embeddedSnapshotSurvivesRoundTrip() throws {
-        let snapshot = StageSnapshot()
-        let doc = DocumentSession(journalRelativePath: "j.jsonl", embeddedSnapshot: snapshot)
+        let doc = DocumentSession(embeddedSnapshot: StageSnapshot())
         let data = try JSONEncoder().encode(doc)
-        let decoded = try JSONDecoder().decode(DocumentSession.self, from: data)
-        #expect(decoded.embeddedSnapshot == snapshot)
+        #expect(try JSONDecoder().decode(DocumentSession.self, from: data).embeddedSnapshot
+                == StageSnapshot())
     }
 }
