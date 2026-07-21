@@ -61,6 +61,14 @@ enum CLIRunner {
                                diffs the flattened USD text against the original
                                (only lossless-modelled files pass). Exits 1 when
                                any invariant fails.
+      diff <before.usd[z|a|c]> <after.usd[z|a|c]> [--json]
+                               Compare two stages (two files, or the same file
+                               before/after an edit) and print the added,
+                               removed, and changed prims plus any root-metadata
+                               field changes. Exits 0 when identical, 1 when they
+                               differ (unix-diff convention), 1 on open failure.
+                               --json prints the delta as a machine-readable
+                               report; branch on its `identical` field.
       validate <file.usd[z|a|c]> [--profile NAME] [--strict] [--json]
                                Run a compliance profile's rule catalog and print
                                diagnostics (most-severe first) with an export
@@ -123,6 +131,10 @@ enum CLIRunner {
                 arguments: Array(arguments.dropFirst()),
                 environment: defaultRoundTripEnvironment(),
                 print: output, printError: printError)
+        case "diff":
+            return await diff(
+                arguments: Array(arguments.dropFirst()),
+                openStage: openStage, print: output, printError: printError)
         case "validate":
             return await validate(
                 arguments: Array(arguments.dropFirst()),
@@ -455,6 +467,98 @@ enum CLIRunner {
             dir.deleteLastPathComponent()
         }
         throw BridgeError.pythonUnavailable(detail: "Resources/Python/scripts not found; set DICYANIN_SCRIPTS_DIR")
+    }
+
+    // MARK: - diff
+
+    static func diff(
+        arguments: [String],
+        openStage: (URL) async throws -> any USDStageProtocol,
+        print output: (String) -> Void,
+        printError: (String) -> Void
+    ) async -> Int32 {
+        var positional: [String] = []
+        var json = false
+        for argument in arguments {
+            switch argument {
+            case "--json":
+                json = true
+            default:
+                if argument.hasPrefix("--") {
+                    printError("error: unknown option \(argument)\n" + usage)
+                    return 2
+                }
+                positional.append(argument)
+            }
+        }
+        guard positional.count == 2 else {
+            printError(usage)
+            return 2
+        }
+
+        let before: any USDStageProtocol
+        let after: any USDStageProtocol
+        do {
+            before = try await openStage(URL(fileURLWithPath: positional[0]))
+            after = try await openStage(URL(fileURLWithPath: positional[1]))
+        } catch {
+            let bridgeError = error as? BridgeError
+            printError("error: \(bridgeError?.errorDescription ?? error.localizedDescription)")
+            if let suggestion = bridgeError?.recoverySuggestion {
+                printError(suggestion)
+            }
+            return 1
+        }
+
+        let delta = StageDelta.compute(before: before, after: after)
+        if json {
+            output(encodeDeltaJSON(delta, before: positional[0], after: positional[1]))
+        } else {
+            output(renderDelta(delta, before: positional[0], after: positional[1]))
+        }
+
+        // Unix-diff convention: 0 when the two stages match, 1 when they differ.
+        return delta.isEmpty ? 0 : 1
+    }
+
+    /// Human-readable diff report with a one-line header summarising the counts.
+    static func renderDelta(_ delta: StageDelta, before: String, after: String) -> String {
+        var lines = ["--- \(before)", "+++ \(after)"]
+        if delta.isEmpty {
+            lines.append("no differences")
+        } else {
+            lines.append(
+                "\(delta.addedPrims.count) added, \(delta.removedPrims.count) removed, "
+                + "\(delta.changedPrims.count) changed"
+                + (delta.changedMetadataFields.isEmpty ? "" : ", metadata changed"))
+            lines.append(contentsOf: delta.summaryLines())
+        }
+        return lines.joined(separator: "\n")
+    }
+
+    static func encodeDeltaJSON(_ delta: StageDelta, before: String, after: String) -> String {
+        let changed: [[String: Any]] = delta.changedPrims.map { change in
+            [
+                "path": change.path.description,
+                "facets": change.changedFacets,
+                "attributes": change.attributeChanges.map { attribute in
+                    ["name": attribute.name, "change": attribute.kind.rawValue]
+                },
+            ]
+        }
+        let payload: [String: Any] = [
+            "before": before,
+            "after": after,
+            "identical": delta.isEmpty,
+            "added": delta.addedPrims.map { $0.description },
+            "removed": delta.removedPrims.map { $0.description },
+            "changed": changed,
+            "changedMetadataFields": delta.changedMetadataFields,
+        ]
+        guard let data = try? JSONSerialization.data(
+                withJSONObject: payload, options: [.prettyPrinted, .sortedKeys]),
+              let text = String(data: data, encoding: .utf8) else { return "{}" }
+        return text
     }
 
     // MARK: - validate

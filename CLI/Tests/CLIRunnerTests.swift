@@ -629,3 +629,134 @@ struct CLIPolicyOverridesTests {
         if case .fail(let code) = outcome { #expect(code == 2) } else { Issue.record("expected failure") }
     }
 }
+
+// MARK: - diff
+
+@Suite("CLI diff")
+struct CLIDiffTests {
+
+    private func prim(_ path: String, type: String = "Xform",
+                      attributes: [Attribute] = []) -> Prim {
+        Prim(path: PrimPath(path)!, typeName: type, attributes: attributes)
+    }
+
+    /// Dispatches by path so `before`/`after` files resolve to distinct stages.
+    private func run(
+        _ args: [String],
+        before: StageSnapshot,
+        after: StageSnapshot,
+        beforePath: String = "/tmp/before.usda",
+        afterPath: String = "/tmp/after.usda"
+    ) async -> (code: Int32, out: [String], err: [String]) {
+        var out: [String] = []
+        var err: [String] = []
+        let code = await CLIRunner.run(
+            arguments: args,
+            openStage: { url in url.path == beforePath ? before : after },
+            print: { out.append($0) }, printError: { err.append($0) })
+        return (code, out, err)
+    }
+
+    private func diff(_ before: StageSnapshot, _ after: StageSnapshot, json: Bool = false)
+    async -> (code: Int32, out: [String], err: [String]) {
+        let flags = json ? ["--json"] : []
+        return await run(["diff"] + flags + ["/tmp/before.usda", "/tmp/after.usda"],
+                         before: before, after: after)
+    }
+
+    // MARK: usage
+
+    @Test func missingOperandsIsUsageError() async {
+        let s = StageSnapshot()
+        let result = await run(["diff", "/tmp/before.usda"], before: s, after: s)
+        #expect(result.code == 2)
+        #expect(result.err.first?.contains("usage") == true)
+    }
+
+    @Test func unknownOptionIsUsageError() async {
+        let s = StageSnapshot()
+        let result = await run(["diff", "--frob", "/tmp/before.usda", "/tmp/after.usda"],
+                               before: s, after: s)
+        #expect(result.code == 2)
+        #expect(result.err.first?.contains("unknown option") == true)
+    }
+
+    // MARK: exit codes
+
+    @Test func identicalStagesExitZero() async {
+        let s = StageSnapshot(rootPrims: [prim("/A")])
+        let result = await diff(s, s)
+        #expect(result.code == 0)
+        let text = result.out.joined(separator: "\n")
+        #expect(text.contains("--- /tmp/before.usda"))
+        #expect(text.contains("+++ /tmp/after.usda"))
+        #expect(text.contains("no differences"))
+    }
+
+    @Test func differingStagesExitOne() async {
+        let before = StageSnapshot(rootPrims: [prim("/A")])
+        let after = StageSnapshot(rootPrims: [prim("/A"), prim("/B")])
+        let result = await diff(before, after)
+        #expect(result.code == 1)
+        let text = result.out.joined(separator: "\n")
+        #expect(text.contains("1 added, 0 removed, 0 changed"))
+        #expect(text.contains("+ /B"))
+    }
+
+    @Test func metadataChangeShownInHeader() async {
+        let before = StageSnapshot(metadata: StageMetadata(metersPerUnit: 1.0), rootPrims: [prim("/A")])
+        let after = StageSnapshot(metadata: StageMetadata(metersPerUnit: 0.01), rootPrims: [prim("/A")])
+        let result = await diff(before, after)
+        #expect(result.code == 1)
+        #expect(result.out.joined(separator: "\n").contains("metadata changed"))
+    }
+
+    @Test func openFailurePrintsBridgeErrorWithRecovery() async {
+        var err: [String] = []
+        let code = await CLIRunner.run(
+            arguments: ["diff", "/tmp/before.usda", "/tmp/after.usda"],
+            openStage: { _ in throw BridgeError.pythonUnavailable(detail: "nope") },
+            print: { _ in }, printError: { err.append($0) })
+        #expect(code == 1)
+        #expect(err.first?.contains("Python runtime unavailable") == true)
+        #expect(err.count == 2)  // description + recovery suggestion
+    }
+
+    // MARK: JSON
+
+    @Test func jsonIdenticalReportsIdenticalTrue() async throws {
+        let s = StageSnapshot(rootPrims: [prim("/A")])
+        let result = await diff(s, s, json: true)
+        #expect(result.code == 0)
+        let object = try JSONSerialization.jsonObject(
+            with: Data(result.out.joined(separator: "\n").utf8)) as? [String: Any]
+        #expect(object?["identical"] as? Bool == true)
+    }
+
+    @Test func jsonReportsAddedRemovedChanged() async throws {
+        let before = StageSnapshot(rootPrims: [prim("/A", type: "Xform"), prim("/Gone")])
+        let after = StageSnapshot(rootPrims: [prim("/A", type: "Mesh"), prim("/New")])
+        let result = await diff(before, after, json: true)
+        #expect(result.code == 1)
+        let object = try JSONSerialization.jsonObject(
+            with: Data(result.out.joined(separator: "\n").utf8)) as? [String: Any]
+        #expect(object?["identical"] as? Bool == false)
+        #expect((object?["added"] as? [String]) == ["/New"])
+        #expect((object?["removed"] as? [String]) == ["/Gone"])
+        let changed = object?["changed"] as? [[String: Any]]
+        #expect(changed?.first?["path"] as? String == "/A")
+        #expect((changed?.first?["facets"] as? [String]) == ["type"])
+    }
+
+    @Test func jsonEncodesAttributeChanges() async throws {
+        let before = StageSnapshot(rootPrims: [prim("/A", attributes: [Attribute(name: "x", value: .double(1))])])
+        let after = StageSnapshot(rootPrims: [prim("/A", attributes: [Attribute(name: "x", value: .double(2))])])
+        let result = await diff(before, after, json: true)
+        let object = try JSONSerialization.jsonObject(
+            with: Data(result.out.joined(separator: "\n").utf8)) as? [String: Any]
+        let changed = object?["changed"] as? [[String: Any]]
+        let attributes = changed?.first?["attributes"] as? [[String: Any]]
+        #expect(attributes?.first?["name"] as? String == "x")
+        #expect(attributes?.first?["change"] as? String == "modified")
+    }
+}
