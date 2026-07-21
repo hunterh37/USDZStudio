@@ -15,6 +15,15 @@ struct CoreTests {
         #expect(abs(cube.signedVolume - 1.0) < 1e-12)
     }
 
+    @Test func edgeSetMatchesCountAndKeys() {
+        let cube = Fixtures.cube()
+        // The undirected edge key set is the membership-only view used by
+        // recipe edge selection; it must agree with edgeCount and with the
+        // keys of the full edgeFaceMap.
+        #expect(cube.edgeSet.count == cube.edgeCount)
+        #expect(cube.edgeSet == Set(cube.edgeFaceMap.keys))
+    }
+
     @Test func gridIsHealthyOpenSurface() {
         let grid = Fixtures.grid(4)
         #expect(MeshInvariants.violations(in: grid).isEmpty)
