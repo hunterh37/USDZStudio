@@ -974,8 +974,17 @@ final class ViewportCoordinator {
     private var onHoverFace: ((Int?) -> Void)?
     private var hoverEntity: ModelEntity?
     private var hoveredFace: Int?
-    /// BVH rebuilt per mesh revision; traversed per hover/click event.
+    /// BVH over the edit mesh; traversed per hover/click event. Rebuilt on a
+    /// topology change, but during a position-only drag it is left `stale` and
+    /// rebuilt lazily on the next pick — no pick happens mid-drag, so paying for
+    /// an O(n log n) BVH build on every pointer event is pure waste.
     private var pickAccelerator: PickAccelerator?
+    private var pickAcceleratorIsStale = false
+    /// The live edit-mesh entities, retained so a position-only drag update can
+    /// swap their geometry in place instead of tearing the anchor down and
+    /// re-instantiating entities + materials every pointer event.
+    private var editBaseEntity: ModelEntity?
+    private var editHighlightEntity: ModelEntity?
 
     /// Swap the file-loaded entity for the live edited mesh (flat-shaded, with
     /// an amber overlay on the selected faces); restore it when editing ends.
@@ -989,18 +998,60 @@ final class ViewportCoordinator {
             ? nil : { [weak self] point in self?.hover(at: point) }
         if data == nil || !hoverPreview { setHoveredFace(nil) }
         guard data != editData else { return }
+        let previous = editData
         editData = data
-        pickAccelerator = data.map(PickAccelerator.init)
-        setHoveredFace(nil) // geometry changed; stale hover would mislead
-        editAnchor.children.removeAll()
-        hoverEntity = nil
 
         guard let data else {
+            // Exit edit mode: full teardown.
+            pickAccelerator = nil
+            pickAcceleratorIsStale = false
+            editBaseEntity = nil
+            editHighlightEntity = nil
+            setHoveredFace(nil)
+            editAnchor.children.removeAll()
+            hoverEntity = nil
             hiddenOriginal?.isEnabled = true
             hiddenOriginal = nil
             if editAnchor.parent != nil { editAnchor.removeFromParent() }
             return
         }
+
+        switch data.update(from: previous) {
+        case .none:
+            // Only the revision counter churned — geometry, selection and prim
+            // are all unchanged, so there is nothing to redraw and the BVH still
+            // matches. This is the cheapest possible drag frame.
+            return
+        case .positions where editBaseEntity != nil:
+            // Interactive extrude/inset drag: vertices moved but topology and
+            // selection held. Refresh the existing entities' geometry in place
+            // and mark the BVH stale (rebuilt lazily on the next pick) — no
+            // teardown, no re-instantiation, no per-event BVH build.
+            pickAcceleratorIsStale = true
+            setHoveredFace(nil) // positions moved; a stale hover face would mislead
+            if let mesh = Self.meshResource(MeshFlattener.flatten(data)) {
+                editBaseEntity?.model?.mesh = mesh
+            }
+            if !data.selectedFaces.isEmpty,
+               let highlight = Self.meshResource(
+                MeshFlattener.flatten(data, faces: data.selectedFaces.sorted()), inflate: 0.003) {
+                editHighlightEntity?.model?.mesh = highlight
+            }
+            return
+        case .positions, .rebuild:
+            break // fall through to a full rebuild
+        }
+
+        // Full rebuild: topology, selection or prim identity changed (or this is
+        // the first frame of an edit session).
+        pickAccelerator = PickAccelerator(data)
+        pickAcceleratorIsStale = false
+        setHoveredFace(nil) // geometry changed; stale hover would mislead
+        editAnchor.children.removeAll()
+        editBaseEntity = nil
+        editHighlightEntity = nil
+        hoverEntity = nil
+
         if editAnchor.parent == nil { view?.scene.addAnchor(editAnchor) }
 
         // Hide the file-loaded entity for this prim; the edit mesh replaces it.
@@ -1030,6 +1081,7 @@ final class ViewportCoordinator {
             let entity = ModelEntity(mesh: mesh, materials: [material])
             entity.transform = Transform(matrix: worldMatrix)
             editAnchor.addChild(entity)
+            editBaseEntity = entity // retained for in-place position-only updates
         }
         if !data.selectedFaces.isEmpty,
            let highlight = Self.meshResource(
@@ -1039,6 +1091,7 @@ final class ViewportCoordinator {
                 materials: [UnlitMaterial(color: NSColor(srgbRed: 0.91, green: 0.7, blue: 0.25, alpha: 0.55))])
             entity.transform = Transform(matrix: worldMatrix)
             editAnchor.addChild(entity)
+            editHighlightEntity = entity // retained for in-place position-only updates
         }
     }
 
@@ -1069,6 +1122,12 @@ final class ViewportCoordinator {
 
     private func faceHit(at point: CGPoint) -> Int? {
         guard let data = editData, let ray = primLocalRay(at: point) else { return nil }
+        // A position-only drag left the BVH stale; rebuild it now, at the first
+        // pick after the drag, so it reflects the current vertex positions.
+        if pickAcceleratorIsStale {
+            pickAccelerator = PickAccelerator(data)
+            pickAcceleratorIsStale = false
+        }
         return (pickAccelerator?.pickFace(ray: ray) ?? MeshPicker.pickFace(ray: ray, in: data))?.faceIndex
     }
 
