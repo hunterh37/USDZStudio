@@ -49,8 +49,16 @@ public enum MeshFlattener {
     /// scene-graph path, which describe meshes the same way.
     public static func flatten(positions: [SIMD3<Float>], faceLoops: [[Int]],
                                faces: [Int]? = nil) -> Buffers {
+        let selected = faces ?? Array(faceLoops.indices)
         var out = Buffers(positions: [], normals: [], triangleIndices: [])
-        for f in faces ?? Array(faceLoops.indices) {
+        // Pre-size the output buffers from the known corner budget so this
+        // per-revision (drag-time) rebuild doesn't repeatedly reallocate.
+        var corners = 0
+        for f in selected where faceLoops.indices.contains(f) { corners += faceLoops[f].count }
+        out.positions.reserveCapacity(corners)
+        out.normals.reserveCapacity(corners)
+        out.triangleIndices.reserveCapacity(corners * 3)
+        for f in selected {
             guard faceLoops.indices.contains(f) else { continue }
             let loop = faceLoops[f]
             guard loop.count >= 3, loop.allSatisfy({ positions.indices.contains($0) }) else { continue }
@@ -58,9 +66,11 @@ public enum MeshFlattener {
             let normal = newellNormal(pts)
             let base = UInt32(out.positions.count)
             out.positions.append(contentsOf: pts)
-            out.normals.append(contentsOf: Array(repeating: normal, count: pts.count))
+            for _ in pts { out.normals.append(normal) }
             for i in 1..<(pts.count - 1) {
-                out.triangleIndices.append(contentsOf: [base, base + UInt32(i), base + UInt32(i + 1)])
+                out.triangleIndices.append(base)
+                out.triangleIndices.append(base + UInt32(i))
+                out.triangleIndices.append(base + UInt32(i + 1))
             }
         }
         return out

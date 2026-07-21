@@ -66,9 +66,9 @@ import Testing
         var probes = 0, ticks = 0
         let info = RelayCodec.awaitEndpoint(
             attempts: 5,
-            resolve: { probes += 1; return probes >= 3 ? MCPEndpointInfo(port: 5, pid: 1, token: nil) : nil },
+            resolve: { probes += 1; return probes >= 3 ? MCPEndpointInfo(socketPath: "/tmp/a.sock", pid: 1, token: nil) : nil },
             tick: { ticks += 1 })
-        #expect(info?.port == 5)
+        #expect(info?.socketPath == "/tmp/a.sock")
         #expect(probes == 3)
         #expect(ticks == 2)
 
