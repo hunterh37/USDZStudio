@@ -16,8 +16,14 @@ public enum BuildStep: Sendable, Equatable {
     /// Set a prim's local transform.
     case setTransform(path: String, translation: [Double],
                       rotationEulerDegrees: [Double], scale: [Double])
-    /// Create a UsdPreviewSurface material and bind it to the target prim.
-    case createMaterial(targetPath: String, baseColor: [Double])
+    /// Create a UsdPreviewSurface material and bind it to the target prim,
+    /// carrying the full channel set (scalars + optional texture maps) so the
+    /// executor authors real image channels, not just a flat colour.
+    case createMaterial(targetPath: String, material: MaterialSpec)
+    /// Author a projected-texture / de-light descriptor (camera pose + target
+    /// UV set) as a `sculptProjectedTexture` string attribute on the sculpt
+    /// root. Emitted by the surface pass; the executor realizes the projection.
+    case projectTexture(rootPath: String, descriptorJSON: String)
     /// Author the action-ready runtime manifest (nodes/sockets/colliders/
     /// destruction groups) as a custom `sculptRuntime` string attribute on the
     /// sculpt root prim.
@@ -47,11 +53,24 @@ public enum BuildPlanner {
             return placementSteps(spec)
         case .material:
             return materialSteps(spec)
+        case .surface:
+            return surfaceSteps(spec)
         case .interaction:
             return runtimeSteps(spec)
-        case .formRefinement, .surface, .lighting, .optimization:
+        case .formRefinement, .lighting, .optimization:
             return []
         }
+    }
+
+    // MARK: - Surface: projected-texture / de-light descriptor
+
+    static func surfaceSteps(_ spec: ObjectSculptSpec) -> [BuildStep] {
+        // Nothing to author unless the spec declares a projection targeting a
+        // real component. Stays review-only otherwise.
+        guard let projection = spec.surfaceProjection,
+              spec.allNodes.contains(where: { $0.name == projection.targetComponent }),
+              let json = try? projection.json() else { return [] }
+        return [.projectTexture(rootPath: "/" + spec.root.name, descriptorJSON: json)]
     }
 
     // MARK: - Interaction: author the action-ready runtime manifest
@@ -214,7 +233,7 @@ public enum BuildPlanner {
         walk(spec.root, parent: nil) { node, parentPath in
             let selfPath = path(for: node.name, under: parentPath)
             if let materialID = node.materialID, let material = byID[materialID] {
-                steps.append(.createMaterial(targetPath: selfPath, baseColor: material.baseColor))
+                steps.append(.createMaterial(targetPath: selfPath, material: material))
             }
             return selfPath
         }

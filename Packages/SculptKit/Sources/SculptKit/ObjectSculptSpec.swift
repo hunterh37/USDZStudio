@@ -24,6 +24,13 @@ public enum ShapeKind: Codable, Sendable, Equatable {
 
 /// A physically-based material in the spec, kept channel-independent
 /// (albedo/roughness/metallic/emissive) like img2threejs's material system.
+///
+/// Beyond the flat scalar/colour channels it can carry optional **texture
+/// maps** (asset path strings) so the material pass authors real image
+/// channels — albedo, normal, roughness, and emissive — not just a solid
+/// colour. `normalScale` tunes the strength of the normal map. Every map field
+/// is optional and decode-defaulted so specs authored before texture support
+/// still load unchanged.
 public struct MaterialSpec: Codable, Sendable, Equatable, Identifiable {
     public var id: String
     /// Linear RGB in 0...1.
@@ -32,14 +39,121 @@ public struct MaterialSpec: Codable, Sendable, Equatable, Identifiable {
     public var metallic: Double
     /// Optional emissive RGB in 0...1.
     public var emissive: [Double]?
+    /// Optional albedo/base-colour texture asset path.
+    public var albedoMap: String?
+    /// Optional tangent-space normal-map asset path.
+    public var normalMap: String?
+    /// Optional roughness texture asset path.
+    public var roughnessMap: String?
+    /// Optional emissive texture asset path.
+    public var emissiveMap: String?
+    /// Strength applied to the normal map (>= 0; 1 = full strength).
+    public var normalScale: Double?
 
     public init(id: String, baseColor: [Double], roughness: Double = 0.5,
-                metallic: Double = 0, emissive: [Double]? = nil) {
+                metallic: Double = 0, emissive: [Double]? = nil,
+                albedoMap: String? = nil, normalMap: String? = nil,
+                roughnessMap: String? = nil, emissiveMap: String? = nil,
+                normalScale: Double? = nil) {
         self.id = id
         self.baseColor = baseColor
         self.roughness = roughness
         self.metallic = metallic
         self.emissive = emissive
+        self.albedoMap = albedoMap
+        self.normalMap = normalMap
+        self.roughnessMap = roughnessMap
+        self.emissiveMap = emissiveMap
+        self.normalScale = normalScale
+    }
+
+    // Custom decoding so specs authored before texture channels existed still
+    // decode (every map field and normalScale decode-default to nil).
+    private enum CodingKeys: String, CodingKey {
+        case id, baseColor, roughness, metallic, emissive
+        case albedoMap, normalMap, roughnessMap, emissiveMap, normalScale
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        baseColor = try c.decode([Double].self, forKey: .baseColor)
+        roughness = try c.decodeIfPresent(Double.self, forKey: .roughness) ?? 0.5
+        metallic = try c.decodeIfPresent(Double.self, forKey: .metallic) ?? 0
+        emissive = try c.decodeIfPresent([Double].self, forKey: .emissive)
+        albedoMap = try c.decodeIfPresent(String.self, forKey: .albedoMap)
+        normalMap = try c.decodeIfPresent(String.self, forKey: .normalMap)
+        roughnessMap = try c.decodeIfPresent(String.self, forKey: .roughnessMap)
+        emissiveMap = try c.decodeIfPresent(String.self, forKey: .emissiveMap)
+        normalScale = try c.decodeIfPresent(Double.self, forKey: .normalScale)
+    }
+
+    /// True when the material carries at least one texture map.
+    public var hasTextures: Bool {
+        albedoMap != nil || normalMap != nil || roughnessMap != nil || emissiveMap != nil
+    }
+}
+
+/// A camera pose for a projected-texture bake: eye position, the point it looks
+/// at, and its up vector. Pure data — SculptKit never renders it.
+public struct CameraPose: Codable, Sendable, Equatable {
+    public var position: [Double]
+    public var target: [Double]
+    public var up: [Double]
+
+    public init(position: [Double], target: [Double], up: [Double] = [0, 1, 0]) {
+        self.position = position
+        self.target = target
+        self.up = up
+    }
+}
+
+/// A projected-texture / de-light descriptor for the surface pass — the
+/// USD-native analog of img2threejs's `bake_projected_texture` +
+/// `delight_albedo`. It describes *how* a reference image is projected onto a
+/// component's UV set (and whether to de-light the resulting albedo); the
+/// executor realizes it, keeping SculptKit free of any image processing.
+public struct SurfaceProjection: Codable, Sendable, Equatable {
+    /// Component node the projection targets.
+    public var targetComponent: String
+    /// Camera the reference is projected from.
+    public var camera: CameraPose
+    /// Destination UV set (e.g. "st").
+    public var uvSet: String
+    /// Whether to remove baked lighting from the projected albedo.
+    public var delight: Bool
+
+    public init(targetComponent: String, camera: CameraPose,
+                uvSet: String = "st", delight: Bool = true) {
+        self.targetComponent = targetComponent
+        self.camera = camera
+        self.uvSet = uvSet
+        self.delight = delight
+    }
+
+    /// Deterministic JSON (sorted keys) for authoring onto the stage.
+    public func json() throws -> String {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        return String(decoding: try encoder.encode(self), as: UTF8.self)
+    }
+}
+
+/// A proportion-lock landmark for character specs: a named anchor bound to a
+/// component at a normalized position (e.g. head-top, hip, foot). Character
+/// specs must declare landmarks so proportions stay deterministic across
+/// rebuilds. Pure data.
+public struct Landmark: Codable, Sendable, Equatable {
+    public var name: String
+    /// Component node this landmark anchors to.
+    public var component: String
+    /// Anchor position (local to the component root).
+    public var position: [Double]
+
+    public init(name: String, component: String, position: [Double]) {
+        self.name = name
+        self.component = component
+        self.position = position
     }
 }
 
@@ -205,6 +319,10 @@ public struct ObjectSculptSpec: Codable, Sendable, Equatable {
     public var colliders: [Collider]
     /// Runtime destruction groups (authored in the interaction pass).
     public var destructionGroups: [DestructionGroup]
+    /// Optional projected-texture / de-light descriptor realized in the surface pass.
+    public var surfaceProjection: SurfaceProjection?
+    /// Proportion-lock landmarks (required for `.character` specs).
+    public var landmarks: [Landmark]
     public var detailInventory: DetailInventory
     public var reviewHistory: [PassReview]
 
@@ -212,6 +330,7 @@ public struct ObjectSculptSpec: Codable, Sendable, Equatable {
         name: String, objectClass: ObjectClass, root: ComponentNode,
         materials: [MaterialSpec] = [], sockets: [Socket] = [],
         colliders: [Collider] = [], destructionGroups: [DestructionGroup] = [],
+        surfaceProjection: SurfaceProjection? = nil, landmarks: [Landmark] = [],
         detailInventory: DetailInventory = DetailInventory(),
         reviewHistory: [PassReview] = []
     ) {
@@ -222,14 +341,18 @@ public struct ObjectSculptSpec: Codable, Sendable, Equatable {
         self.sockets = sockets
         self.colliders = colliders
         self.destructionGroups = destructionGroups
+        self.surfaceProjection = surfaceProjection
+        self.landmarks = landmarks
         self.detailInventory = detailInventory
         self.reviewHistory = reviewHistory
     }
 
-    // Custom decoding so specs authored before the runtime layer still decode.
+    // Custom decoding so specs authored before the runtime/surface/character
+    // layers still decode.
     private enum CodingKeys: String, CodingKey {
         case name, objectClass, root, materials, sockets
-        case colliders, destructionGroups, detailInventory, reviewHistory
+        case colliders, destructionGroups, surfaceProjection, landmarks
+        case detailInventory, reviewHistory
     }
 
     public init(from decoder: Decoder) throws {
@@ -241,6 +364,8 @@ public struct ObjectSculptSpec: Codable, Sendable, Equatable {
         sockets = try c.decodeIfPresent([Socket].self, forKey: .sockets) ?? []
         colliders = try c.decodeIfPresent([Collider].self, forKey: .colliders) ?? []
         destructionGroups = try c.decodeIfPresent([DestructionGroup].self, forKey: .destructionGroups) ?? []
+        surfaceProjection = try c.decodeIfPresent(SurfaceProjection.self, forKey: .surfaceProjection)
+        landmarks = try c.decodeIfPresent([Landmark].self, forKey: .landmarks) ?? []
         detailInventory = try c.decodeIfPresent(DetailInventory.self, forKey: .detailInventory) ?? DetailInventory()
         reviewHistory = try c.decodeIfPresent([PassReview].self, forKey: .reviewHistory) ?? []
     }
