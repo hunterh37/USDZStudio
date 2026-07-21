@@ -61,6 +61,7 @@ public enum SculptTools {
         registerBuild(on: server, session: session, store: store)
         registerReview(on: server, store: store)
         registerStatus(on: server, store: store)
+        registerComparisonSheet(on: server, store: store, workDirectory: workDirectory)
     }
 
     // MARK: - Assess
@@ -157,6 +158,14 @@ public enum SculptTools {
                 throw ToolError.failed("no spec authored yet — call sculpt_author_spec first")
             }
             let pass = orchestrator.current
+            // Action-ready gate: the interaction pass only authors once the
+            // object exposes a usable runtime layer (img2threejs's gate).
+            if pass == .interaction {
+                let ready = SpecValidator.actionReady(spec)
+                if !ready.isValid {
+                    throw ToolError.rejectedByValidation(ready.errors.map(\.message))
+                }
+            }
             let steps = BuildPlanner.plan(for: spec, pass: pass)
             var authored: [String] = []
             for step in steps {
@@ -220,9 +229,55 @@ public enum SculptTools {
                 "isHalted": .bool(orchestrator.isHalted),
                 "reviewCount": .number(Double(spec.reviewHistory.count)),
                 "unmappedDetails": .array(unmapped.map { .string($0) }),
+                "socketCount": .number(Double(spec.sockets.count)),
+                "colliderCount": .number(Double(spec.colliders.count)),
+                "actionReady": .bool(SpecValidator.actionReady(spec).isValid),
                 "lastScore": spec.reviewHistory.last?.score.map { .number($0) } ?? .null,
             ])
         })
+    }
+
+    // MARK: - Comparison sheet
+
+    private static func registerComparisonSheet(on server: MCPServer, store: SculptStore, workDirectory: URL) {
+        server.register(MCPTool(
+            name: "sculpt_comparison_sheet", group: .sculpt,
+            description: "Compose a reference-vs-render comparison sheet for the current pass (img2threejs's screenshot-review artifact). Writes an SVG placing the reference beside the pass render to the work directory and returns its path — feed that path plus your fidelity score to sculpt_review.",
+            inputSchema: Schema.object([
+                "referencePath": Schema.string("path to the original reference image"),
+                "renderPath": Schema.string("path to the current pass render"),
+                "size": Schema.integer("per-panel pixel size (default 512)"),
+            ], required: ["referencePath", "renderPath"])
+        ) { args in
+            guard let orchestrator = await store.orchestrator else {
+                throw ToolError.failed("no spec authored yet — call sculpt_author_spec first")
+            }
+            guard let referencePath = args["referencePath"].stringValue,
+                  let renderPath = args["renderPath"].stringValue else {
+                throw ToolError.invalidParams("'referencePath' and 'renderPath' are required")
+            }
+            let sheet = ComparisonSheet(
+                pass: orchestrator.current, referencePath: referencePath,
+                renderPath: renderPath, size: args["size"].intValue ?? 512)
+            let path = try writeComparisonSheet(sheet, to: workDirectory)
+            return .object([
+                "pass": .string(sheet.pass.rawValue),
+                "comparisonSheetPath": .string(path),
+            ])
+        })
+    }
+
+    static func writeComparisonSheet(_ sheet: ComparisonSheet, to workDirectory: URL) throws -> String {
+        let url = workDirectory.appendingPathComponent("comparison-\(sheet.pass.rawValue).svg")
+        do {
+            try FileManager.default.createDirectory(at: workDirectory, withIntermediateDirectories: true)
+            try Data(sheet.svg().utf8).write(to: url)
+        } catch {
+            // coverage:disable — filesystem write failure (read-only/full disk) is environmental, not a code path we can exercise deterministically.
+            throw ToolError.failed("could not write comparison sheet: \(error)")
+            // coverage:enable
+        }
+        return url.path
     }
 
     // MARK: - Step execution
@@ -271,6 +326,13 @@ public enum SculptTools {
             }
             _ = try session.mutate(command)
             return command.materialPath.description
+
+        case .authorRuntime(let rootPath, let manifestJSON):
+            let primPath = try resolvePath(rootPath, session: session)
+            let attribute = Attribute(name: "sculptRuntime", value: .string(manifestJSON))
+            let old = session.stage.prim(at: primPath)?.attribute(named: "sculptRuntime")
+            _ = try session.mutate(SetAttributeCommand(path: primPath, newAttribute: attribute, oldAttribute: old))
+            return primPath.description
         }
     }
 
@@ -319,6 +381,10 @@ public enum SculptTools {
 
     static func assessmentJSON(_ a: PreSpecAssessment) -> JSONValue {
         .object([
+            "suitability": .object([
+                "verdict": .string(a.suitability.suitability.rawValue),
+                "reasons": .array(a.suitability.reasons.map { .string($0) }),
+            ]),
             "objectClass": .string(a.objectClass.rawValue),
             "complexity": .number(Double(a.complexity)),
             "policy": .object([

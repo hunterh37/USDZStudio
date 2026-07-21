@@ -75,6 +75,10 @@ public enum SpecValidator {
             }
         }
 
+        // Runtime-layer schema: colliders/destruction groups must reference
+        // real components and be well-formed.
+        issues.append(contentsOf: runtimeSchemaIssues(spec, componentNames: seenNames))
+
         // ── Strict-quality gate (opt-in) ──────────────────────────────────
         if strictQuality {
             issues.append(contentsOf: strictQualityIssues(spec, assessment: assessment))
@@ -131,6 +135,45 @@ public enum SpecValidator {
             }
         }
         return issues
+    }
+
+    // MARK: - Runtime-layer schema
+
+    static func runtimeSchemaIssues(_ spec: ObjectSculptSpec, componentNames: Set<String>) -> [SpecIssue] {
+        var issues: [SpecIssue] = []
+        for collider in spec.colliders {
+            if !componentNames.contains(collider.component) {
+                issues.append(.init(.error, "collider '\(collider.name)' references unknown component '\(collider.component)'"))
+            }
+            if collider.center.count != 3 || collider.size.count != 3 {
+                issues.append(.init(.error, "collider '\(collider.name)' center and size must be [x, y, z]"))
+            } else if collider.size.contains(where: { $0 <= 0 }) {
+                issues.append(.init(.error, "collider '\(collider.name)' size components must be positive"))
+            }
+        }
+        for group in spec.destructionGroups {
+            if group.members.isEmpty {
+                issues.append(.init(.error, "destruction group '\(group.name)' has no members"))
+            }
+            for member in group.members where !componentNames.contains(member) {
+                issues.append(.init(.error, "destruction group '\(group.name)' references unknown component '\(member)'"))
+            }
+        }
+        return issues
+    }
+
+    // MARK: - Action-ready gate
+
+    /// img2threejs's "Action-Ready Gate": confirms the object exposes a usable
+    /// runtime layer (at least one socket or collider). Schema correctness of
+    /// the runtime references is covered by `validate`; this checks presence.
+    public static func actionReady(_ spec: ObjectSculptSpec) -> SpecValidationResult {
+        let manifest = RuntimeManifest(spec: spec)
+        var issues: [SpecIssue] = []
+        if !manifest.isActionable {
+            issues.append(.init(.error, "action-ready: object exposes no runtime handles — author at least one socket or collider"))
+        }
+        return SpecValidationResult(issues: issues)
     }
 
     // MARK: - Strict-quality helpers

@@ -55,17 +55,88 @@ public struct Socket: Codable, Sendable, Equatable {
     }
 }
 
-/// A linear repetition system (bolts around a rim, slats on a bench…). The
-/// structural pass expands `count` copies, each offset by `step`.
+/// How a repetition system lays out its copies.
+public enum RepetitionKind: String, Codable, Sendable, Equatable {
+    /// Copies offset by `step * i` (slats on a bench).
+    case linear
+    /// Copies revolved around `axis` through the base, evenly over 360°
+    /// (bolts around a rim). `step` is the radial offset applied before the
+    /// rotation, so the first copy sits `step` away from the pivot.
+    case radial
+    /// Copies laid out on a `gridCounts` = [nx, ny, nz] lattice, spaced by
+    /// `step` on each axis (rivets on a panel).
+    case grid
+}
+
+/// A repetition system (bolts around a rim, slats on a bench, rivets on a
+/// panel…). The structural pass expands the copies according to `kind`.
 public struct RepetitionSystem: Codable, Sendable, Equatable {
     public var name: String
+    public var kind: RepetitionKind
     public var count: Int
     public var step: [Double]
+    /// Rotation axis for `.radial` (defaults to +Y when nil).
+    public var axis: [Double]?
+    /// Per-axis counts [nx, ny, nz] for `.grid` (defaults derived from `count`).
+    public var gridCounts: [Int]?
 
-    public init(name: String, count: Int, step: [Double]) {
+    public init(name: String, kind: RepetitionKind = .linear, count: Int, step: [Double],
+                axis: [Double]? = nil, gridCounts: [Int]? = nil) {
         self.name = name
+        self.kind = kind
         self.count = count
         self.step = step
+        self.axis = axis
+        self.gridCounts = gridCounts
+    }
+
+    // Custom decoding so specs authored before `kind`/`axis`/`gridCounts`
+    // existed still decode (kind defaults to `.linear`).
+    private enum CodingKeys: String, CodingKey { case name, kind, count, step, axis, gridCounts }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        name = try c.decode(String.self, forKey: .name)
+        kind = try c.decodeIfPresent(RepetitionKind.self, forKey: .kind) ?? .linear
+        count = try c.decode(Int.self, forKey: .count)
+        step = try c.decode([Double].self, forKey: .step)
+        axis = try c.decodeIfPresent([Double].self, forKey: .axis)
+        gridCounts = try c.decodeIfPresent([Int].self, forKey: .gridCounts)
+    }
+}
+
+/// A runtime collision volume wrapping a component (part of the "action-ready"
+/// runtime layer img2threejs exposes via `sculptRuntime`).
+public struct Collider: Codable, Sendable, Equatable {
+    public enum Kind: String, Codable, Sendable, Equatable {
+        case box, sphere, capsule, convexHull
+    }
+    public var name: String
+    public var kind: Kind
+    /// Name of the component node this collider wraps.
+    public var component: String
+    public var center: [Double]
+    public var size: [Double]
+
+    public init(name: String, kind: Kind, component: String,
+                center: [Double] = [0, 0, 0], size: [Double] = [1, 1, 1]) {
+        self.name = name
+        self.kind = kind
+        self.component = component
+        self.center = center
+        self.size = size
+    }
+}
+
+/// A named group of components that break away together at runtime.
+public struct DestructionGroup: Codable, Sendable, Equatable {
+    public var name: String
+    /// Component node names that belong to this group.
+    public var members: [String]
+
+    public init(name: String, members: [String]) {
+        self.name = name
+        self.members = members
     }
 }
 
@@ -130,12 +201,17 @@ public struct ObjectSculptSpec: Codable, Sendable, Equatable {
     public var root: ComponentNode
     public var materials: [MaterialSpec]
     public var sockets: [Socket]
+    /// Runtime collision volumes (authored in the interaction pass).
+    public var colliders: [Collider]
+    /// Runtime destruction groups (authored in the interaction pass).
+    public var destructionGroups: [DestructionGroup]
     public var detailInventory: DetailInventory
     public var reviewHistory: [PassReview]
 
     public init(
         name: String, objectClass: ObjectClass, root: ComponentNode,
         materials: [MaterialSpec] = [], sockets: [Socket] = [],
+        colliders: [Collider] = [], destructionGroups: [DestructionGroup] = [],
         detailInventory: DetailInventory = DetailInventory(),
         reviewHistory: [PassReview] = []
     ) {
@@ -144,8 +220,29 @@ public struct ObjectSculptSpec: Codable, Sendable, Equatable {
         self.root = root
         self.materials = materials
         self.sockets = sockets
+        self.colliders = colliders
+        self.destructionGroups = destructionGroups
         self.detailInventory = detailInventory
         self.reviewHistory = reviewHistory
+    }
+
+    // Custom decoding so specs authored before the runtime layer still decode.
+    private enum CodingKeys: String, CodingKey {
+        case name, objectClass, root, materials, sockets
+        case colliders, destructionGroups, detailInventory, reviewHistory
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        name = try c.decode(String.self, forKey: .name)
+        objectClass = try c.decode(ObjectClass.self, forKey: .objectClass)
+        root = try c.decode(ComponentNode.self, forKey: .root)
+        materials = try c.decodeIfPresent([MaterialSpec].self, forKey: .materials) ?? []
+        sockets = try c.decodeIfPresent([Socket].self, forKey: .sockets) ?? []
+        colliders = try c.decodeIfPresent([Collider].self, forKey: .colliders) ?? []
+        destructionGroups = try c.decodeIfPresent([DestructionGroup].self, forKey: .destructionGroups) ?? []
+        detailInventory = try c.decodeIfPresent(DetailInventory.self, forKey: .detailInventory) ?? DetailInventory()
+        reviewHistory = try c.decodeIfPresent([PassReview].self, forKey: .reviewHistory) ?? []
     }
 
     /// Every node in the tree, depth-first.

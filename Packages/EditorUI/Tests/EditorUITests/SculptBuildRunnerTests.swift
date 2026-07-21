@@ -66,6 +66,20 @@ struct SculptBuildRunnerTests {
             to: doc) == nil)
     }
 
+    @Test func authorsRuntimeManifestAndSkipsMissingRoot() {
+        let doc = EditorDocument(snapshot: StageSnapshot(rootPrims: []))
+        SculptBuildRunner.apply(pass: .blockout, of: house(), to: doc)
+        // Author the runtime manifest onto the existing root.
+        let path = SculptBuildRunner.apply(
+            step: .authorRuntime(rootPath: "/House", manifestJSON: "{\"nodes\":[\"House\"]}"),
+            to: doc)
+        #expect(path == "/House")
+        #expect(doc.snapshot.prim(at: PrimPath("/House")!)?.attribute(named: "sculptRuntime") != nil)
+        // A missing root prim is skipped, not fatal.
+        #expect(SculptBuildRunner.apply(
+            step: .authorRuntime(rootPath: "/Ghost", manifestJSON: "{}"), to: doc) == nil)
+    }
+
     @Test func demoHouseSpecIsStrictQualityValid() {
         let spec = house()
         let assessment = PreSpecAssessment.assess(

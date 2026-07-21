@@ -30,19 +30,49 @@ public struct FeatureAcceptancePolicy: Codable, Sendable, Equatable {
     }
 }
 
-/// The pre-spec assessment: classify the object, score its complexity, and
-/// establish the acceptance policy — all deterministically from lightweight
-/// hints (no image decoding here; the agent supplies descriptive hints and the
-/// image dimensions).
+/// Whether a reference is usable for reconstruction at all. img2threejs's
+/// first quality gate ("Suitability Gate") — it can reject an input outright
+/// or ask for more before any spec work begins.
+public enum Suitability: String, Codable, Sendable {
+    /// Good enough to author a spec against.
+    case viable
+    /// Usable, but the agent should gather more (extra hints/views) first.
+    case needsMoreInput
+    /// Not reconstructable — too small / degenerate; halt.
+    case rejected
+}
+
+/// The suitability verdict plus the reasons behind it.
+public struct SuitabilityVerdict: Codable, Sendable, Equatable {
+    public var suitability: Suitability
+    public var reasons: [String]
+
+    public init(_ suitability: Suitability, reasons: [String] = []) {
+        self.suitability = suitability
+        self.reasons = reasons
+    }
+
+    /// True only when the reference is `viable`.
+    public var isViable: Bool { suitability == .viable }
+}
+
+/// The pre-spec assessment: judge suitability, classify the object, score its
+/// complexity, and establish the acceptance policy — all deterministically
+/// from lightweight hints (no image decoding here; the agent supplies
+/// descriptive hints and the image dimensions).
 public struct PreSpecAssessment: Codable, Sendable, Equatable {
+    /// The suitability gate verdict (see `Suitability`).
+    public var suitability: SuitabilityVerdict
     public var objectClass: ObjectClass
     /// 1 (trivial prop) … 5 (highly detailed character).
     public var complexity: Int
     public var policy: FeatureAcceptancePolicy
     public var notes: [String]
 
-    public init(objectClass: ObjectClass, complexity: Int,
+    public init(suitability: SuitabilityVerdict = .init(.viable),
+                objectClass: ObjectClass, complexity: Int,
                 policy: FeatureAcceptancePolicy, notes: [String] = []) {
+        self.suitability = suitability
         self.objectClass = objectClass
         self.complexity = complexity
         self.policy = policy
@@ -90,7 +120,28 @@ public struct PreSpecAssessment: Codable, Sendable, Equatable {
         if hints.isEmpty { notes.append("no hints supplied — assessment is conservative") }
 
         return PreSpecAssessment(
+            suitability: suitability(hints: hints, width: width, height: height, isCharacter: isCharacter),
             objectClass: objectClass, complexity: complexity,
             policy: policy, notes: notes)
+    }
+
+    /// The suitability gate. Rejects references too small to carry
+    /// identity-defining detail, and asks for more input when the description
+    /// is too thin to author confidently (no hints, or a character described
+    /// by a single hint).
+    static func suitability(hints: [String], width: Int, height: Int, isCharacter: Bool) -> SuitabilityVerdict {
+        var reasons: [String] = []
+        if min(width, height) < 64 {
+            reasons.append("reference is \(width)×\(height)px — too small (min 64px per side) to reconstruct")
+            return SuitabilityVerdict(.rejected, reasons: reasons)
+        }
+        if hints.isEmpty {
+            reasons.append("no descriptive hints — supply a few before authoring a spec")
+        } else if isCharacter && hints.count < 2 {
+            reasons.append("character references need more than one hint (pose, proportions, distinctive features)")
+        }
+        return reasons.isEmpty
+            ? SuitabilityVerdict(.viable)
+            : SuitabilityVerdict(.needsMoreInput, reasons: reasons)
     }
 }

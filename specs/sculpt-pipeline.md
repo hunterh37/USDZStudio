@@ -31,8 +31,18 @@ The USD-native analog of img2threejs's spec (`ObjectSculptSpec.swift`):
 - `materials: [MaterialSpec]` — channel-independent PBR (baseColor, roughness,
   metallic, optional emissive).
 - `sockets: [Socket]` — named attachment points for rigging/props.
+- `colliders: [Collider]` — runtime collision volumes (`box|sphere|capsule|convexHull`)
+  wrapping a named component. Part of the action-ready runtime layer.
+- `destructionGroups: [DestructionGroup]` — named component groups that break
+  away together at runtime.
 - `detailInventory: DetailInventory` — the detail-first feature list.
 - `reviewHistory: [PassReview]` — every pass's recorded decision + evidence.
+
+`RepetitionSystem` supports three layouts via `kind`: `linear` (offset by
+`step * i`), `radial` (revolved around `axis`, default +Y, using Rodrigues
+rotation of `step`), and `grid` (a `gridCounts` = [nx, ny, nz] lattice spaced by
+`step`). Legacy specs without `kind` decode as `linear`; the new spec fields all
+decode-default so pre-runtime-layer specs still load.
 
 The spec is `Codable`; the `.sculpt` tools persist it to
 `<workDirectory>/sculpt-spec.json` between calls.
@@ -56,17 +66,29 @@ the rest are review/annotation passes that gate but emit no `BuildStep`s:
 | blockout | Coarse geometry for every node + repetition copies (real prims). |
 | structural | `set_transform` placement for every authored prim. |
 | material | `create_material` for each painted node. |
-| formRefinement, surface, lighting, interaction, optimization | Review-only (no mutations in v1). |
+| interaction | Authors the action-ready runtime manifest (`sculptRuntime` string attribute on the root) when the spec exposes a socket or collider. |
+| formRefinement, surface, lighting, optimization | Review-only (no mutations in v1). |
 
 ## Gates
 
-1. **Strict-quality gate** (`SpecValidator`, `strictQuality: true`): schema
+1. **Suitability gate** (`PreSpecAssessment.assess`): every assessment carries a
+   `SuitabilityVerdict` — `viable`, `needsMoreInput` (no hints, or a
+   single-hint character), or `rejected` (reference smaller than 64px per side).
+   Surfaced by `sculpt_assess` so the agent can gather more or halt before
+   authoring.
+2. **Strict-quality gate** (`SpecValidator`, `strictQuality: true`): schema
    validity **plus** — relative to the `PreSpecAssessment` policy — full detail
    mapping, minimum detail-item count, minimum component count, and material
-   coverage of geometry leaves. Blocks before any build pass.
-2. **Continue gate** (`PassOrchestrator.advance`): `continue` requires a
+   coverage of geometry leaves. Blocks before any build pass. Runtime-layer
+   references (collider components, destruction-group members) are schema-checked
+   on every validate.
+3. **Continue gate** (`PassOrchestrator.advance`): `continue` requires a
    render, a comparison sheet, **and** a vision score ≥ the assessed threshold
    (`policy.minScore`). Missing evidence or a low score is rejected.
+4. **Action-ready gate** (`SpecValidator.actionReady`): the `interaction` build
+   pass is rejected unless the object exposes at least one socket or collider,
+   mirroring img2threejs's requirement that the finished object carry a usable
+   runtime layer.
 
 ## Review-loop contract
 
@@ -79,8 +101,10 @@ contract exactly. `continue` unlocks the next pass (or completes the object);
 ## Tool surface (`mcp__openusdz__*`)
 
 `sculpt_assess` → `sculpt_author_spec` → `sculpt_validate_spec` →
-per pass: `sculpt_build_pass` → `render_views` → `score` → `sculpt_review`;
-`sculpt_status` reports state at any point. The `sculpt-from-image` workflow
+per pass: `sculpt_build_pass` → `render_views` → `sculpt_comparison_sheet`
+(composes the reference-vs-render SVG sheet into the work directory) → `score`
+→ `sculpt_review` (fed the sheet path + fidelity score); `sculpt_status` reports
+state (current pass, socket/collider counts, action-ready flag) at any point. The `sculpt-from-image` workflow
 prompt scripts the whole loop. Image→base-mesh generation, when wanted, plugs
 in via the existing `generate_asset`/`fetch_asset` `AssetGenerating` seam
 without changing SculptKit.

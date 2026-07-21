@@ -74,6 +74,14 @@ public enum SculptBuildRunner {
                     bindingTo: primPath, baseColor: baseColor, in: document.snapshot)
             else { return nil }
             return document.run(command) != nil ? command.materialPath.description : nil
+
+        case .authorRuntime(let rootPath, let manifestJSON):
+            guard let primPath = PrimPath(rootPath), document.snapshot.prim(at: primPath) != nil
+            else { return nil }
+            let attribute = Attribute(name: "sculptRuntime", value: .string(manifestJSON))
+            let old = document.snapshot.prim(at: primPath)?.attribute(named: "sculptRuntime")
+            return document.run(SetAttributeCommand(path: primPath, newAttribute: attribute, oldAttribute: old)) != nil
+                ? primPath.description : nil
         }
     }
 

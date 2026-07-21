@@ -211,6 +211,92 @@ import USDCore
         }
     }
 
+    // MARK: - Suitability
+
+    @Test func assessSurfacesSuitability() async {
+        let server = Fixtures.server(session: Fixtures.session())
+        // Viable reference.
+        let ok = await callOK(server, "sculpt_assess", ["hints": ["wooden barrel"], "width": 512, "height": 512])
+        #expect(ok["suitability"]["verdict"].stringValue == "viable")
+        // Too small → rejected verdict (still a successful call, agent decides).
+        let tiny = await callOK(server, "sculpt_assess", ["hints": ["barrel"], "width": 10, "height": 10])
+        #expect(tiny["suitability"]["verdict"].stringValue == "rejected")
+        #expect(tiny["suitability"]["reasons"].arrayValue?.isEmpty == false)
+    }
+
+    // MARK: - Action-ready gate + runtime authoring
+
+    /// A spec exposing a runtime handle (collider) so the interaction pass can
+    /// author the runtime manifest.
+    static func actionableSpec() -> ObjectSculptSpec {
+        let body = ComponentNode(name: "Body", shape: .primitive(.box))
+        let root = ComponentNode(name: "Root", shape: .group, children: [body])
+        return ObjectSculptSpec(
+            name: "Root", objectClass: .object, root: root,
+            colliders: [Collider(name: "hull", kind: .box, component: "Body")])
+    }
+
+    @Test func interactionGateBlocksWithoutRuntime() async {
+        let server = Fixtures.server(session: Fixtures.session())
+        _ = await callOK(server, "sculpt_author_spec", ["spec": Self.specArg(Self.richSpec())])
+        // Advance blockout → interaction (6 continues).
+        for _ in 0..<6 { _ = await callOK(server, "sculpt_review", passingReview()) }
+        let status = await callOK(server, "sculpt_status")
+        #expect(status["currentPass"].stringValue == "interaction")
+        #expect(status["actionReady"].boolValue == false)
+        // Building interaction without any runtime handles is rejected.
+        let msg = await callError(server, "sculpt_build_pass")
+        #expect(msg.contains("action-ready"))
+    }
+
+    @Test func interactionPassAuthorsRuntimeManifest() async {
+        let session = Fixtures.session()
+        let server = Fixtures.server(session: session)
+        _ = await callOK(server, "sculpt_author_spec", ["spec": Self.specArg(Self.actionableSpec())])
+        for _ in 0..<6 { _ = await callOK(server, "sculpt_review", passingReview()) }
+        let built = await callOK(server, "sculpt_build_pass")
+        #expect(built["pass"].stringValue == "interaction")
+        #expect(built["stepCount"].doubleValue == 1)
+        // The runtime manifest is authored onto the root prim.
+        let attr = session.stage.prim(at: PrimPath("/Root")!)?.attribute(named: "sculptRuntime")
+        #expect(attr != nil)
+    }
+
+    @Test func executeAuthorRuntimeStep() async throws {
+        let session = Fixtures.session()
+        _ = try await SculptTools.execute(step: .createGroup(name: "Rt", parentPath: nil), session: session)
+        let path = try await SculptTools.execute(
+            step: .authorRuntime(rootPath: "/Rt", manifestJSON: "{\"nodes\":[\"Rt\"]}"), session: session)
+        #expect(path == "/Rt")
+        #expect(session.stage.prim(at: PrimPath("/Rt")!)?.attribute(named: "sculptRuntime") != nil)
+        // A missing root prim throws.
+        await #expect(throws: (any Error).self) {
+            try await SculptTools.execute(
+                step: .authorRuntime(rootPath: "/Ghost", manifestJSON: "{}"), session: session)
+        }
+    }
+
+    // MARK: - Comparison sheet
+
+    @Test func comparisonSheetWritesArtifact() async {
+        let work = Fixtures.tempDirectory()
+        let server = Fixtures.server(session: Fixtures.session(), configuration: .init(workDirectory: work))
+
+        // Before authoring → error (no orchestrator).
+        _ = await callError(server, "sculpt_comparison_sheet",
+            ["referencePath": "/tmp/ref.png", "renderPath": "/tmp/out.png"])
+
+        _ = await callOK(server, "sculpt_author_spec", ["spec": Self.specArg(Self.richSpec())])
+        let out = await callOK(server, "sculpt_comparison_sheet",
+            ["referencePath": "/tmp/ref.png", "renderPath": "/tmp/out.png"])
+        #expect(out["pass"].stringValue == "blockout")
+        let path = out["comparisonSheetPath"].stringValue ?? ""
+        #expect(FileManager.default.fileExists(atPath: path))
+
+        // Missing required paths → error.
+        _ = await callError(server, "sculpt_comparison_sheet", ["referencePath": "/tmp/ref.png"])
+    }
+
     @Test func specPersistedToWorkDirectory() async {
         let work = Fixtures.tempDirectory()
         let session = Fixtures.session()

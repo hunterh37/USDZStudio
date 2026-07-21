@@ -18,6 +18,18 @@ public enum BuildStep: Sendable, Equatable {
                       rotationEulerDegrees: [Double], scale: [Double])
     /// Create a UsdPreviewSurface material and bind it to the target prim.
     case createMaterial(targetPath: String, baseColor: [Double])
+    /// Author the action-ready runtime manifest (nodes/sockets/colliders/
+    /// destruction groups) as a custom `sculptRuntime` string attribute on the
+    /// sculpt root prim.
+    case authorRuntime(rootPath: String, manifestJSON: String)
+}
+
+/// One expanded repetition copy: its full prim name and local transform.
+struct RepetitionCopy: Equatable {
+    var name: String
+    var translation: [Double]
+    var rotationEulerDegrees: [Double]
+    var scale: [Double]
 }
 
 /// Translates the unlocked slice of a spec into build steps for one pass.
@@ -35,9 +47,20 @@ public enum BuildPlanner {
             return placementSteps(spec)
         case .material:
             return materialSteps(spec)
-        case .formRefinement, .surface, .lighting, .interaction, .optimization:
+        case .interaction:
+            return runtimeSteps(spec)
+        case .formRefinement, .surface, .lighting, .optimization:
             return []
         }
+    }
+
+    // MARK: - Interaction: author the action-ready runtime manifest
+
+    static func runtimeSteps(_ spec: ObjectSculptSpec) -> [BuildStep] {
+        let manifest = RuntimeManifest(spec: spec)
+        // Nothing to author when there is no runtime data — stays review-only.
+        guard manifest.isActionable, let json = try? manifest.json() else { return [] }
+        return [.authorRuntime(rootPath: "/" + spec.root.name, manifestJSON: json)]
     }
 
     /// USD path for a node given its parent path (nil parent → root child).
@@ -63,13 +86,89 @@ public enum BuildPlanner {
 
     /// The base name plus repetition-copy names for a node.
     static func geometryNames(for node: ComponentNode) -> [String] {
-        var names = [node.name]
-        if let repetition = node.repetition, repetition.count > 1, repetition.step.count == 3 {
-            for i in 1..<repetition.count {
-                names.append("\(node.name)_\(repetition.name)\(i)")
+        [node.name] + copies(for: node).map(\.name)
+    }
+
+    /// Expanded repetition copies for a node (excluding the base), honoring the
+    /// repetition `kind`. Empty when the node has no (valid) repetition.
+    static func copies(for node: ComponentNode) -> [RepetitionCopy] {
+        guard let rep = node.repetition, rep.count > 1, rep.step.count == 3 else { return [] }
+        switch rep.kind {
+        case .linear: return linearCopies(node, rep)
+        case .radial: return radialCopies(node, rep)
+        case .grid: return gridCopies(node, rep)
+        }
+    }
+
+    static func linearCopies(_ node: ComponentNode, _ rep: RepetitionSystem) -> [RepetitionCopy] {
+        (1..<rep.count).map { i in
+            let offset = rep.step.map { $0 * Double(i) }
+            return RepetitionCopy(
+                name: "\(node.name)_\(rep.name)\(i)",
+                translation: zip(node.translation, offset).map(+),
+                rotationEulerDegrees: node.rotationEulerDegrees, scale: node.scale)
+        }
+    }
+
+    static func radialCopies(_ node: ComponentNode, _ rep: RepetitionSystem) -> [RepetitionCopy] {
+        let axis = normalized(rep.axis ?? [0, 1, 0])
+        let anglePer = 360.0 / Double(rep.count)
+        return (1..<rep.count).map { i in
+            let angle = anglePer * Double(i) * .pi / 180
+            let rotated = rotate(rep.step, around: axis, radians: angle)
+            return RepetitionCopy(
+                name: "\(node.name)_\(rep.name)\(i)",
+                translation: zip(node.translation, rotated).map(+),
+                rotationEulerDegrees: node.rotationEulerDegrees, scale: node.scale)
+        }
+    }
+
+    static func gridCopies(_ node: ComponentNode, _ rep: RepetitionSystem) -> [RepetitionCopy] {
+        let counts = gridDimensions(rep)
+        var out: [RepetitionCopy] = []
+        var index = 1
+        for z in 0..<counts[2] {
+            for y in 0..<counts[1] {
+                for x in 0..<counts[0] {
+                    if x == 0, y == 0, z == 0 { continue } // base cell
+                    let offset = [Double(x) * rep.step[0], Double(y) * rep.step[1], Double(z) * rep.step[2]]
+                    out.append(RepetitionCopy(
+                        name: "\(node.name)_\(rep.name)\(index)",
+                        translation: zip(node.translation, offset).map(+),
+                        rotationEulerDegrees: node.rotationEulerDegrees, scale: node.scale))
+                    index += 1
+                }
             }
         }
-        return names
+        return out
+    }
+
+    /// Grid cell counts [nx, ny, nz]; defaults to a single row of `count` when
+    /// `gridCounts` is absent or malformed.
+    static func gridDimensions(_ rep: RepetitionSystem) -> [Int] {
+        if let g = rep.gridCounts, g.count == 3, g.allSatisfy({ $0 >= 1 }) { return g }
+        return [rep.count, 1, 1]
+    }
+
+    // MARK: - Vector helpers (Rodrigues rotation for radial repetition)
+
+    static func normalized(_ v: [Double]) -> [Double] {
+        guard v.count == 3 else { return [0, 1, 0] }
+        let len = (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).squareRoot()
+        guard len > 1e-9 else { return [0, 1, 0] }
+        return v.map { $0 / len }
+    }
+
+    /// Rotate vector `v` around unit axis `k` by `radians` (Rodrigues formula).
+    static func rotate(_ v: [Double], around k: [Double], radians: Double) -> [Double] {
+        let c = cos(radians), s = sin(radians)
+        let dot = v[0] * k[0] + v[1] * k[1] + v[2] * k[2]
+        let cross = [k[1] * v[2] - k[2] * v[1],
+                     k[2] * v[0] - k[0] * v[2],
+                     k[0] * v[1] - k[1] * v[0]]
+        return (0..<3).map { i in
+            v[i] * c + cross[i] * s + k[i] * dot * (1 - c)
+        }
     }
 
     static func geometryStep(named name: String, node: ComponentNode, parentPath: String?) -> BuildStep {
@@ -95,16 +194,12 @@ public enum BuildPlanner {
             steps.append(.setTransform(
                 path: selfPath, translation: node.translation,
                 rotationEulerDegrees: node.rotationEulerDegrees, scale: node.scale))
-            if let repetition = node.repetition, repetition.count > 1, repetition.step.count == 3 {
-                // Copies 1..<count are offset multiples of `step` from the base.
-                for i in 1..<repetition.count {
-                    let offset = repetition.step.map { $0 * Double(i) }
-                    let translated = zip(node.translation, offset).map(+)
-                    steps.append(.setTransform(
-                        path: "\(selfPath)_\(repetition.name)\(i)",
-                        translation: translated,
-                        rotationEulerDegrees: node.rotationEulerDegrees, scale: node.scale))
-                }
+            // Place each expanded copy at its computed transform.
+            for copy in copies(for: node) {
+                steps.append(.setTransform(
+                    path: path(for: copy.name, under: parentPath),
+                    translation: copy.translation,
+                    rotationEulerDegrees: copy.rotationEulerDegrees, scale: copy.scale))
             }
             return selfPath
         }
