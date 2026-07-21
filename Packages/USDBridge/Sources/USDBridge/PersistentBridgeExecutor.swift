@@ -169,6 +169,14 @@ private final class Worker {
         self.process = process
         self.input = stdin.fileHandleForWriting
         self.output = stdout.fileHandleForReading
+        // A resident worker can die between our `process.isRunning` check and a
+        // write (a crash in usd-core, `exit`, or a shutdown race). Writing to the
+        // now-closed read end otherwise delivers SIGPIPE, whose default action
+        // kills our *whole* process — not the thrown `EPIPE` the write path
+        // expects. F_SETNOSIGPIPE makes the syscall return EPIPE instead, so a
+        // dead worker surfaces as a thrown error → TransportFailure → one-shot
+        // fallback, exactly as the reliability floor intends.
+        _ = fcntl(stdin.fileHandleForWriting.fileDescriptor, F_SETNOSIGPIPE, 1)
     }
 
     func write(_ data: Data) throws {
