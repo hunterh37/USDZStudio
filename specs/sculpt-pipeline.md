@@ -129,11 +129,21 @@ processing and stays a pure leaf.
    strict-quality gate additionally requires that a `.character` spec declare at
    least one proportion-lock landmark, keeping character proportions
    deterministic across rebuilds.
-3. **Continue gate** (`PassOrchestrator.advance`): `continue` requires a
-   render, a comparison sheet, **and** a vision score ≥ the assessed threshold
-   (`policy.minScore`). Missing evidence or a low score is rejected. When the
-   assessment sets a `similarityFloor` (> 0), `continue` additionally requires a
-   `measuredSimilarity` ≥ that floor — the **deterministic fidelity gate** the
+3. **Continue gate** (`PassOrchestrator.advance`): `continue` always requires
+   the full **evidence bundle** — a render, a comparison sheet, **and** a vision
+   score — out of every pass; missing evidence is rejected. On top of that, the
+   two **fidelity gates** (the vision score ≥ the assessed threshold
+   `policy.minScore`, and — when the assessment sets a `similarityFloor` > 0 — a
+   `measuredSimilarity` ≥ that floor) apply only to passes where
+   `SculptPass.enforcesFidelityGate` is true. The `blockout` pass is **exempt**:
+   it authors coarse geometry at each prim's local origin (component placement is
+   the `structural` pass's job), so a blockout render is an origin-collapsed
+   massing that is not yet comparable to a placed reference — enforcing a
+   similarity floor or a high subjective score there is unsatisfiable for any
+   multi-part object and would deadlock the pipeline before placement can run.
+   Fidelity gating therefore begins at `structural` — the first pass with a
+   placed, comparable render — and tightens through every pass that follows. The
+   `measuredSimilarity` floor is the **deterministic fidelity gate** the
    subjective score cannot bypass (see below).
 3a. **Similarity floor** (`ImageSimilarity` + `RasterLoader`): `sculpt_comparison_sheet`
    decodes the reference and render PNGs and computes a deterministic fidelity

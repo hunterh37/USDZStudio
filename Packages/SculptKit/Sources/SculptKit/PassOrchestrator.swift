@@ -82,15 +82,23 @@ public struct PassOrchestrator: Sendable, Equatable, Codable {
             guard review.renderPath != nil else { throw AdvanceError.continueRequiresRender }
             guard review.comparisonSheetPath != nil else { throw AdvanceError.continueRequiresComparisonSheet }
             guard let score = review.score else { throw AdvanceError.continueRequiresScore }
-            guard score >= threshold else {
-                throw AdvanceError.scoreBelowThreshold(score: score, threshold: threshold)
-            }
-            if similarityFloor > 0 {
-                guard let measured = review.measuredSimilarity else {
-                    throw AdvanceError.continueRequiresMeasuredSimilarity
+            // The fidelity gates compare the render against a *placed* reference.
+            // `blockout` authors geometry at the origin (placement is the
+            // `structural` pass's job), so its render is not yet comparable and
+            // is exempt from the score threshold and the similarity floor — it
+            // still owes the full evidence bundle above. Gating begins at
+            // `structural` and tightens through the remaining passes.
+            if current.enforcesFidelityGate {
+                guard score >= threshold else {
+                    throw AdvanceError.scoreBelowThreshold(score: score, threshold: threshold)
                 }
-                guard measured >= similarityFloor else {
-                    throw AdvanceError.similarityBelowFloor(measured: measured, floor: similarityFloor)
+                if similarityFloor > 0 {
+                    guard let measured = review.measuredSimilarity else {
+                        throw AdvanceError.continueRequiresMeasuredSimilarity
+                    }
+                    guard measured >= similarityFloor else {
+                        throw AdvanceError.similarityBelowFloor(measured: measured, floor: similarityFloor)
+                    }
                 }
             }
             if let next = current.next {

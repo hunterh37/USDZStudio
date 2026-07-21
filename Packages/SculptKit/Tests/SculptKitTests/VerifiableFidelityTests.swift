@@ -10,38 +10,50 @@ import Testing
 
     // MARK: - Orchestrator similarity floor
 
-    func passingReview(similarity: Double? = nil) -> PassReview {
-        PassReview(pass: .blockout, decision: .continue, score: 0.95,
+    func passingReview(pass: SculptPass = .structural, similarity: Double? = nil) -> PassReview {
+        PassReview(pass: pass, decision: .continue, score: 0.95,
                    renderPath: "/tmp/r.png", comparisonSheetPath: "/tmp/c.png",
                    measuredSimilarity: similarity)
     }
 
-    @Test func floorOfZeroKeepsLegacyBehaviour() throws {
+    /// An orchestrator advanced to `structural` — the first fidelity-gated pass.
+    /// blockout is exempt (its render is origin-collapsed), so this step needs
+    /// only the evidence bundle.
+    func orchestratorAtStructural() throws -> PassOrchestrator {
         var orchestrator = PassOrchestrator()
-        // No measuredSimilarity, floor 0 → advances just like before.
-        let result = try orchestrator.advance(after: passingReview(), threshold: 0.7, similarityFloor: 0)
-        #expect(result == .advanced(to: .structural))
+        _ = try orchestrator.advance(
+            after: PassReview(pass: .blockout, decision: .continue, score: 0.5,
+                              renderPath: "/tmp/r.png", comparisonSheetPath: "/tmp/c.png"),
+            threshold: 0.7, similarityFloor: 0.5)
+        return orchestrator
     }
 
-    @Test func floorRequiresMeasuredSimilarity() {
-        var orchestrator = PassOrchestrator()
+    @Test func floorOfZeroKeepsLegacyBehaviour() throws {
+        var orchestrator = try orchestratorAtStructural()
+        // No measuredSimilarity, floor 0 → advances just like before.
+        let result = try orchestrator.advance(after: passingReview(), threshold: 0.7, similarityFloor: 0)
+        #expect(result == .advanced(to: .formRefinement))
+    }
+
+    @Test func floorRequiresMeasuredSimilarity() throws {
+        var orchestrator = try orchestratorAtStructural()
         #expect(throws: AdvanceError.continueRequiresMeasuredSimilarity) {
             try orchestrator.advance(after: passingReview(), threshold: 0.7, similarityFloor: 0.5)
         }
     }
 
-    @Test func floorRejectsLowSimilarity() {
-        var orchestrator = PassOrchestrator()
+    @Test func floorRejectsLowSimilarity() throws {
+        var orchestrator = try orchestratorAtStructural()
         #expect(throws: AdvanceError.similarityBelowFloor(measured: 0.3, floor: 0.5)) {
             try orchestrator.advance(after: passingReview(similarity: 0.3), threshold: 0.7, similarityFloor: 0.5)
         }
     }
 
     @Test func floorAcceptsSufficientSimilarity() throws {
-        var orchestrator = PassOrchestrator()
+        var orchestrator = try orchestratorAtStructural()
         let result = try orchestrator.advance(
             after: passingReview(similarity: 0.72), threshold: 0.7, similarityFloor: 0.5)
-        #expect(result == .advanced(to: .structural))
+        #expect(result == .advanced(to: .formRefinement))
     }
 
     @Test func floorErrorsHaveDescriptions() {

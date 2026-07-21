@@ -24,6 +24,8 @@ import Testing
     }
 
     @Test func continueRequiresFullEvidence() {
+        // The evidence bundle (render + comparison sheet + score) is required to
+        // continue out of *every* pass, including the fidelity-exempt blockout.
         var orch = PassOrchestrator()
         #expect(throws: AdvanceError.continueRequiresRender) {
             try orch.advance(after: PassReview(pass: .blockout, decision: .continue), threshold: 0.8)
@@ -35,11 +37,65 @@ import Testing
             try orch.advance(after: PassReview(pass: .blockout, decision: .continue,
                                                renderPath: "/r.png", comparisonSheetPath: "/c.png"), threshold: 0.8)
         }
-        #expect(throws: AdvanceError.scoreBelowThreshold(score: 0.5, threshold: 0.8)) {
-            try orch.advance(after: passingReview(.blockout, score: 0.5), threshold: 0.8)
-        }
         // None of the failed attempts advanced the pass.
         #expect(orch.current == .blockout)
+    }
+
+    @Test func blockoutExemptFromFidelityGate() throws {
+        // blockout authors geometry at the origin (placement is structural's
+        // job), so it is exempt from the score threshold and the similarity
+        // floor: a low subjective score and a missing measured similarity still
+        // advance, as long as the evidence bundle is present.
+        var orch = PassOrchestrator()
+        #expect(!SculptPass.blockout.enforcesFidelityGate)
+        let result = try orch.advance(
+            after: passingReview(.blockout, score: 0.2), threshold: 0.8, similarityFloor: 0.55)
+        #expect(result == .advanced(to: .structural))
+        #expect(orch.current == .structural)
+    }
+
+    @Test func fidelityGateEnforcedFromStructural() throws {
+        // Advance past the exempt blockout, then confirm both fidelity gates
+        // bite at structural — the first pass with a placed, comparable render.
+        var orch = PassOrchestrator()
+        _ = try orch.advance(after: passingReview(.blockout, score: 0.2),
+                             threshold: 0.8, similarityFloor: 0.55)
+        #expect(orch.current == .structural)
+        #expect(SculptPass.structural.enforcesFidelityGate)
+
+        // Score threshold bites.
+        #expect(throws: AdvanceError.scoreBelowThreshold(score: 0.5, threshold: 0.8)) {
+            try orch.advance(after: passingReview(.structural, score: 0.5),
+                             threshold: 0.8, similarityFloor: 0.55)
+        }
+        // Floor requires a measured similarity.
+        #expect(throws: AdvanceError.continueRequiresMeasuredSimilarity) {
+            try orch.advance(after: passingReview(.structural, score: 0.9),
+                             threshold: 0.8, similarityFloor: 0.55)
+        }
+        // Floor rejects a low measured similarity.
+        let lowSim = PassReview(pass: .structural, decision: .continue, score: 0.9,
+                                renderPath: "/tmp/r.png", comparisonSheetPath: "/tmp/c.png",
+                                measuredSimilarity: 0.3)
+        #expect(throws: AdvanceError.similarityBelowFloor(measured: 0.3, floor: 0.55)) {
+            try orch.advance(after: lowSim, threshold: 0.8, similarityFloor: 0.55)
+        }
+        // Still on structural after every rejected attempt.
+        #expect(orch.current == .structural)
+
+        // A sufficient render clears the gate.
+        let ok = PassReview(pass: .structural, decision: .continue, score: 0.9,
+                            renderPath: "/tmp/r.png", comparisonSheetPath: "/tmp/c.png",
+                            measuredSimilarity: 0.6)
+        let result = try orch.advance(after: ok, threshold: 0.8, similarityFloor: 0.55)
+        #expect(result == .advanced(to: .formRefinement))
+    }
+
+    @Test func enforcesFidelityGateProperty() {
+        #expect(!SculptPass.blockout.enforcesFidelityGate)
+        for pass in SculptPass.allCases where pass != .blockout {
+            #expect(pass.enforcesFidelityGate)
+        }
     }
 
     @Test func refineStaysOnCurrentPass() throws {
