@@ -40,11 +40,36 @@ enum Fixtures {
         EditSession(snapshot: snapshot(), strictness: strictness)
     }
 
+    /// A session whose stage starts empty (no `/Root`), so sculpt passes author
+    /// the *only* geometry present — used by the AR-compliance completion-gate
+    /// tests where the finished stage must be judged on the sculpt output alone.
+    static func emptySession(strictness: ValidationStrictness = .warn) -> EditSession {
+        let snapshot = StageSnapshot(
+            metadata: StageMetadata(upAxis: .y, metersPerUnit: 1.0, defaultPrim: nil),
+            rootPrims: [])
+        return EditSession(snapshot: snapshot, strictness: strictness)
+    }
+
+    /// An empty stage whose `defaultPrim` names a prim that does not exist — a
+    /// hard AR-compliance error (DefaultPrimRule) that never resolves, so the
+    /// AR-compliance completion gate must block. Strictness `.warn` so the bad
+    /// metadata doesn't trip the session's own mutation guard.
+    static func nonCompliantSession() -> EditSession {
+        let snapshot = StageSnapshot(
+            metadata: StageMetadata(upAxis: .y, metersPerUnit: 1.0, defaultPrim: "Ghost"),
+            rootPrims: [])
+        return EditSession(snapshot: snapshot, strictness: .warn)
+    }
+
     static func server(
         session: EditSession,
-        configuration: AgentMCPServer.Configuration = .init()
+        configuration: AgentMCPServer.Configuration? = nil
     ) -> MCPServer {
-        AgentMCPServer.make(session: session, configuration: configuration)
+        // Default to a unique per-server work directory so persisted sculpt
+        // state (spec/assessment/orchestrator) never leaks between tests —
+        // mirroring production, where each project has its own work directory.
+        let configuration = configuration ?? .init(workDirectory: tempDirectory())
+        return AgentMCPServer.make(session: session, configuration: configuration)
     }
 
     static func tempDirectory() -> URL {

@@ -66,17 +66,37 @@ public struct PassReview: Codable, Sendable, Equatable {
     public var score: Double?
     public var renderPath: String?
     public var comparisonSheetPath: String?
+    /// The deterministic reference-vs-render similarity measured for this pass
+    /// (the verifiable floor under `score`). Decode-defaults to nil for reviews
+    /// recorded before the metric existed.
+    public var measuredSimilarity: Double?
     public var note: String?
 
     public init(pass: SculptPass, decision: PassDecision, score: Double? = nil,
                 renderPath: String? = nil, comparisonSheetPath: String? = nil,
-                note: String? = nil) {
+                measuredSimilarity: Double? = nil, note: String? = nil) {
         self.pass = pass
         self.decision = decision
         self.score = score
         self.renderPath = renderPath
         self.comparisonSheetPath = comparisonSheetPath
+        self.measuredSimilarity = measuredSimilarity
         self.note = note
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case pass, decision, score, renderPath, comparisonSheetPath, measuredSimilarity, note
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        pass = try c.decode(SculptPass.self, forKey: .pass)
+        decision = try c.decode(PassDecision.self, forKey: .decision)
+        score = try c.decodeIfPresent(Double.self, forKey: .score)
+        renderPath = try c.decodeIfPresent(String.self, forKey: .renderPath)
+        comparisonSheetPath = try c.decodeIfPresent(String.self, forKey: .comparisonSheetPath)
+        measuredSimilarity = try c.decodeIfPresent(Double.self, forKey: .measuredSimilarity)
+        note = try c.decodeIfPresent(String.self, forKey: .note)
     }
 }
 

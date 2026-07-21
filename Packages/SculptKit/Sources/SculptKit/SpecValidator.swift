@@ -88,6 +88,7 @@ public enum SpecValidator {
         // Lighting + LOD schema (always).
         issues.append(contentsOf: lightSchemaIssues(spec))
         issues.append(contentsOf: lodSchemaIssues(spec))
+        issues.append(contentsOf: optimizationIssues(spec))
 
         // ── Strict-quality gate (opt-in) ──────────────────────────────────
         if strictQuality {
@@ -146,7 +147,40 @@ public enum SpecValidator {
                 issues.append(.init(.error, "component '\(node.name)' repetition step must be [x, y, z]"))
             }
         }
+        issues.append(contentsOf: refinementIssues(node))
         return issues
+    }
+
+    /// Validate a node's declared geometry refinements. Refinements only apply
+    /// to geometry-authoring nodes, and `inset` requires a fraction in (0, 1)
+    /// and a finite depth (matching MeshKit's `InsetFaces` preconditions).
+    static func refinementIssues(_ node: ComponentNode) -> [SpecIssue] {
+        var issues: [SpecIssue] = []
+        if !node.refinements.isEmpty, !node.shape.authorsGeometry {
+            issues.append(.init(.error, "component '\(node.name)' is a group but declares refinements"))
+        }
+        for refinement in node.refinements {
+            switch refinement {
+            case let .inset(fraction, depth):
+                if !fraction.isFinite || fraction <= 0 || fraction >= 1 {
+                    issues.append(.init(.error, "component '\(node.name)' inset fraction must be in (0, 1)"))
+                }
+                if !depth.isFinite {
+                    issues.append(.init(.error, "component '\(node.name)' inset depth must be finite"))
+                }
+            }
+        }
+        return issues
+    }
+
+    /// Validate the optimization spec: a declared weld distance must be finite
+    /// and positive (MeshKit's `MergeVertices.byDistance` precondition).
+    static func optimizationIssues(_ spec: ObjectSculptSpec) -> [SpecIssue] {
+        guard let optimization = spec.optimization else { return [] }
+        if !optimization.weldDistance.isFinite || optimization.weldDistance <= 0 {
+            return [.init(.error, "optimization weldDistance must be finite and > 0")]
+        }
+        return []
     }
 
     // MARK: - Runtime-layer schema

@@ -3,6 +3,7 @@ import EditingKit
 import MeshKit
 import SculptKit
 import USDCore
+import ValidationKit
 
 /// Cross-call state for the staged-sculpt pipeline: the pre-spec assessment,
 /// the authored spec, and the locked-pass orchestrator. Requests are processed
@@ -12,24 +13,64 @@ public actor SculptStore {
     public private(set) var assessment: PreSpecAssessment?
     public private(set) var spec: ObjectSculptSpec?
     public private(set) var orchestrator: PassOrchestrator?
+    /// Where pipeline state is persisted so a sculpt survives a server restart.
+    /// nil disables persistence (used by tests that want an ephemeral store).
+    let workDirectory: URL?
 
-    public init() {}
+    public init(workDirectory: URL? = nil) {
+        self.workDirectory = workDirectory
+        // Best-effort restore: reload a previously-persisted assessment, spec,
+        // and pass position so the pipeline resumes where it left off instead of
+        // silently dropping back to the blockout pass.
+        guard let dir = workDirectory else { return }
+        if let data = try? Data(contentsOf: Self.assessmentURL(dir)) {
+            assessment = try? JSONDecoder().decode(PreSpecAssessment.self, from: data)
+        }
+        if let data = try? Data(contentsOf: Self.specURL(dir)),
+           let restored = try? ObjectSculptSpec.decoded(from: data) {
+            spec = restored
+            if let odata = try? Data(contentsOf: Self.orchestratorURL(dir)),
+               let restoredOrchestrator = try? JSONDecoder().decode(PassOrchestrator.self, from: odata) {
+                orchestrator = restoredOrchestrator
+            } else {
+                // Spec present but the orchestrator file is missing/corrupt (a
+                // partial write, or a crash between the two persists): recover
+                // by restarting the pass machine at blockout rather than
+                // stranding the restored spec with no orchestrator.
+                orchestrator = PassOrchestrator()
+            }
+        }
+    }
 
-    func setAssessment(_ a: PreSpecAssessment) { assessment = a }
+    /// True when the pipeline is on its last pass (a `continue` here completes
+    /// the object). Used to trigger the AR-compliance completion gate.
+    var isFinalPass: Bool {
+        guard let orchestrator else { return false }
+        return orchestrator.isActive && orchestrator.current.next == nil
+    }
+
+    func setAssessment(_ a: PreSpecAssessment) {
+        assessment = a
+        persistAssessment()
+    }
 
     func setSpec(_ s: ObjectSculptSpec) {
         spec = s
         orchestrator = PassOrchestrator()
+        persistSpec()
+        persistOrchestrator()
     }
 
     /// Build a review for the current pass, record it, and advance the
     /// orchestrator. Optionally records per-feature review scores first, and —
     /// when this `continue` would complete the pipeline — enforces the
-    /// feature-acceptance gate. Returns the advance result, or throws if no
-    /// spec exists yet or a gate rejects the decision.
+    /// feature-acceptance gate. Enforces the measured-similarity floor via
+    /// `similarityFloor`. Persists the updated spec + pass position. Returns the
+    /// advance result, or throws if no spec exists yet or a gate rejects.
     func review(
         decision: PassDecision, score: Double?, renderPath: String?,
-        comparisonSheetPath: String?, note: String?, threshold: Double,
+        comparisonSheetPath: String?, measuredSimilarity: Double?, note: String?,
+        threshold: Double, similarityFloor: Double,
         featureScores: [String: Double] = [:]
     ) throws -> AdvanceResult {
         guard spec != nil, orchestrator != nil else {
@@ -48,13 +89,44 @@ public actor SculptStore {
         }
         let review = PassReview(
             pass: orchestrator!.current, decision: decision, score: score,
-            renderPath: renderPath, comparisonSheetPath: comparisonSheetPath, note: note)
+            renderPath: renderPath, comparisonSheetPath: comparisonSheetPath,
+            measuredSimilarity: measuredSimilarity, note: note)
         spec!.reviewHistory.append(review)
         do {
-            return try orchestrator!.advance(after: review, threshold: threshold)
+            let result = try orchestrator!.advance(
+                after: review, threshold: threshold, similarityFloor: similarityFloor)
+            persistSpec()
+            persistOrchestrator()
+            return result
         } catch let error as AdvanceError {
             throw ToolError.invalidParams("\(error)")
         }
+    }
+
+    // MARK: - Persistence
+
+    static func assessmentURL(_ dir: URL) -> URL { dir.appendingPathComponent("sculpt-assessment.json") }
+    static func specURL(_ dir: URL) -> URL { dir.appendingPathComponent("sculpt-spec.json") }
+    static func orchestratorURL(_ dir: URL) -> URL { dir.appendingPathComponent("sculpt-orchestrator.json") }
+
+    func persistAssessment() {
+        guard let dir = workDirectory, let assessment,
+              let data = try? JSONEncoder().encode(assessment) else { return }
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        try? data.write(to: Self.assessmentURL(dir))
+    }
+
+    func persistSpec() {
+        guard let dir = workDirectory, let spec, let data = try? spec.encoded() else { return }
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        try? data.write(to: Self.specURL(dir))
+    }
+
+    func persistOrchestrator() {
+        guard let dir = workDirectory, let orchestrator,
+              let data = try? JSONEncoder().encode(orchestrator) else { return }
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        try? data.write(to: Self.orchestratorURL(dir))
     }
 }
 
@@ -71,12 +143,34 @@ public enum SculptTools {
     ) {
         registerProbe(on: server)
         registerAssess(on: server, store: store)
-        registerAuthor(on: server, store: store, workDirectory: workDirectory)
+        registerAuthor(on: server, store: store)
         registerValidate(on: server, store: store)
         registerBuild(on: server, session: session, store: store)
-        registerReview(on: server, store: store)
+        registerReview(on: server, session: session, store: store)
         registerStatus(on: server, store: store)
         registerComparisonSheet(on: server, store: store, workDirectory: workDirectory)
+    }
+
+    /// Resolve reference-image dimensions from an optional decoded `imagePath`
+    /// (falling back to explicit `width`/`height` args). When a path is given it
+    /// is decoded for real (via `RasterLoader`), so the intake vets the actual
+    /// pixels instead of trusting agent-reported numbers. Throws when a supplied
+    /// path can't be decoded and no usable explicit dimensions are present.
+    static func resolveImageDimensions(
+        _ args: JSONValue
+    ) throws -> (width: Int, height: Int, hasAlpha: Bool?) {
+        if let path = args["imagePath"].stringValue {
+            if let info = RasterLoader.info(path: path) {
+                return (info.width, info.height, info.hasAlpha)
+            }
+            throw ToolError.invalidParams("could not decode image at '\(path)'")
+        }
+        let width = args["width"].intValue ?? 0
+        let height = args["height"].intValue ?? 0
+        guard width > 0, height > 0 else {
+            throw ToolError.invalidParams("'width' and 'height' must be positive (or supply 'imagePath')")
+        }
+        return (width, height, args["hasAlpha"].boolValue)
     }
 
     // MARK: - Probe
@@ -84,19 +178,16 @@ public enum SculptTools {
     private static func registerProbe(on server: MCPServer) {
         server.register(MCPTool(
             name: "sculpt_probe", group: .sculpt,
-            description: "Technical fitness probe of a reference image (img2threejs's probe_image intake). Vets pixel dimensions — and optional alpha — before assessment: returns a usable/marginal/unusable verdict, megapixels, aspect ratio, a recommended component ceiling, and the reasons. Decode-free: supply width/height (and hasAlpha if known).",
+            description: "Technical fitness probe of a reference image (img2threejs's probe_image intake). Vets pixel dimensions — and alpha — before assessment: returns a usable/marginal/unusable verdict, megapixels, aspect ratio, a recommended component ceiling, and the reasons. Prefer 'imagePath' (the image is decoded for true dimensions + alpha); or supply width/height (and hasAlpha) directly.",
             inputSchema: Schema.object([
-                "width": Schema.integer("reference image width in pixels"),
-                "height": Schema.integer("reference image height in pixels"),
+                "imagePath": Schema.string("path to the reference image — decoded for true dimensions + alpha (preferred)"),
+                "width": Schema.integer("reference image width in pixels (used when imagePath is absent)"),
+                "height": Schema.integer("reference image height in pixels (used when imagePath is absent)"),
                 "hasAlpha": Schema.boolean("whether the source carries a transparency channel (optional)"),
-            ], required: ["width", "height"])
+            ])
         ) { args in
-            let width = args["width"].intValue ?? 0
-            let height = args["height"].intValue ?? 0
-            guard width > 0, height > 0 else {
-                throw ToolError.invalidParams("'width' and 'height' must be positive")
-            }
-            let report = ImageProbe.probe(width: width, height: height, hasAlpha: args["hasAlpha"].boolValue)
+            let (width, height, hasAlpha) = try resolveImageDimensions(args)
+            let report = ImageProbe.probe(width: width, height: height, hasAlpha: hasAlpha)
             return probeReportJSON(report)
         })
     }
@@ -106,19 +197,16 @@ public enum SculptTools {
     private static func registerAssess(on server: MCPServer, store: SculptStore) {
         server.register(MCPTool(
             name: "sculpt_assess", group: .sculpt,
-            description: "Pre-spec assessment of a reference image: classify (character/object/hybrid), score complexity, and set the acceptance policy (thresholds the strict-quality gate and review loop enforce). Deterministic from descriptive hints + image dimensions.",
+            description: "Pre-spec assessment of a reference image: classify (character/object/hybrid), score complexity, and set the acceptance policy (thresholds — including the measured-similarity floor — the strict-quality gate and review loop enforce). Deterministic from descriptive hints + image dimensions. Prefer 'imagePath' (decoded for true dimensions) or supply width/height.",
             inputSchema: Schema.object([
                 "hints": Schema.array(of: Schema.string("descriptive tag"), "descriptive tags, e.g. 'wooden barrel', 'rusty', 'glossy'"),
-                "width": Schema.integer("reference image width in pixels"),
-                "height": Schema.integer("reference image height in pixels"),
-            ], required: ["hints", "width", "height"])
+                "imagePath": Schema.string("path to the reference image — decoded for true dimensions (preferred)"),
+                "width": Schema.integer("reference image width in pixels (used when imagePath is absent)"),
+                "height": Schema.integer("reference image height in pixels (used when imagePath is absent)"),
+            ], required: ["hints"])
         ) { args in
             let hints = args["hints"].stringArrayValue ?? []
-            let width = args["width"].intValue ?? 0
-            let height = args["height"].intValue ?? 0
-            guard width > 0, height > 0 else {
-                throw ToolError.invalidParams("'width' and 'height' must be positive")
-            }
+            let (width, height, _) = try resolveImageDimensions(args)
             let assessment = PreSpecAssessment.assess(hints: hints, width: width, height: height)
             await store.setAssessment(assessment)
             return assessmentJSON(assessment)
@@ -127,7 +215,7 @@ public enum SculptTools {
 
     // MARK: - Author spec
 
-    private static func registerAuthor(on server: MCPServer, store: SculptStore, workDirectory: URL) {
+    private static func registerAuthor(on server: MCPServer, store: SculptStore) {
         server.register(MCPTool(
             name: "sculpt_author_spec", group: .sculpt,
             description: "Author (or replace) the ObjectSculptSpec: the component tree, materials, sockets, detail inventory, and — for objects that realistically open/swing (case or chest lid, door, cap, drawer) — `joints` (revolute hinge / prismatic slider, each with an axis + a pivot point on the hinge line, targeting a component) so the interaction pass authors real articulation. Pass the full spec as JSON (SculptKit.ObjectSculptSpec shape). Resets the pass orchestrator to blockout and persists the spec to the work directory.",
@@ -146,7 +234,6 @@ public enum SculptTools {
                 throw ToolError.invalidParams("could not decode spec: \(error)")
             }
             await store.setSpec(spec)
-            persist(spec, to: workDirectory)
             return .object([
                 "name": .string(spec.name),
                 "componentCount": .number(Double(spec.componentCount)),
@@ -221,15 +308,16 @@ public enum SculptTools {
 
     // MARK: - Review
 
-    private static func registerReview(on server: MCPServer, store: SculptStore) {
+    private static func registerReview(on server: MCPServer, session: EditSession, store: SculptStore) {
         server.register(MCPTool(
             name: "sculpt_review", group: .sculpt,
-            description: "Record the agent's visual judgment of the current pass and advance the pipeline. decision: continue | refineSpec | refineCode | requestInput | stop. `continue` requires a render, a comparison sheet, and a score >= the assessed acceptance threshold; otherwise it is rejected. Optional `featureScores` (detailItemId → 0...1) records per-feature scores; a `continue` out of the final pass must clear every declared per-feature threshold.",
+            description: "Record the agent's visual judgment of the current pass and advance the pipeline. decision: continue | refineSpec | refineCode | requestInput | stop. `continue` requires a render, a comparison sheet, a subjective score >= the assessed acceptance threshold, AND (when the assessment sets a similarity floor) a `measuredSimilarity` >= that floor — the deterministic gate the score cannot bypass. Optional `featureScores` (detailItemId → 0...1) records per-feature scores; a `continue` out of the FINAL pass must clear every per-feature threshold and pass the AR-compliance gate (the finished stage is validated against the ARKit profile). Pass the `measuredSimilarity` returned by sculpt_comparison_sheet.",
             inputSchema: Schema.object([
                 "decision": Schema.string("continue | refineSpec | refineCode | requestInput | stop"),
                 "score": Schema.number("vision score 0...1 (required to continue)"),
                 "renderPath": Schema.string("path to the pass render (required to continue)"),
                 "comparisonSheetPath": Schema.string("path to the reference-vs-render sheet (required to continue)"),
+                "measuredSimilarity": Schema.number("deterministic similarity from sculpt_comparison_sheet (required to continue when a floor is set)"),
                 "note": Schema.string("optional reviewer note"),
                 "featureScores": .object(["type": "object", "description": "map of detail-item id → vision score (0...1)"]),
             ], required: ["decision"])
@@ -238,12 +326,30 @@ public enum SculptTools {
                   let decision = PassDecision(rawValue: decisionRaw) else {
                 throw ToolError.invalidParams("'decision' must be one of continue, refineSpec, refineCode, requestInput, stop")
             }
-            let threshold = await store.assessment?.policy.minScore ?? 0.7
+            let policy = await store.assessment?.policy
+            let threshold = policy?.minScore ?? 0.7
+            let similarityFloor = policy?.similarityFloor ?? 0
+
+            // AR-compliance completion gate: when the assessment requires it, a
+            // `continue` out of the final pass must yield an AR-valid stage.
+            // Checked before the pass is recorded so a non-compliant object
+            // cannot be marked complete.
+            if decision == .continue, policy?.requireCompliance == true, await store.isFinalPass {
+                let compliance = ComplianceChecker(profile: .arkit).check(session.stage)
+                if !compliance.isExportAllowed {
+                    throw ToolError.rejectedByValidation(
+                        ["AR-compliance gate: \(compliance.summary)"]
+                        + compliance.blockingDiagnostics.map { "  • \($0.message)" })
+                }
+            }
+
             let result = try await store.review(
                 decision: decision, score: args["score"].doubleValue,
                 renderPath: args["renderPath"].stringValue,
                 comparisonSheetPath: args["comparisonSheetPath"].stringValue,
+                measuredSimilarity: args["measuredSimilarity"].doubleValue,
                 note: args["note"].stringValue, threshold: threshold,
+                similarityFloor: similarityFloor,
                 featureScores: featureScores(from: args["featureScores"]))
             return advanceResultJSON(result)
         })
@@ -261,22 +367,29 @@ public enum SculptTools {
                 return .object(["initialized": .bool(false)])
             }
             let unmapped = spec.detailInventory.unmapped.map(\.id)
-            return .object([
-                "initialized": .bool(true),
-                "currentPass": .string(orchestrator.current.rawValue),
-                "isComplete": .bool(orchestrator.isComplete),
-                "isHalted": .bool(orchestrator.isHalted),
-                "reviewCount": .number(Double(spec.reviewHistory.count)),
-                "unmappedDetails": .array(unmapped.map { .string($0) }),
-                "socketCount": .number(Double(spec.sockets.count)),
-                "colliderCount": .number(Double(spec.colliders.count)),
-                "lightCount": .number(Double(spec.lights.count)),
-                "lodTierCount": .number(Double(spec.lodTiers.count)),
-                "actionReady": .bool(SpecValidator.actionReady(spec).isValid),
-                "featuresAccepted": .bool(SpecValidator.featureAcceptance(spec).isValid),
-                "unacceptedFeatures": .array(spec.detailInventory.unaccepted.map { .string($0.id) }),
-                "lastScore": spec.reviewHistory.last?.score.map { .number($0) } ?? .null,
-            ])
+            let unaccepted = spec.detailInventory.unaccepted.map { JSONValue.string($0.id) }
+            let lastReview = spec.reviewHistory.last
+            let similarityFloor = await store.assessment?.policy.similarityFloor
+            // Built incrementally rather than as one large dictionary literal to
+            // keep the Swift type-checker within its expression budget.
+            var status: [String: JSONValue] = [:]
+            status["initialized"] = .bool(true)
+            status["currentPass"] = .string(orchestrator.current.rawValue)
+            status["isComplete"] = .bool(orchestrator.isComplete)
+            status["isHalted"] = .bool(orchestrator.isHalted)
+            status["reviewCount"] = .number(Double(spec.reviewHistory.count))
+            status["unmappedDetails"] = .array(unmapped.map { .string($0) })
+            status["socketCount"] = .number(Double(spec.sockets.count))
+            status["colliderCount"] = .number(Double(spec.colliders.count))
+            status["lightCount"] = .number(Double(spec.lights.count))
+            status["lodTierCount"] = .number(Double(spec.lodTiers.count))
+            status["actionReady"] = .bool(SpecValidator.actionReady(spec).isValid)
+            status["featuresAccepted"] = .bool(SpecValidator.featureAcceptance(spec).isValid)
+            status["unacceptedFeatures"] = .array(unaccepted)
+            status["lastScore"] = lastReview?.score.map { .number($0) } ?? .null
+            status["lastMeasuredSimilarity"] = lastReview?.measuredSimilarity.map { .number($0) } ?? .null
+            status["similarityFloor"] = similarityFloor.map { .number($0) } ?? .null
+            return .object(status)
         })
     }
 
@@ -285,29 +398,74 @@ public enum SculptTools {
     private static func registerComparisonSheet(on server: MCPServer, store: SculptStore, workDirectory: URL) {
         server.register(MCPTool(
             name: "sculpt_comparison_sheet", group: .sculpt,
-            description: "Compose a reference-vs-render comparison sheet for the current pass (img2threejs's screenshot-review artifact). Writes an SVG placing the reference beside the pass render to the work directory and returns its path — feed that path plus your fidelity score to sculpt_review.",
+            description: "Compose a reference-vs-render comparison sheet for the current pass (img2threejs's screenshot-review artifact) AND measure fidelity deterministically. Accepts a single reference/render pair, or a multi-view turntable via 'views' (each {label, referencePath, renderPath}) — the measured similarity is the WORST view, so a good angle can't hide a bad one. Writes an SVG to the work directory and, when the images decode, returns 'measuredSimilarity' (silhouette IoU + SSIM + luminance blend) plus per-metric detail. Feed the returned comparisonSheetPath and measuredSimilarity to sculpt_review — the continue-gate enforces the assessed similarity floor.",
             inputSchema: Schema.object([
-                "referencePath": Schema.string("path to the original reference image"),
-                "renderPath": Schema.string("path to the current pass render"),
+                "referencePath": Schema.string("path to the original reference image (single-view)"),
+                "renderPath": Schema.string("path to the current pass render (single-view)"),
+                "views": Schema.array(
+                    of: .object(["type": "object", "description": "{label, referencePath, renderPath}"]),
+                    "multi-view pairs; overrides referencePath/renderPath when present"),
                 "size": Schema.integer("per-panel pixel size (default 512)"),
-            ], required: ["referencePath", "renderPath"])
+            ])
         ) { args in
             guard let orchestrator = await store.orchestrator else {
                 throw ToolError.failed("no spec authored yet — call sculpt_author_spec first")
             }
-            guard let referencePath = args["referencePath"].stringValue,
-                  let renderPath = args["renderPath"].stringValue else {
-                throw ToolError.invalidParams("'referencePath' and 'renderPath' are required")
-            }
+            let views = try comparisonViews(from: args)
             let sheet = ComparisonSheet(
-                pass: orchestrator.current, referencePath: referencePath,
-                renderPath: renderPath, size: args["size"].intValue ?? 512)
+                pass: orchestrator.current, views: views, size: args["size"].intValue ?? 512)
             let path = try writeComparisonSheet(sheet, to: workDirectory)
-            return .object([
+            var result: [String: JSONValue] = [
                 "pass": .string(sheet.pass.rawValue),
                 "comparisonSheetPath": .string(path),
-            ])
+                "viewCount": .number(Double(views.count)),
+            ]
+            // Deterministic fidelity measurement across every view (worst wins).
+            let pairs = views.map { (reference: $0.referencePath, render: $0.renderPath) }
+            if let report = RasterLoader.worstViewSimilarity(pairs) {
+                result["measuredSimilarity"] = .number(report.aggregate)
+                result["similarity"] = similarityReportJSON(report)
+            } else {
+                result["measuredSimilarity"] = .null
+                result["similarityNote"] = .string(
+                    "images could not be decoded — the measured floor cannot be enforced for this pass")
+            }
+            return .object(result)
         })
+    }
+
+    /// Build the comparison views from either an explicit `views` array or the
+    /// single-pair `referencePath`/`renderPath` args. Throws when neither a
+    /// usable multi-view list nor a complete single pair is present.
+    static func comparisonViews(from args: JSONValue) throws -> [ComparisonView] {
+        if case .array(let rawViews) = args["views"], !rawViews.isEmpty {
+            var views: [ComparisonView] = []
+            for (index, raw) in rawViews.enumerated() {
+                guard let reference = raw["referencePath"].stringValue,
+                      let render = raw["renderPath"].stringValue else {
+                    throw ToolError.invalidParams(
+                        "views[\(index)] needs 'referencePath' and 'renderPath'")
+                }
+                let label = raw["label"].stringValue ?? "view\(index + 1)"
+                views.append(ComparisonView(label: label, referencePath: reference, renderPath: render))
+            }
+            return views
+        }
+        guard let referencePath = args["referencePath"].stringValue,
+              let renderPath = args["renderPath"].stringValue else {
+            throw ToolError.invalidParams(
+                "supply 'referencePath' and 'renderPath', or a non-empty 'views' array")
+        }
+        return [ComparisonView(label: "view", referencePath: referencePath, renderPath: renderPath)]
+    }
+
+    static func similarityReportJSON(_ report: SimilarityReport) -> JSONValue {
+        .object([
+            "aggregate": .number(report.aggregate),
+            "silhouetteIoU": .number(report.silhouetteIoU),
+            "ssim": .number(report.ssim),
+            "luminanceCorrelation": .number(report.luminanceCorrelation),
+        ])
     }
 
     static func writeComparisonSheet(_ sheet: ComparisonSheet, to workDirectory: URL) throws -> String {
@@ -401,7 +559,61 @@ public enum SculptTools {
             return try authorRootAttribute(
                 name: "sculptRuntime", value: manifestJSON,
                 rootPath: rootPath, session: session)
+
+        case .refineMesh(let path, let ops):
+            return try applyMeshTransform(at: path, session: session) { mesh in
+                var current = mesh
+                for op in ops {
+                    switch op {
+                    case let .inset(fraction, depth):
+                        let faces = Set(current.faceLoops.keys)
+                        current = try InsetFaces.apply(
+                            current, selection: .faces(faces),
+                            params: .init(fraction: fraction, depth: depth)).mesh
+                    }
+                }
+                return current
+            }
+
+        case .decimateMesh(let path, let weldDistance):
+            return try applyMeshTransform(at: path, session: session) { mesh in
+                let vertices = Set(mesh.positions.keys)
+                return try MergeVertices.apply(
+                    mesh, selection: .vertices(vertices), params: .byDistance(weldDistance)).mesh
+            }
         }
+    }
+
+    /// Read an authored prim back into a `HalfEdgeMesh`, apply a transform
+    /// (real MeshKit ops), and re-author the resulting topology onto the same
+    /// prim through the mutation funnel. Shared by the form-refinement and
+    /// optimization passes so their geometry work is genuine, not a manifest.
+    static func applyMeshTransform(
+        at rawPath: String, session: EditSession,
+        _ transform: (HalfEdgeMesh) throws -> HalfEdgeMesh
+    ) throws -> String {
+        let primPath = try resolvePath(rawPath, session: session)
+        guard let prim = session.stage.prim(at: primPath) else {
+            // coverage:disable — resolvePath already rejects a missing prim; kept so a future resolver change surfaces structurally.
+            throw ToolError.invalidParams("prim \(rawPath) not found")
+            // coverage:enable
+        }
+        let mesh: HalfEdgeMesh
+        do {
+            mesh = try MeshIO.mesh(from: GeometryProbe.flatMesh(of: prim))
+        } catch {
+            throw ToolError.failed("cannot read mesh at \(rawPath): \(error)")
+        }
+        let result: HalfEdgeMesh
+        do {
+            result = try transform(mesh)
+        } catch {
+            throw ToolError.failed("mesh op failed at \(rawPath): \(error)")
+        }
+        for attribute in GeometryProbe.meshAttributes(from: MeshIO.flat(from: result)) {
+            try authorAttribute(attribute, on: primPath, session: session)
+        }
+        return primPath.description
     }
 
     /// The extra shader-input attributes for a material beyond the base colour
@@ -537,9 +749,4 @@ public enum SculptTools {
         }
     }
 
-    static func persist(_ spec: ObjectSculptSpec, to workDirectory: URL) {
-        guard let data = try? spec.encoded() else { return }
-        try? FileManager.default.createDirectory(at: workDirectory, withIntermediateDirectories: true)
-        try? data.write(to: workDirectory.appendingPathComponent("sculpt-spec.json"))
-    }
 }

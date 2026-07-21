@@ -57,7 +57,7 @@ MODULES=(
   "USDBridge|Packages/USDBridge|Sources/USDBridge|95"          # spec floor; measures 100 today
   # Ratchet floors — pinned below spec target (noted), gap tracked in ROADMAP Phase T.
   "ViewportKit|Packages/ViewportKit|Sources/ViewportKit|50"    # ratchet 46→50; spec target 90
-  "EditorUI|Packages/EditorUI|Sources/EditorUI|34"             # ratchet 27→34; spec target 90
+  "EditorUI|Packages/EditorUI|Sources/EditorUI|64"             # ratchet 34→64; spec target 90
 )
 
 REPORT=0

@@ -64,7 +64,7 @@ public enum AgentMCPServer {
             workDirectory: configuration.workDirectory)
         SculptTools.register(
             on: server, session: session,
-            store: SculptStore(),
+            store: SculptStore(workDirectory: configuration.workDirectory),
             workDirectory: configuration.workDirectory)
 
         // §3.1 — the same payloads as read tools, exposed as MCP resources so

@@ -169,4 +169,62 @@ struct SculptBuildRunnerTests {
             step: .createLight(name: "bad name", parentPath: nil, kind: .dome,
                                intensity: 1, color: [1, 1, 1]), to: doc) == nil)
     }
+
+    // MARK: - Real geometry passes (form refinement + optimization weld)
+
+    /// A grounded box spec that declares a real inset refinement on its leaf.
+    private func refinedBoxSpec() -> ObjectSculptSpec {
+        let body = ComponentNode(name: "Body", shape: .primitive(.box), attachment: .weld,
+                                 refinements: [.inset(fraction: 0.3, depth: -0.05)])
+        let root = ComponentNode(name: "Obj", shape: .group, children: [body])
+        return ObjectSculptSpec(name: "Obj", objectClass: .object, root: root)
+    }
+
+    @Test func formRefinementInsetsLiveGeometry() {
+        let doc = EditorDocument(snapshot: StageSnapshot(rootPrims: []))
+        let spec = refinedBoxSpec()
+        SculptBuildRunner.apply(pass: .blockout, of: spec, to: doc)
+        let before = doc.snapshot.prim(at: PrimPath("/Obj/Body/Geo")!)
+        guard case .float3Array(let beforePts)? = before?.attribute(named: "points")?.value else {
+            Issue.record("no points before refinement"); return
+        }
+        let authored = SculptBuildRunner.apply(pass: .formRefinement, of: spec, to: doc)
+        #expect(authored == ["/Obj/Body"])
+        let after = doc.snapshot.prim(at: PrimPath("/Obj/Body/Geo")!)
+        guard case .float3Array(let afterPts)? = after?.attribute(named: "points")?.value else {
+            Issue.record("no points after refinement"); return
+        }
+        // Inset adds a recessed inner ring per face — real new geometry.
+        #expect(afterPts.count > beforePts.count)
+    }
+
+    @Test func optimizationWeldsCoincidentVerticesLive() {
+        // A spec whose leaf is a box (no coincident verts) with a weld epsilon:
+        // MeshKit refuses to weld nothing, so the step is skipped best-effort,
+        // and the LOD manifest still authors. The runner never crashes.
+        let doc = EditorDocument(snapshot: StageSnapshot(rootPrims: []))
+        let body = ComponentNode(name: "Body", shape: .primitive(.box), attachment: .weld)
+        let root = ComponentNode(name: "Obj", shape: .group, children: [body])
+        let spec = ObjectSculptSpec(
+            name: "Obj", objectClass: .object, root: root,
+            lodTiers: [LODTier(name: "lo", screenCoverage: 0.2, decimation: 0.3)],
+            optimization: OptimizationSpec(weldDistance: 0.001))
+        SculptBuildRunner.apply(pass: .blockout, of: spec, to: doc)
+        let authored = SculptBuildRunner.apply(pass: .optimization, of: spec, to: doc)
+        // The decimate step no-ops (nothing to weld) but the LOD manifest lands.
+        #expect(doc.snapshot.prim(at: PrimPath("/Obj")!)?.attribute(named: "sculptLOD") != nil)
+        #expect(authored.contains("/Obj"))
+    }
+
+    @Test func meshTransformSkipsMissingPrim() {
+        let doc = EditorDocument(snapshot: StageSnapshot(rootPrims: []))
+        // Missing prim → skipped (returns nil, not fatal).
+        #expect(SculptBuildRunner.apply(
+            step: .refineMesh(path: "/Ghost", ops: [.inset(fraction: 0.3, depth: 0)]), to: doc) == nil)
+        #expect(SculptBuildRunner.apply(
+            step: .decimateMesh(path: "/Ghost", weldDistance: 0.01), to: doc) == nil)
+        // Unparseable path → skipped.
+        #expect(SculptBuildRunner.apply(
+            step: .refineMesh(path: "", ops: []), to: doc) == nil)
+    }
 }

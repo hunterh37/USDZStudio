@@ -68,8 +68,12 @@ rotation of `step`), and `grid` (a `gridCounts` = [nx, ny, nz] lattice spaced by
 `step`). Legacy specs without `kind` decode as `linear`; the new spec fields all
 decode-default so pre-runtime-layer specs still load.
 
-The spec is `Codable`; the `.sculpt` tools persist it to
-`<workDirectory>/sculpt-spec.json` between calls.
+The spec is `Codable`; the `SculptStore` persists the assessment, spec, and
+pass-orchestrator position to `<workDirectory>/sculpt-{assessment,spec,orchestrator}.json`
+after every mutation, and **restores all three on construction**, so a sculpt
+survives a server restart and resumes on its current pass rather than silently
+dropping back to blockout. A store with no work directory is ephemeral (used by
+tests).
 
 ## Detail inventory (detail-first)
 
@@ -82,19 +86,24 @@ that realizes it. The strict-quality gate blocks any spec with unmapped items.
 
 In strict order (`SculptPass`): `blockout → structural → formRefinement →
 material → surface → lighting → interaction → optimization`. A pass unlocks
-only after the previous is accepted. Six passes author into the stage;
-`formRefinement` alone remains review-only:
+only after the previous is accepted. All eight passes can author into the stage (each stays review-only when its
+spec fields are absent):
 
 | Pass | Authors |
 |------|---------|
 | blockout | Coarse geometry for every node + repetition copies (real prims). |
 | structural | `set_transform` placement for every authored prim. |
+| formRefinement | Applies real MeshKit geometry ops (v1: `inset`) declared per-node in `refinements` — the prim is read back into a `HalfEdgeMesh`, the ops are applied over the whole mesh, and the result is re-authored. Review-only when no node declares refinements. |
 | material | `create_material` for each painted node, plus the extra PBR channels (roughness/metallic scalars, emissive, and any texture maps + normalScale) as shader inputs on the created surface. |
 | surface | Authors a projected-texture / de-light descriptor (`sculptProjectedTexture` string attribute on the root) when the spec declares a `surfaceProjection` targeting a real component. |
 | lighting | Authors a real `UsdLux` light prim (with `inputs:intensity` + `inputs:color`) plus its placement for each declared `LightSpec`, under the sculpt root. |
 | interaction | Authors the action-ready runtime manifest (`sculptRuntime` string attribute on the root) when the spec exposes a socket, collider, or joint. |
-| optimization | Authors the LOD manifest (`sculptLOD` string attribute on the root) when the spec declares `lodTiers`. |
-| formRefinement | Review-only (no mutations). |
+| optimization | Welds coincident vertices on each geometry leaf when the spec declares an `optimization` weld (a small epsilon that removes split/seam duplicates — MeshKit's welder refuses to collapse a mesh with nothing coincident), and authors the LOD manifest (`sculptLOD`) when it declares `lodTiers`. |
+
+`formRefinement` and `optimization` perform genuine geometry surgery through the
+same read-back/re-author path (`SculptTools.applyMeshTransform` in AgentMCP,
+`SculptBuildRunner.applyMeshTransform` in EditorUI), so "refine" and "optimize"
+change real topology rather than only annotating the root.
 
 The surface pass mirrors img2threejs's `bake_projected_texture` +
 `delight_albedo`: SculptKit emits only the declarative descriptor (camera pose
@@ -122,7 +131,26 @@ processing and stays a pure leaf.
    deterministic across rebuilds.
 3. **Continue gate** (`PassOrchestrator.advance`): `continue` requires a
    render, a comparison sheet, **and** a vision score ≥ the assessed threshold
-   (`policy.minScore`). Missing evidence or a low score is rejected.
+   (`policy.minScore`). Missing evidence or a low score is rejected. When the
+   assessment sets a `similarityFloor` (> 0), `continue` additionally requires a
+   `measuredSimilarity` ≥ that floor — the **deterministic fidelity gate** the
+   subjective score cannot bypass (see below).
+3a. **Similarity floor** (`ImageSimilarity` + `RasterLoader`): `sculpt_comparison_sheet`
+   decodes the reference and render PNGs and computes a deterministic fidelity
+   score — a weighted blend of silhouette IoU, SSIM, and luminance correlation
+   on a fixed 64×64 resample, so it is stable across machines and independent of
+   image resolution. Multi-view sheets (`views: [...]`) score the **worst**
+   angle, so a good view can't mask a bad one. The number is returned as
+   `measuredSimilarity` and fed back to `sculpt_review`; the continue gate
+   enforces it against `policy.similarityFloor`. When the images can't be
+   decoded the tool reports no measurement and the floor is not enforced for
+   that pass (the subjective score still gates). SculptKit stays decode-free —
+   `RasterLoader` (AgentMCP, ImageIO) is the only pixel-decoding seam.
+3b. **AR-compliance completion gate**: when the assessment sets
+   `requireCompliance`, the final `continue` runs the ARKit `ComplianceChecker`
+   profile over the finished stage and blocks completion if it is not
+   export-valid — the finished object is confirmed AR-ready, not just visually
+   accepted.
 4. **Action-ready gate** (`SpecValidator.actionReady`): the `interaction` build
    pass is rejected unless the object exposes at least one socket or collider,
    mirroring img2threejs's requirement that the finished object carry a usable
@@ -154,9 +182,14 @@ contract exactly. `continue` unlocks the next pass (or completes the object);
 
 `sculpt_probe` (optional intake vet) → `sculpt_assess` → `sculpt_author_spec` → `sculpt_validate_spec` →
 per pass: `sculpt_build_pass` → `render_views` → `sculpt_comparison_sheet`
-(composes the reference-vs-render SVG sheet into the work directory) → `score`
-→ `sculpt_review` (fed the sheet path + fidelity score); `sculpt_status` reports
-state (current pass, socket/collider counts, action-ready flag) at any point. The `sculpt-from-image` workflow
+(composes the reference-vs-render SVG sheet into the work directory **and
+returns the measured similarity**) → `sculpt_review` (fed the sheet path,
+subjective score, and `measuredSimilarity`); `sculpt_status` reports state
+(current pass, socket/collider counts, action-ready flag, last measured
+similarity, and the floor) at any point. `sculpt_probe` and `sculpt_assess`
+accept an `imagePath` and decode it (via `RasterLoader`/ImageIO) for true
+dimensions + alpha, instead of trusting caller-supplied numbers (which still
+work as a fallback). The `sculpt-from-image` workflow
 prompt scripts the whole loop. Image→base-mesh generation, when wanted, plugs
 in via the existing `generate_asset`/`fetch_asset` `AssetGenerating` seam
 without changing SculptKit.
