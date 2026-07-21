@@ -226,7 +226,8 @@ import USDCore
         #expect(names.contains("build-validate-score-loop"))
         #expect(names.contains("sculpt-from-image"))
         #expect(names.contains("author-hinged-object"))
-        #expect(names.count == 6)
+        #expect(names.contains("identify-and-animate"))
+        #expect(names.count == 9)
 
         let prompt = await server.handle(request: JSONRPCRequest(
             id: .number(6), method: "prompts/get", params: ["name": "import-and-normalize"]))!
