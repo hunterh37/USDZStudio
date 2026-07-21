@@ -14,6 +14,24 @@ public struct ViewportMeshData: Equatable, Sendable {
         self.positions = positions
         self.faceLoops = faceLoops
     }
+
+    /// Positions that changed between `self` and `other`, keyed by vertex index —
+    /// but only when the two meshes share identical topology (same `faceLoops`
+    /// and vertex count). Returns `nil` when topology differs, signalling the
+    /// caller to fall back to a full re-mesh.
+    ///
+    /// This is what lets a live vertex drag rewrite only the touched slots of a
+    /// persistent GPU buffer instead of regenerating the whole `MeshResource`:
+    /// an empty dictionary means "same topology, no positions moved".
+    public func positionChanges(to other: ViewportMeshData) -> [Int: SIMD3<Float>]? {
+        guard positions.count == other.positions.count,
+              faceLoops == other.faceLoops else { return nil }
+        var changed: [Int: SIMD3<Float>] = [:]
+        for i in positions.indices where positions[i] != other.positions[i] {
+            changed[i] = other.positions[i]
+        }
+        return changed
+    }
 }
 
 /// One prim as the viewport needs to draw it. Pure data — no RealityKit — so
@@ -90,6 +108,11 @@ public enum SceneGraphOperation: Equatable, Sendable {
     case remove(path: String)
     /// Geometry changed (or appeared/vanished): rebuild the mesh resource.
     case updateMesh(path: String, mesh: ViewportMeshData?)
+    /// Positions of a subset of vertices changed while topology stayed identical
+    /// — the cheap path a live vertex edit takes. Maps to a partial vertex-buffer
+    /// write on the entity's `LowLevelMesh` (macOS 15+) rather than a full
+    /// `MeshResource` rebuild. Keyed by vertex index → new position.
+    case updateVertices(path: String, positions: [Int: SIMD3<Float>])
     case updateTransform(path: String, transform: float4x4)
     case setEnabled(path: String, isEnabled: Bool)
 }
@@ -139,7 +162,15 @@ public enum SceneGraphDiff {
         for path in Set(old.nodes.keys).intersection(new.nodes.keys).sorted() {
             guard let before = old.nodes[path], let after = new.nodes[path] else { continue }
             if before.mesh != after.mesh {
-                ops.append(.updateMesh(path: path, mesh: after.mesh))
+                // Positions-only change on identical topology → cheap partial
+                // vertex write. Any topology change (or mesh appearing/vanishing)
+                // falls through to a full re-mesh.
+                if let b = before.mesh, let a = after.mesh,
+                   let changed = b.positionChanges(to: a), !changed.isEmpty {
+                    ops.append(.updateVertices(path: path, positions: changed))
+                } else {
+                    ops.append(.updateMesh(path: path, mesh: after.mesh))
+                }
             }
             if before.transform != after.transform {
                 ops.append(.updateTransform(path: path, transform: after.transform))

@@ -112,6 +112,28 @@ public struct MeshEditState {
     /// the HUD readout while the mesh updates under the cursor.
     public var gizmoDrag: GizmoDragState?
 
+    /// Proportional-edit ("soft selection") radius for vertex dragging, in
+    /// prim-local units. `0` = rigid (only the grabbed vertices move).
+    public var proportionalRadius: Double = 0
+    /// Falloff curve applied within `proportionalRadius`.
+    public var proportionalCurve: ProportionalFalloff.Curve = .smooth
+    /// Live vertex drag (`nil` = not dragging). Base positions and falloff
+    /// weights are frozen at grab time so the deform is stable and the gesture
+    /// stays "exactly zero or one op", exactly like the extrude gizmo.
+    public var vertexDrag: VertexDragState?
+
+    public struct VertexDragState {
+        /// Positions of every affected vertex at grab time (the base the drag
+        /// measures from — never drifts, so re-applying one op is exact).
+        public var basePositions: [VertexID: SIMD3<Double>]
+        /// Proportional weight per affected vertex (seeds = 1).
+        public var weights: [VertexID: Double]
+        /// Current prim-local drag translation of the grabbed vertices.
+        public var translation: SIMD3<Double> = .zero
+        /// Whether a preview move is currently recorded in the session.
+        var hasPreview = false
+    }
+
     public struct GizmoDragState: Equatable, Sendable {
         /// Extrude axis captured at drag start (unit, prim-local).
         public var axis: SIMD3<Double>
@@ -407,6 +429,104 @@ extension EditorDocument {
 
     private static func gizmoJournalEntry(_ distance: Double) -> String {
         "Extrude d=\(String(format: "%.4g", distance))"
+    }
+
+    // MARK: Live vertex drag (specs/mesh-editing.md §Live vertex edit)
+
+    /// Viewport click → vertex selection (index is into `vertexOrder`, matching
+    /// the point-cloud overlay). `additive` (⇧-click) toggles the vertex.
+    public func selectMeshVertex(index: Int, additive: Bool = false) {
+        guard var state = meshEdit else { return }
+        let order = state.session.mesh.vertexOrder
+        guard order.indices.contains(index) else { return }
+        let vid = order[index]
+        var verts: Set<VertexID>
+        if case .vertices(let current) = state.componentSelection, additive {
+            verts = current
+        } else {
+            verts = []
+        }
+        if additive, verts.contains(vid) { verts.remove(vid) } else { verts.insert(vid) }
+        state.componentSelection = .vertices(verts)
+        state.lastDiagnostic = nil
+        meshEdit = state
+    }
+
+    /// Grab the current vertex selection (or `seedIndex` if given) and freeze
+    /// its base positions + proportional-falloff weights for the whole drag.
+    public func beginVertexDrag(seedIndex: Int? = nil) {
+        guard var state = meshEdit, state.vertexDrag == nil else { return }
+        let mesh = state.session.mesh
+        var seeds: Set<VertexID>
+        if let seedIndex, mesh.vertexOrder.indices.contains(seedIndex) {
+            seeds = [mesh.vertexOrder[seedIndex]]
+            state.componentSelection = .vertices(seeds)
+        } else if case .vertices(let sel) = state.componentSelection {
+            seeds = sel
+        } else {
+            seeds = []
+        }
+        guard !seeds.isEmpty else {
+            state.lastDiagnostic = "Select at least one vertex to drag."
+            meshEdit = state
+            return
+        }
+        let weights = ProportionalFalloff.weights(
+            in: mesh, seeds: seeds, radius: state.proportionalRadius, curve: state.proportionalCurve)
+        var base: [VertexID: SIMD3<Double>] = [:]
+        for v in weights.keys { base[v] = mesh.positions[v] }
+        state.vertexDrag = .init(basePositions: base, weights: weights)
+        state.lastDiagnostic = nil
+        meshEdit = state
+    }
+
+    /// Live preview: rewind the previous preview, then re-apply exactly one
+    /// `SetVertexPositions` from the frozen base at the new translation. The
+    /// session's CoW snapshots keep this cheap and the base never drifts — a
+    /// drag is always zero or one op.
+    public func updateVertexDrag(translation: SIMD3<Double>) {
+        guard var state = meshEdit, var drag = state.vertexDrag else { return }
+        if drag.hasPreview {
+            state.session.undo()
+            drag.hasPreview = false
+        }
+        drag.translation = translation
+        if translation != .zero {
+            var targets: [VertexID: SIMD3<Double>] = [:]
+            for (v, base) in drag.basePositions {
+                targets[v] = base + translation * (drag.weights[v] ?? 0)
+            }
+            do {
+                let result = try SetVertexPositions.apply(
+                    state.session.mesh, selection: state.componentSelection,
+                    params: .init(positions: targets))
+                state.session.record(result, journalEntry: Self.vertexDragJournalEntry(translation))
+                state.componentSelection = result.resultSelection
+                drag.hasPreview = true
+                state.lastDiagnostic = nil
+            } catch let error as MeshOpError {
+                // Loud, never silent — e.g. a move that collapses a face. The
+                // drag stays alive; a smaller move may succeed.
+                state.lastDiagnostic = error.description
+            } catch {
+                state.lastDiagnostic = "\(error)"
+            }
+        }
+        state.vertexDrag = drag
+        meshEdit = state
+    }
+
+    /// Commit: the last preview stays recorded — one in-session undo step per
+    /// drag, flushed on exit. A drag ending back at its origin leaves the
+    /// session exactly as it found it.
+    public func endVertexDrag() {
+        guard var state = meshEdit, state.vertexDrag != nil else { return }
+        state.vertexDrag = nil
+        meshEdit = state
+    }
+
+    private static func vertexDragJournalEntry(_ t: SIMD3<Double>) -> String {
+        "Move vertices Δ=(\(String(format: "%.3g", t.x)), \(String(format: "%.3g", t.y)), \(String(format: "%.3g", t.z)))"
     }
 
     // MARK: Viewport bridge

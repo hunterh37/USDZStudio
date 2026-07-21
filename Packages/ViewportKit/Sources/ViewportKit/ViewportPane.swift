@@ -849,8 +849,10 @@ final class ViewportCoordinator {
         // Normals/matcap carry raw colour (no colour-space transform); the UV
         // checker is a display-space colour texture.
         let semantic: TextureResource.Semantic = kind == .uvChecker ? .color : .raw
-        guard let resource = try? TextureResource.generate(
-            from: cgImage, options: .init(semantic: semantic)) else { return nil }
+        // macOS 15+: the `generate(from:options:)` factory is deprecated in favor
+        // of the `init(image:withName:options:)` initializer.
+        guard let resource = try? TextureResource(
+            image: cgImage, withName: nil, options: .init(semantic: semantic)) else { return nil }
         debugTextureCache[kind] = resource
         return resource
     }

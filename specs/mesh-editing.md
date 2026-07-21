@@ -2,7 +2,7 @@
 
 ## Scope Statement
 
-Targeted mesh **repair and adjustment** — not modeling-from-scratch. The mission use cases: add a mounting tab to a bumper (extrude), thicken a flat panel (extrude/solidify), close a hole (fill), clean vendor-mesh defects (merge/delete), soften a hard edge (bevel). Sculpting, subdivision-surface modeling, booleans, and retopology remain non-goals permanently.
+Targeted mesh **repair and adjustment** — not modeling-from-scratch. The mission use cases: add a mounting tab to a bumper (extrude), thicken a flat panel (extrude/solidify), close a hole (fill), clean vendor-mesh defects (merge/delete), soften a hard edge (bevel), and **directly nudge vertices** — a live vertex edit mode with proportional (soft-selection) falloff, scaling to million-vertex meshes (see §Live vertex edit). Subdivision-surface modeling, booleans, retopology, and voxel/remesh sculpting engines remain non-goals; brush-style sculpt tools (grab/inflate/smooth) are a permitted future extension of the live-vertex machinery.
 
 Designed explicitly to be **built and verified by LLM code agents**: every operation is a pure function on value types with machine-checkable correctness invariants — no human eyeball required to know an op is right.
 
@@ -85,6 +85,26 @@ Golden-mesh fixtures (committed .usda) cover the known nasty cases: bowtie verts
 
 ### Skinned/animated meshes
 - Edit mode disabled with an explanatory badge ("mesh has skeletal binding — mesh editing would break weights"). Explicit non-silent refusal, per app philosophy.
+
+## Live vertex edit
+
+A component edit mode (vertex sub-mode, hotkey `1`) that shows the vertex/edge point cloud over the mesh and lets the user click-drag points to deform it live, at the million-vertex scale.
+
+### Kernel (MeshKit, pure)
+- `SetVertexPositions` op — absolute per-vertex position setting, `Params { positions: [VertexID: SIMD3<Double>] }`, `TopologyDelta (0,0,0)`. Rejects non-finite coordinates explicitly (a NaN passes both `< lo` and `> hi` range checks, so it is guarded at the boundary) and unknown vertices; the shared `OpSupport.verify` still rejects moves that collapse a face. The interaction layer computes final absolute positions; the op stays free of UI concepts.
+- `ProportionalFalloff` — pure geodesic soft-selection: given seeds, a radius and a curve (`constant/linear/smooth/sphere`), returns `[VertexID: Double]` weights via Dijkstra over edge lengths. The drag layer multiplies weight × drag-delta into each vertex's base position.
+
+### Rendering (ViewportKit, macOS 15+)
+- `LiveMeshRenderer` backs the edited prim with a `LowLevelMesh` (shared vertices + a smooth normal buffer — not `MeshFlattener`'s per-face duplication). A drag rewrites only the moved vertices' slots and their 1-ring normals in place (`LiveMeshBuffers.applyPositionChanges`), never regenerating the `MeshResource`. The CPU-side buffer math is pure and unit-tested; the `LowLevelMesh` submission is GPU glue (coverage-excluded, golden-image-tested).
+- `VertexAccelerator` — a vertex BVH (sibling of `PickAccelerator`) for nearest-vertex picking and rectangle/lasso region select, culling whole nodes by projected screen bounds (O(visible), not O(n)).
+- `OverlayLOD` — deterministic stride decimation of the vertex-dot overlay to a hard cap (selected/hovered always drawn), recomputed on camera-settle, so a million dots never render at once.
+- Scene seam: `SceneGraphOperation.updateVertices(path, positions)` is emitted by `SceneGraphDiff` when a survivor prim's positions change on identical topology (`ViewportMeshData.positionChanges`), reserving full `.updateMesh` for topology changes. The interactive drag bypasses the ViewportScene round-trip and writes `LiveMeshRenderer` directly; `.updateVertices` serves the programmatic/MCP/undo path.
+
+### Interaction & undo
+- Preview lives in the GPU buffer only; the `HalfEdgeMesh`/session is untouched until mouse-up. On mouse-up a single `SetVertexPositions` op → `MeshEditSession.record` → one coalesced `MeshEditCommand` (before/after `FlatMesh`) = one undo step, exactly like the extrude gizmo's "a gesture produces zero or one op" invariant. Skinned meshes keep the existing refusal.
+
+### RealityKit export profile
+- A pure vertex move authors only the `points` array — RealityKit-clean, no blocking diagnostics under `arkit`/`arkit-strict`, and it degrades trivially (nothing to strip).
 
 ## Testing (extends specs/testing.md)
 

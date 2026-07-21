@@ -3,7 +3,7 @@ import PackageDescription
 
 let package = Package(
     name: "OpenUSDZEditorApp",
-    platforms: [.macOS(.v14)],
+    platforms: [.macOS(.v15)],
     dependencies: [
         .package(path: "../Packages/EditorUI"),
         .package(path: "../Packages/USDBridge"),

@@ -63,6 +63,26 @@ struct SceneGraphApplierTests {
         #expect(applier.synthesized["/Cube/Geo"]?.parent === applier.synthesized["/Cube"])
     }
 
+    @Test("A positions-only edit rebuilds a synthesized entity in place, keeping children")
+    func updateVerticesRebuildsSynthesizedEntityPreservingSubtree() {
+        let root = Entity()
+        let applier = SceneGraphApplier(root: root)
+        applier.apply(ViewportScene([node("/Cube", mesh: mesh()), node("/Cube/Geo")]))
+        let child = applier.synthesized["/Cube/Geo"]
+        let originalCube = applier.synthesized["/Cube"]
+
+        // Move one vertex → diff emits .updateVertices → applier rebuilds /Cube.
+        var moved = mesh()
+        moved.positions[0] = SIMD3(-3, -3, -3)
+        applier.apply(ViewportScene([node("/Cube", mesh: moved), node("/Cube/Geo")]))
+
+        let rebuilt = applier.synthesized["/Cube"]
+        #expect(rebuilt is ModelEntity)
+        #expect(rebuilt !== originalCube)                 // rebuilt in place
+        #expect(applier.synthesized["/Cube/Geo"] === child) // subtree preserved
+        #expect(rebuilt?.children.first === child)
+    }
+
     @Test("A child whose parent prim isn't drawn falls back to the root")
     func orphanFallsBackToRoot() {
         let root = Entity()

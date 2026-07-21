@@ -50,7 +50,7 @@ struct FuzzTests {
         for opIndex in 0..<3 {
             let result: MeshOpResult?
             do {
-                switch (Int(seed % 6) + opIndex) % 6 {
+                switch (Int(seed % 7) + opIndex) % 7 {
                 case 0:
                     result = try ExtrudeFaces.apply(mesh, selection: .faces(randomFaces(mesh, &rng)),
                                                     params: .init(distance: Double.random(in: 0.1...2, using: &rng)))
@@ -70,10 +70,28 @@ struct FuzzTests {
                         .prefix(Int.random(in: 1...3, using: &rng)))
                     result = try BevelEdges.apply(mesh, selection: .edges(pick),
                                                   params: .init(width: Double.random(in: 0.01...0.6, using: &rng)))
-                default:
+                case 5:
                     let edges = Array(mesh.edgeFaceMap.keys).sorted(by: <)
                     let seedEdge = edges[Int.random(in: 0..<edges.count, using: &rng)]
                     result = try LoopCut.apply(mesh, selection: .edges([seedEdge]), params: .init())
+                default:
+                    // Live-vertex-edit path: proportional-falloff-weighted nudge
+                    // of a random seed's neighborhood, exactly as the drag layer
+                    // computes it. May collapse a face → loud refusal is valid.
+                    let seedVert = mesh.vertexOrder.shuffled(using: &rng).first!
+                    let radius = Double.random(in: 0.1...2, using: &rng)
+                    let curve = ProportionalFalloff.Curve.allCases.randomElement(using: &rng)!
+                    let weights = ProportionalFalloff.weights(
+                        in: mesh, seeds: [seedVert], radius: radius, curve: curve)
+                    let delta = SIMD3(Double.random(in: -0.5...0.5, using: &rng),
+                                      Double.random(in: -0.5...0.5, using: &rng),
+                                      Double.random(in: -0.5...0.5, using: &rng))
+                    let targets = weights.mapValues { w in delta * w }
+                    let abs = Dictionary(uniqueKeysWithValues:
+                        targets.map { ($0.key, mesh.positions[$0.key]! + $0.value) })
+                    result = try SetVertexPositions.apply(
+                        mesh, selection: .vertices(Set(abs.keys)),
+                        params: .init(positions: abs))
                 }
             } catch is MeshOpError {
                 result = nil // loud precondition refusal is a valid outcome

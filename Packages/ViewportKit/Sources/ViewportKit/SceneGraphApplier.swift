@@ -97,6 +97,15 @@ final class SceneGraphApplier {
             remove(path)
         case .updateMesh(let path, let mesh):
             updateMesh(path, to: mesh)
+        case .updateVertices(let path, _):
+            // The interactive vertex drag never routes through here — it writes
+            // the edit entity's `LowLevelMesh` directly via `LiveMeshRenderer`
+            // for a true partial GPU update (specs/viewport.md). This case serves
+            // the programmatic / MCP / undo-redo path, which is not per-frame.
+            // Synthesized entities are flat-shaded (per-face duplicated vertices),
+            // so there is no 1:1 buffer slot for a prim vertex index; rebuild from
+            // the already-updated scene node, which is correct and cheap here.
+            updateMesh(path, to: appliedScene[path]?.mesh)
         case .updateTransform(let path, let transform):
             synthesized[path]?.transform = Transform(matrix: transform)
         case .setEnabled(let path, let isEnabled):

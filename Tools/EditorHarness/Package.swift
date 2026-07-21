@@ -5,7 +5,8 @@ import PackageDescription
 // real editor views and documents without a window (Tools/EditorHarness/README.md).
 let package = Package(
     name: "editor-harness",
-    platforms: [.macOS(.v14)],
+    // Depends on EditorUI, which the macOS 15 cascade raised to v15.
+    platforms: [.macOS(.v15)],
     products: [
         .executable(name: "editor-harness", targets: ["editor-harness"])
     ],

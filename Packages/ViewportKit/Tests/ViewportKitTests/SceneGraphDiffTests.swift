@@ -9,6 +9,14 @@ private func mesh(_ x: Float = 0) -> ViewportMeshData {
         faceLoops: [[0, 1, 2]])
 }
 
+/// Same triangle plus a second face and a fourth vertex — a genuine *topology*
+/// change relative to `mesh()`, so the diff must fall back to a full re-mesh.
+private func meshTopoChanged() -> ViewportMeshData {
+    ViewportMeshData(
+        positions: [SIMD3(0, 0, 0), SIMD3(1, 0, 0), SIMD3(1, 1, 0), SIMD3(0, 1, 0)],
+        faceLoops: [[0, 1, 2], [0, 2, 3]])
+}
+
 private func translation(_ x: Float) -> float4x4 {
     var m = matrix_identity_float4x4
     m.columns.3 = SIMD4(x, 0, 0, 1)
@@ -78,6 +86,34 @@ struct ViewportSceneTests {
     func emptiness() {
         #expect(ViewportScene().isEmpty)
         #expect(ViewportScene(nodes: ["/A": node("/A")]).isEmpty == false)
+    }
+}
+
+@Suite("ViewportMeshData.positionChanges")
+struct PositionChangesTests {
+
+    @Test("Identical meshes report an empty change set (same topology, no motion)")
+    func identicalIsEmpty() {
+        #expect(mesh(0).positionChanges(to: mesh(0)) == [:])
+    }
+
+    @Test("Different vertex counts report nil — a topology change")
+    func differentCountIsNil() {
+        #expect(mesh(0).positionChanges(to: meshTopoChanged()) == nil)
+    }
+
+    @Test("Different face loops at equal vertex count report nil")
+    func differentFaceLoopsIsNil() {
+        let a = ViewportMeshData(positions: mesh(0).positions, faceLoops: [[0, 1, 2]])
+        let b = ViewportMeshData(positions: mesh(0).positions, faceLoops: [[2, 1, 0]])
+        #expect(a.positionChanges(to: b) == nil)
+    }
+
+    @Test("Only the moved slots are reported")
+    func reportsMovedSlotsOnly() {
+        var b = mesh(0)
+        b.positions[2] = SIMD3(7, 8, 9)
+        #expect(mesh(0).positionChanges(to: b) == [2: SIMD3(7, 8, 9)])
     }
 }
 
@@ -163,12 +199,42 @@ struct SceneGraphDiffTests {
                 == [.updateTransform(path: "/A", transform: translation(3))])
     }
 
-    @Test("Edited geometry emits a mesh update")
+    @Test("A topology change (new faces/verts) emits a full mesh update")
     func meshUpdate() {
         let before = ViewportScene([node("/A", mesh: mesh(0))])
-        let after = ViewportScene([node("/A", mesh: mesh(9))])
+        let after = ViewportScene([node("/A", mesh: meshTopoChanged())])
         #expect(SceneGraphDiff.operations(from: before, to: after)
-                == [.updateMesh(path: "/A", mesh: mesh(9))])
+                == [.updateMesh(path: "/A", mesh: meshTopoChanged())])
+    }
+
+    @Test("A positions-only edit on identical topology emits a partial vertex update")
+    func positionsOnlyEmitsUpdateVertices() {
+        let before = ViewportScene([node("/A", mesh: mesh(0))])
+        let after = ViewportScene([node("/A", mesh: mesh(9))])
+        // mesh(0)→mesh(9) keeps faceLoops and vertex count; all three positions move.
+        #expect(SceneGraphDiff.operations(from: before, to: after) == [
+            .updateVertices(path: "/A", positions: [
+                0: SIMD3(9, 0, 0), 1: SIMD3(10, 0, 0), 2: SIMD3(10, 1, 0),
+            ]),
+        ])
+    }
+
+    @Test("Only the vertices that actually moved appear in the partial update")
+    func partialUpdateCarriesOnlyMovedVertices() {
+        let before = ViewportScene([node("/A", mesh: mesh(0))])
+        var moved = mesh(0)
+        moved.positions[1] = SIMD3(5, 5, 5) // move a single vertex
+        let after = ViewportScene([node("/A", mesh: moved)])
+        #expect(SceneGraphDiff.operations(from: before, to: after)
+                == [.updateVertices(path: "/A", positions: [1: SIMD3(5, 5, 5)])])
+    }
+
+    @Test("A vertex-count change is a topology change and falls back to re-mesh")
+    func vertexCountChangeFallsBackToFullMesh() {
+        let before = ViewportScene([node("/A", mesh: mesh(0))])
+        let after = ViewportScene([node("/A", mesh: meshTopoChanged())])
+        let ops = SceneGraphDiff.operations(from: before, to: after)
+        #expect(ops == [.updateMesh(path: "/A", mesh: meshTopoChanged())])
     }
 
     @Test("Geometry dropped from a prim updates the mesh to nil")
@@ -187,16 +253,29 @@ struct SceneGraphDiffTests {
                 == [.setEnabled(path: "/A", isEnabled: false)])
     }
 
-    @Test("A prim changed in every dimension emits mesh, transform, then enablement")
+    @Test("A prim changed in every dimension emits geometry, transform, then enablement")
     func combinedUpdatesAreOrdered() {
         let before = ViewportScene([node("/A", mesh: mesh(0))])
         let after = ViewportScene([node("/A", transform: translation(2),
-                                        mesh: mesh(1), isEnabled: false)])
+                                        mesh: meshTopoChanged(), isEnabled: false)])
         #expect(SceneGraphDiff.operations(from: before, to: after) == [
-            .updateMesh(path: "/A", mesh: mesh(1)),
+            .updateMesh(path: "/A", mesh: meshTopoChanged()),
             .updateTransform(path: "/A", transform: translation(2)),
             .setEnabled(path: "/A", isEnabled: false),
         ])
+    }
+
+    @Test("A positions-only edit composes with transform and enablement in order")
+    func partialUpdateComposesWithOtherDimensions() {
+        let before = ViewportScene([node("/A", mesh: mesh(0))])
+        let after = ViewportScene([node("/A", transform: translation(2),
+                                        mesh: mesh(1), isEnabled: false)])
+        let ops = SceneGraphDiff.operations(from: before, to: after)
+        #expect(ops.count == 3)
+        guard case .updateVertices(let p, _) = ops[0] else { Issue.record("expected updateVertices first"); return }
+        #expect(p == "/A")
+        #expect(ops[1] == .updateTransform(path: "/A", transform: translation(2)))
+        #expect(ops[2] == .setEnabled(path: "/A", isEnabled: false))
     }
 
     @Test("Updates across several survivors are emitted in a stable path order")

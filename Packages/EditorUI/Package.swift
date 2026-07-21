@@ -3,7 +3,9 @@ import PackageDescription
 
 let package = Package(
     name: "EditorUI",
-    platforms: [.macOS(.v14)],
+    // macOS 15: EditorUI hosts ViewportKit, which requires macOS 15 for the
+    // LowLevelMesh live vertex edit path (specs/mesh-editing.md §Live vertex edit).
+    platforms: [.macOS(.v15)],
     products: [
         .library(name: "EditorUI", targets: ["EditorUI"])
     ],
