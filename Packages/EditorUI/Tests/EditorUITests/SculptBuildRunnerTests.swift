@@ -1,6 +1,7 @@
 import Testing
 import USDCore
 import SculptKit
+import ValidationKit
 @testable import EditorUI
 
 /// `SculptBuildRunner` applies SculptKit `BuildStep`s to the open document as
@@ -24,6 +25,50 @@ struct SculptBuildRunnerTests {
         #expect(walls?.children.first?.typeName == "Mesh")
         // The repetition copy is a real prim.
         #expect(houseRoot?.children.contains { $0.name == "Window_bay1" } == true)
+    }
+
+    /// Sculpt-accuracy P5 (#86): a rebuilt stage must author real per-vertex
+    /// normals, so `MissingNormalsRule` reports zero `mesh.normals` diagnostics.
+    @Test func builtMeshesAuthorNormals() {
+        let doc = EditorDocument(snapshot: StageSnapshot(rootPrims: []))
+        SculptBuildRunner.apply(pass: .blockout, of: house(), to: doc)
+
+        let meshes = doc.snapshot.allPrims().filter { $0.typeName == "Mesh" }
+        #expect(!meshes.isEmpty)
+        // Every authored mesh carries a normals channel parallel to its points.
+        for mesh in meshes {
+            guard case .float3Array(let points)? = mesh.attribute(named: "points")?.value,
+                  case .float3Array(let normals)? = mesh.attribute(named: "normals")?.value
+            else { Issue.record("\(mesh.name) missing points/normals"); continue }
+            #expect(normals.count == points.count)
+        }
+
+        let diagnostics = MissingNormalsRule().evaluate(stage: doc.snapshot)
+        #expect(diagnostics.isEmpty)
+    }
+
+    /// Deforming a built mesh re-authors normals for the new surface rather than
+    /// leaving the pre-transform channel stale.
+    @Test func deformedMeshRefreshesNormals() {
+        let doc = EditorDocument(snapshot: StageSnapshot(rootPrims: []))
+        SculptBuildRunner.apply(pass: .blockout, of: house(), to: doc)
+        let target = doc.snapshot.allPrims().first {
+            $0.typeName == "Xform" && $0.children.contains { $0.typeName == "Mesh" }
+        }
+        let xformPath = target!.path.description
+        let before = SculptBuildRunner.applyMeshTransform(at: xformPath, to: doc) { mesh in
+            var m = mesh
+            for v in m.vertexOrder {
+                var p = m.positions[v]!
+                p.y *= 2
+                m.setPosition(p, for: v)
+            }
+            return m
+        }
+        #expect(before != nil)
+        let geo = doc.snapshot.prim(at: PrimPath(xformPath)!.appending("Geo")!)
+        #expect(geo?.attribute(named: "normals") != nil)
+        #expect(MissingNormalsRule().evaluate(stage: doc.snapshot).isEmpty)
     }
 
     @Test func structuralPlacesAndMaterialBinds() {
@@ -195,6 +240,27 @@ struct SculptBuildRunnerTests {
             Issue.record("no points after refinement"); return
         }
         // Inset adds a recessed inner ring per face — real new geometry.
+        #expect(afterPts.count > beforePts.count)
+    }
+
+    @Test func formRefinementSubdividesLiveGeometry() {
+        let doc = EditorDocument(snapshot: StageSnapshot(rootPrims: []))
+        let body = ComponentNode(name: "Body", shape: .primitive(.box), attachment: .weld,
+                                 refinements: [.subdivide(levels: 1)])
+        let root = ComponentNode(name: "Obj", shape: .group, children: [body])
+        let spec = ObjectSculptSpec(name: "Obj", objectClass: .object, root: root)
+        SculptBuildRunner.apply(pass: .blockout, of: spec, to: doc)
+        let before = doc.snapshot.prim(at: PrimPath("/Obj/Body/Geo")!)
+        guard case .float3Array(let beforePts)? = before?.attribute(named: "points")?.value else {
+            Issue.record("no points before refinement"); return
+        }
+        let authored = SculptBuildRunner.apply(pass: .formRefinement, of: spec, to: doc)
+        #expect(authored == ["/Obj/Body"])
+        let after = doc.snapshot.prim(at: PrimPath("/Obj/Body/Geo")!)
+        guard case .float3Array(let afterPts)? = after?.attribute(named: "points")?.value else {
+            Issue.record("no points after refinement"); return
+        }
+        // Catmull-Clark introduces face/edge points — real new geometry.
         #expect(afterPts.count > beforePts.count)
     }
 

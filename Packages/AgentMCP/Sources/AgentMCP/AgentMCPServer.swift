@@ -57,6 +57,7 @@ public enum AgentMCPServer {
             generators: configuration.generators,
             libraryDirectories: configuration.libraryDirectories,
             jobs: AssetJobStore())
+        ReferenceImageTools.register(on: server, session: session)
         TransactionTools.register(on: server, session: session)
         ScriptTools.register(
             on: server, session: session,
@@ -94,6 +95,11 @@ public enum AgentMCPServer {
                 "redoLabel": session.stack.redoLabel.map { .string($0) } ?? .null,
             ])
         })
+
+        server.register(MCPResource(
+            uri: "usd://reference", name: "Reference image",
+            description: "The reference image the agent is working from (path + caption), or null."
+        ) { session.referenceImage?.asJSON ?? .null })
 
         WorkflowPrompts.register(on: server)
         server.instructions = AgentInstructions.text

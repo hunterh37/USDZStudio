@@ -79,6 +79,23 @@ public final class EditSession: @unchecked Sendable {
     /// separate from `saveExecutor` so tests can stub it.
     public var bridgeExecutor: (any BridgeExecutor)?
 
+    /// The reference image the agent is working from (nil when none). Set via
+    /// the `set_reference_image` tool and surfaced in the editor's reference
+    /// panel; not part of the USD scene, so it never touches the stage or the
+    /// undo stack (specs/agent-live-editing.md — "Reference panel").
+    public private(set) var referenceImage: ReferenceImage?
+
+    /// Fired whenever `referenceImage` changes so the host (app/CLI) can mirror
+    /// it to the UI and/or persist the hand-off record. AgentMCP owns no
+    /// transport — like `MCPEventSink`, this is a fire-and-forget notification.
+    public var onReferenceImageChange: (@Sendable (ReferenceImage?) -> Void)?
+
+    /// Set (or clear, with nil) the working reference image and notify the host.
+    public func setReferenceImage(_ image: ReferenceImage?) {
+        referenceImage = image
+        onReferenceImageChange?(image)
+    }
+
     public init(
         snapshot: StageSnapshot,
         sourceURL: URL? = nil,

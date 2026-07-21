@@ -207,7 +207,7 @@ import USDCore
         let server = Fixtures.server(session: Fixtures.session())
         let list = await server.handle(request: JSONRPCRequest(id: .number(1), method: "resources/list"))!
         let uris = list["result"]["resources"].arrayValue!.compactMap { $0["uri"].stringValue }
-        #expect(Set(uris) == ["usd://scene", "usd://stats", "usd://history"])
+        #expect(Set(uris) == ["usd://scene", "usd://stats", "usd://history", "usd://reference"])
 
         let read = await server.handle(request: JSONRPCRequest(
             id: .number(2), method: "resources/read", params: ["uri": "usd://stats"]))!

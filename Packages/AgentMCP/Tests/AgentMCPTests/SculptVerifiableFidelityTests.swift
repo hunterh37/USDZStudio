@@ -155,6 +155,23 @@ import UniformTypeIdentifiers
         #expect(after.points.count > before.points.count)
     }
 
+    @Test func refineMeshStepSubdividesRealGeometry() async throws {
+        let session = Fixtures.session()
+        _ = try await SculptTools.execute(step: .createGroup(name: "G", parentPath: nil), session: session)
+        _ = try await SculptTools.execute(
+            step: .createMesh(name: "M", parentPath: "/G", primitive: .box,
+                              width: 1, height: 1, depth: 1, radius: 0.5, segments: 8),
+            session: session)
+        let before = try GeometryProbe.flatMesh(of: session.stage.prim(at: PrimPath("/G/M")!)!)
+        let refined = try await SculptTools.execute(
+            step: .refineMesh(path: "/G/M", ops: [.subdivide(levels: 1)]), session: session)
+        #expect(refined == "/G/M")
+        let after = try GeometryProbe.flatMesh(of: session.stage.prim(at: PrimPath("/G/M")!)!)
+        // Catmull-Clark smoothing refines the box into more, all-quad faces.
+        #expect(after.points.count > before.points.count)
+        #expect(after.faceVertexCounts.allSatisfy { $0 == 4 })
+    }
+
     /// Two triangles that share an edge but carry *duplicated* split vertices
     /// at the shared corners — exactly the seam duplication the optimization
     /// weld is meant to clean up. Six points, two coincident pairs.
