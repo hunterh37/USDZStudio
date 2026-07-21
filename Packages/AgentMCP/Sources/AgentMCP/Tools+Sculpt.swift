@@ -367,24 +367,29 @@ public enum SculptTools {
                 return .object(["initialized": .bool(false)])
             }
             let unmapped = spec.detailInventory.unmapped.map(\.id)
-            return .object([
-                "initialized": .bool(true),
-                "currentPass": .string(orchestrator.current.rawValue),
-                "isComplete": .bool(orchestrator.isComplete),
-                "isHalted": .bool(orchestrator.isHalted),
-                "reviewCount": .number(Double(spec.reviewHistory.count)),
-                "unmappedDetails": .array(unmapped.map { .string($0) }),
-                "socketCount": .number(Double(spec.sockets.count)),
-                "colliderCount": .number(Double(spec.colliders.count)),
-                "lightCount": .number(Double(spec.lights.count)),
-                "lodTierCount": .number(Double(spec.lodTiers.count)),
-                "actionReady": .bool(SpecValidator.actionReady(spec).isValid),
-                "featuresAccepted": .bool(SpecValidator.featureAcceptance(spec).isValid),
-                "unacceptedFeatures": .array(spec.detailInventory.unaccepted.map { .string($0.id) }),
-                "lastScore": spec.reviewHistory.last?.score.map { .number($0) } ?? .null,
-                "lastMeasuredSimilarity": spec.reviewHistory.last?.measuredSimilarity.map { .number($0) } ?? .null,
-                "similarityFloor": (await store.assessment?.policy.similarityFloor).map { .number($0) } ?? .null,
-            ])
+            let unaccepted = spec.detailInventory.unaccepted.map { JSONValue.string($0.id) }
+            let lastReview = spec.reviewHistory.last
+            let similarityFloor = await store.assessment?.policy.similarityFloor
+            // Built incrementally rather than as one large dictionary literal to
+            // keep the Swift type-checker within its expression budget.
+            var status: [String: JSONValue] = [:]
+            status["initialized"] = .bool(true)
+            status["currentPass"] = .string(orchestrator.current.rawValue)
+            status["isComplete"] = .bool(orchestrator.isComplete)
+            status["isHalted"] = .bool(orchestrator.isHalted)
+            status["reviewCount"] = .number(Double(spec.reviewHistory.count))
+            status["unmappedDetails"] = .array(unmapped.map { .string($0) })
+            status["socketCount"] = .number(Double(spec.sockets.count))
+            status["colliderCount"] = .number(Double(spec.colliders.count))
+            status["lightCount"] = .number(Double(spec.lights.count))
+            status["lodTierCount"] = .number(Double(spec.lodTiers.count))
+            status["actionReady"] = .bool(SpecValidator.actionReady(spec).isValid)
+            status["featuresAccepted"] = .bool(SpecValidator.featureAcceptance(spec).isValid)
+            status["unacceptedFeatures"] = .array(unaccepted)
+            status["lastScore"] = lastReview?.score.map { .number($0) } ?? .null
+            status["lastMeasuredSimilarity"] = lastReview?.measuredSimilarity.map { .number($0) } ?? .null
+            status["similarityFloor"] = similarityFloor.map { .number($0) } ?? .null
+            return .object(status)
         })
     }
 
