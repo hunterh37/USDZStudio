@@ -51,6 +51,7 @@ MODULES=(
   "ScriptingKit|Packages/ScriptingKit|Sources/ScriptingKit|100"
   "AgentMCP|Packages/AgentMCP|Sources/AgentMCP|100"
   "SculptKit|Packages/SculptKit|Sources/SculptKit|100"
+  "SessionKit|Packages/SessionKit|Sources/SessionKit|100"
   "DicyaninDesignSystem|Packages/DicyaninDesignSystem|Sources/DicyaninDesignSystem|95"
   "QuickLookKit|Packages/QuickLookKit|Sources/QuickLookKit|100"
   "CLI|CLI|Sources|95"

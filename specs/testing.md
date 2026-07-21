@@ -20,6 +20,7 @@
 | ConversionKit | **100%** (logic) | Unit + corpus integration (glTF-Sample-Models in CI) |
 | ScriptingKit | **100%** (logic) | Unit + scripted-session integration tests |
 | SculptKit | **100%** (logic) | Unit: spec round-trip, strict-quality gate, pass-lock ordering + gate, detail mapping, build-plan generation |
+| SessionKit | **100%** (logic) | Unit: envelope/view-state Codable round-trips, migration/incompatible-version discard, corrupt/absent persistence, WAL recovery-plan derivation, source bookmark/fingerprint change detection |
 | AgentMCP | **100%** (logic) | Unit: JSON-RPC dispatch, every tool × valid/invalid params, session diff/undo semantics; process seams (stdio loop, usdrecord, Python) injected + excluded |
 | USDBridge | **95%** | Golden-file integration (real usd-core, real assets) over the committed mini-corpus + `StageSaver` save-path round-trips; the uncovered remainder is interpreter-crash handlers, each annotated |
 | QuickLookKit | **100%** (logic) | Unit: render-plan resolution, usdrecord location, temp-path derivation; process spawn lives in the thin .appex (App/QuickLookShared), excluded from the logic gate |
