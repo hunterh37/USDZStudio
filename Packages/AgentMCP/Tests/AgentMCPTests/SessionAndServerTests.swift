@@ -149,6 +149,11 @@ import USDCore
         #expect(tools.count == server.toolNames.count)
         #expect(server.toolNames.contains("query_scene"))
         #expect(server.toolNames.contains("batch"))
+        // Regression guard (#72 gap): the articulation tools ship in AgentMCP but
+        // were never wired into make(), so no served binary exposed them. Assert
+        // make() actually registers every tool group, joints included.
+        #expect(server.toolNames.contains("create_joint"))
+        #expect(server.toolNames.contains("set_joint_state"))
         #expect(tools.allSatisfy { $0["inputSchema"]["type"].stringValue == "object" })
 
         let stats = await callOK(server, "scene_stats")
