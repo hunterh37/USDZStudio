@@ -15,6 +15,7 @@
 | USDCore | **100%** | Pure unit tests (value types, protocols, prim-path math) |
 | MeshKit | **100%** | Unit + property/fuzz corpus + golden meshes; gate live in `scripts/coverage-gate.sh` |
 | MechanismKit | **100%** | Unit + fuzz corpus: joint schema validation, pivot-transform math, and the geometric invariants (axis fixed-point, rest==closed, geometry-in-place, prismatic displacement) — see `specs/articulation-mechanisms.md` |
+| RigKit | **100%** | Unit + fuzz corpus: skeleton/pose/skin schema + FK, solver determinism & convergence (2-bone/CCD/FABRIK), constraints, auto-rig fit + weight solve, humanoid bone-identification goldens, retarget round-trip, motion-quality sub-metrics, and the self-validation gate contract — see `specs/animation-rigging.md` |
 | EditingKit | **100%** | Unit: every command's execute/undo/redo/coalesce path |
 | ValidationKit | **100%** | Unit: every rule × pass/fail/edge fixture, quick-fix round-trips |
 | ConversionKit | **100%** (logic) | Unit + corpus integration (glTF-Sample-Models in CI) |

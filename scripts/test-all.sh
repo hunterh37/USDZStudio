@@ -16,6 +16,7 @@ PACKAGES=(
   Packages/USDBridge
   Packages/MeshKit
   Packages/MechanismKit
+  Packages/RigKit
   Packages/EditingKit
   Packages/ValidationKit
   Packages/ConversionKit
