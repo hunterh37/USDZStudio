@@ -21,7 +21,7 @@ privacy gate: on recent macOS a fresh app instance intermittently never reached
 UNIX socket needs no port and triggers no TCC prompt (so `NSLocalNetworkUsageDescription`
 is removed from `App/Info.plist`).
 
-- **Discovery** is unchanged in shape (`…/OpenUSDZEditor/mcp/endpoint.json`) but the
+- **Discovery** is unchanged in shape (`…/USDZStudio/mcp/endpoint.json`) but the
   record now carries `socketPath` (path to `…/mcp/agent.sock`) instead of `port`;
   the `pid`+`token` liveness fields are unchanged.
 - **`NWListener`/`NWConnection` don't cleanly support AF_UNIX** on the deployment
@@ -59,7 +59,7 @@ An agent reconstructing a model from a reference image can push that image into 
 
 - **Tools.** `set_reference_image { path, caption? }` and `clear_reference_image` (`Tools+ReferenceImage.swift`, group `.asset`). The image is passed by **absolute path** — the convention the `sculpt_*` tools already use for `referencePath` — so the bytes stay on disk and the app loads them. The tool validates the file exists and stores a `ReferenceImage` (`{path, caption}`) on the `EditSession`, notifying the host via `session.onReferenceImageChange` (a fire-and-forget callback, like `MCPEventSink`; AgentMCP owns no transport). Read back over `usd://reference`.
 - **App is live (relay → in-app host).** The callback folds the reference into `ReferenceImageModel` (EditorUI, observed by `ReferenceImagePanel`) on the main actor, and persists the hand-off record. Same seam as the edit mirror in `handleRpc`.
-- **App launched by the agent/CLI afterward.** When no editor is running the CLI hosts in-process and persists the reference to a **hand-off file** `…/OpenUSDZEditor/mcp/reference.json` (`ReferenceImage.write`), clearing any stale record at session start. On launch the app reads it (`MCPActivityListener.start` → `ReferenceImage.read`) and seeds the panel, so an image set *before the window existed* still appears. This is the "pass the image in when the app is launched by the agent" path.
+- **App launched by the agent/CLI afterward.** When no editor is running the CLI hosts in-process and persists the reference to a **hand-off file** `…/USDZStudio/mcp/reference.json` (`ReferenceImage.write`), clearing any stale record at session start. On launch the app reads it (`MCPActivityListener.start` → `ReferenceImage.read`) and seeds the panel, so an image set *before the window existed* still appears. This is the "pass the image in when the app is launched by the agent" path.
 - **Boundary.** The reference is **not** USD scene data: it never touches the stage, the `CommandStack`, or undo. `ReferenceImageModel` (EditorUI) carries only plain `path`/`caption` values, since dependency-lint forbids EditorUI from importing AgentMCP; the app (which may import AgentMCP) translates between the two.
 
 ## Key files
@@ -71,7 +71,7 @@ An agent reconstructing a model from a reference image can push that image into 
 - `CLI/Sources/UnixSocket.swift` — `UnixSocketPath` (pure, unit-tested) + `UnixSocketClient` (AF_UNIX connect/IO, coverage-disabled). Used by both `RelayPump` and `SocketEventSink`.
 - `App/Sources/UnixSocketServer.swift` — POSIX AF_UNIX accept loop feeding NDJSON lines to the listener; app target (un-coverage-gated).
 - `App/Sources/MCPActivityListener.swift` — `bindDocument`, `handleRpc`, `RpcRequestFrame`/`RpcResponseFrame`, `HostActivitySink`, stale-socket cleanup, `removeEndpointIfOwned`.
-- `App/Sources/OpenUSDZEditorApp.swift` — binds the host on launch and on document change; passes `mcp.referenceModel` into the shell.
+- `App/Sources/USDZStudioApp.swift` — binds the host on launch and on document change; passes `mcp.referenceModel` into the shell.
 - `Packages/AgentMCP/.../ReferenceImage.swift` + `Tools+ReferenceImage.swift` — the `{path, caption}` value / hand-off record and the `set_reference_image`/`clear_reference_image` tools; `EditSession.onReferenceImageChange` is the host callback.
 - `Packages/EditorUI/.../ReferenceImagePanel.swift` — `ReferenceImageModel` (plain path/caption state), `ReferenceImagePanel`, and `InspectorColumn` (panel above the inspector). Wired in `EditorShellView` via `inspectorColumn`.
 - `App/Sources/MCPActivityListener.swift` — `referenceModel`, `applyReference`, `referenceURL`, and the on-launch seed in `start()`.

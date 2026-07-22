@@ -53,7 +53,7 @@ public enum ReplProgram {
 
     /// Marks the generated preamble so a test — and a human reading a temp file —
     /// can tell console-authored source from a user's own script.
-    public static let injectionBanner = "# --- OpenUSDZEditor console injection ---"
+    public static let injectionBanner = "# --- USDZStudio console injection ---"
     public static let userCodeBanner = "# --- user code ---"
 
     /// Builds the runnable program. `stage` opens the document, `selection`

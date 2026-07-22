@@ -25,7 +25,7 @@
 in enough depth that the plan can lean on it. Distinguish "offline/PBR-renderer
 technique" from "what RealityKit can actually do for us.">
 
-## Recommended approach for OpenUSDZEditor
+## Recommended approach for USDZ Studio
 
 <The approach we should build, in our terms (RealityKit-first, USD-native).>
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-generate_app_icon.py — 100% CLI-generated macOS app icons for OpenUSDZEditor.
+generate_app_icon.py — 100% CLI-generated macOS app icons for USDZ Studio.
 
 No design files, no external services: every pixel is computed from the repo's
 own design tokens (Packages/DicyaninDesignSystem — blue-graphite dark palette,
@@ -365,7 +365,7 @@ def write_icns(master: Image.Image, dest_icns: Path, workdir: Path):
 
 
 def main():
-    ap = argparse.ArgumentParser(description="Generate OpenUSDZEditor app icons (pure CLI).")
+    ap = argparse.ArgumentParser(description="Generate USDZ Studio app icons (pure CLI).")
     ap.add_argument("--variant", choices=list(VARIANTS), help="render just one variant preview")
     ap.add_argument("--pick", choices=list(VARIANTS),
                     help="chosen variant -> also emit AppIcon.appiconset + .icns")

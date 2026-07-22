@@ -27,7 +27,7 @@ import Testing
         let socket = MCPActivityPaths.socketURL()
         #expect(endpoint.lastPathComponent == "endpoint.json")
         #expect(socket.lastPathComponent == "agent.sock")
-        // Both live in .../OpenUSDZEditor/mcp/.
+        // Both live in .../USDZStudio/mcp/.
         #expect(endpoint.deletingLastPathComponent() == socket.deletingLastPathComponent())
         #expect(socket.deletingLastPathComponent().lastPathComponent == "mcp")
     }
@@ -36,6 +36,6 @@ import Testing
         // The default FileManager resolves a real Application Support dir; the
         // path derivation is deterministic relative to it.
         let socket = MCPActivityPaths.socketURL()
-        #expect(socket.path.hasSuffix("/OpenUSDZEditor/mcp/agent.sock"))
+        #expect(socket.path.hasSuffix("/USDZStudio/mcp/agent.sock"))
     }
 }

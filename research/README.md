@@ -1,7 +1,7 @@
 # research/ — 3D tooling & rendering research → buildable plans
 
 This folder is the durable memory of a **closed-loop research system** for
-OpenUSDZEditor. We study how other 3D software (open-source DCCs, engines,
+USDZ Studio. We study how other 3D software (open-source DCCs, engines,
 renderers) and the rendering literature solve a problem, then turn each finding
 into a **precise, spec-style implementation plan** that slots into this repo's
 architecture — ready for a build agent to execute.

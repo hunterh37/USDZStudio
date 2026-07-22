@@ -18,7 +18,7 @@ Two independent defects combined to produce this, both silent.
 
 ### 1. A stale/second instance owns the socket and the survivor never reclaims it
 
-`MCPActivityListener.start()` binds `…/OpenUSDZEditor/mcp/agent.sock` once at launch. If
+`MCPActivityListener.start()` binds `…/USDZStudio/mcp/agent.sock` once at launch. If
 another **live** instance already owns it (e.g. a leftover debug build from a different
 window or a `.claude/worktrees/*` build), the bind loses the race and `restartListener()`
 **gave up after 6 tries** (`maxListenerRetries`). From then on that instance never served
