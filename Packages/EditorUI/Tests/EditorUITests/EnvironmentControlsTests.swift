@@ -86,6 +86,57 @@ import ViewportKit
         #expect(view.backgroundKindBinding.wrappedValue == .color)
         box.value.background = .transparent
         #expect(view.backgroundKindBinding.wrappedValue == .transparent)
+        box.value.background = .arPreview
+        #expect(view.backgroundKindBinding.wrappedValue == .arPreview)
+    }
+
+    @Test func backgroundKindSetterRoundTripsARPreview() {
+        let box = Box(EnvironmentSettings(background: .environment))
+        let view = EnvironmentControls(settings: box.binding())
+        view.backgroundKindBinding.wrappedValue = .arPreview
+        #expect(box.value.background == .arPreview)
+    }
+
+    // MARK: #126 grounding + tone mapping
+
+    @Test func bodyRendersARPreviewAndGrounding() {
+        var settings = EnvironmentSettings(background: .arPreview)
+        _ = EnvironmentControls(settings: bind(&settings)).body
+    }
+
+    @Test func groundingActiveOnlyOnARPreviewBackground() {
+        let box = Box(EnvironmentSettings(background: .arPreview))
+        let view = EnvironmentControls(settings: box.binding())
+        #expect(view.groundingActive)
+        box.value.background = .environment
+        #expect(!view.groundingActive)
+    }
+
+    @Test func groundingEnabledBindingToggles() {
+        let box = Box(EnvironmentSettings())
+        let view = EnvironmentControls(settings: box.binding())
+        view.groundingEnabledBinding.wrappedValue = false
+        #expect(!box.value.grounding.isEnabled)
+        view.groundingEnabledBinding.wrappedValue = true
+        #expect(box.value.grounding.isEnabled)
+    }
+
+    @Test func softnessBindingReadsAndClampsWrites() {
+        let box = Box(EnvironmentSettings())
+        let view = EnvironmentControls(settings: box.binding())
+        _ = view.softnessBinding.wrappedValue
+        view.softnessBinding.wrappedValue = 2   // clamps to 1
+        #expect(box.value.grounding.softness == 1)
+        view.softnessBinding.wrappedValue = 0.25
+        #expect(abs(box.value.grounding.softness - 0.25) < 1e-6)
+    }
+
+    @Test func toneMappingBindingReadsAndWrites() {
+        let box = Box(EnvironmentSettings(toneMapping: .aces))
+        let view = EnvironmentControls(settings: box.binding())
+        #expect(view.toneMappingBinding.wrappedValue == .aces)
+        view.toneMappingBinding.wrappedValue = .reinhard
+        #expect(box.value.toneMapping == .reinhard)
     }
 
     @Test func backgroundKindLabelsAreDistinct() {
