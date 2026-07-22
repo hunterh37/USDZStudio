@@ -140,6 +140,21 @@ import USDCore
         _ = await callError(server, "create_mesh", ["name": "X", "shape": "torus"])
         _ = await callError(server, "create_mesh", ["name": "X", "shape": "box", "width": -1])
         _ = await callError(server, "create_mesh", ["name": "X", "shape": "cone", "segments": 2])
+
+        // #97: a plain create_mesh authors subdivisionScheme = "none" (crisp polys),
+        // and `smooth: true` opts into a Catmull-Clark subdivision surface.
+        func subdivScheme(_ prim: JSONValue) -> String? {
+            prim["attributes"].arrayValue?
+                .first { $0["name"].stringValue == "subdivisionScheme" }?["value"].stringValue
+        }
+        let crisp = await callOK(server, "create_mesh", ["name": "Crisp", "shape": "box"])
+        let crispPrim = await callOK(server, "get_prim", ["path": crisp["path"]])
+        #expect(subdivScheme(crispPrim) == "none")
+
+        let smooth = await callOK(server, "create_mesh",
+                                  ["name": "Smooth", "shape": "box", "smooth": .bool(true)])
+        let smoothPrim = await callOK(server, "get_prim", ["path": smooth["path"]])
+        #expect(subdivScheme(smoothPrim) == "catmullClark")
     }
 
     @Test func setActiveVariantAttributeAndRemoveAttribute() async {

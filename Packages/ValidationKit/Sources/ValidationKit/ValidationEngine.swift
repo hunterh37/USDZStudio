@@ -45,6 +45,7 @@ public struct ValidationEngine: Sendable {
             EmptyMeshRule(),
             UnboundMeshRule(),
             MissingNormalsRule(),
+            MissingSubdivisionSchemeRule(),
         ])
     }
 

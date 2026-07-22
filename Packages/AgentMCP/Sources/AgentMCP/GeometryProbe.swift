@@ -111,11 +111,22 @@ public enum GeometryProbe {
     }
 
     /// Author a `FlatMesh` back onto a prim as USD attributes.
-    public static func meshAttributes(from flat: FlatMesh) -> [Attribute] {
+    /// Author the core USD Mesh attributes for `flat`.
+    ///
+    /// `subdivisionScheme` defaults to `"none"`: USD's own default is
+    /// `catmullClark`, so a polygonal cage we intend to display as-authored is
+    /// otherwise treated as a subdivision control cage and rendered as a rounded
+    /// blob (boxes → pills). Callers that genuinely want a subdivision surface can
+    /// pass `subdivisionScheme: "catmullClark"`. See issue #97.
+    public static func meshAttributes(
+        from flat: FlatMesh,
+        subdivisionScheme: String = "none"
+    ) -> [Attribute] {
         [
             Attribute(name: "points", value: .float3Array(flat.points.flatMap { [$0.x, $0.y, $0.z] })),
             Attribute(name: "faceVertexCounts", value: .intArray(flat.faceVertexCounts)),
             Attribute(name: "faceVertexIndices", value: .intArray(flat.faceVertexIndices)),
+            Attribute(name: "subdivisionScheme", value: .token(subdivisionScheme), isUniform: true),
         ]
     }
 

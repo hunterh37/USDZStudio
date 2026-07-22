@@ -44,13 +44,16 @@ public enum MutateTools {
                 "depth": Schema.number("box/plane depth (default 1)"),
                 "radius": Schema.number("cylinder/cone/sphere radius (default 0.5)"),
                 "segments": Schema.integer("radial/ring segments (default 8)"),
+                "smooth": Schema.boolean("author as a Catmull-Clark subdivision surface instead of crisp polygons (default false)"),
             ], required: ["name", "shape"])
         ) { args in
             let mesh = try primitive(from: args)
             let flat = MeshIO.flat(from: mesh)
+            // Default to crisp polygons; only subdivide when explicitly requested (#97).
+            let scheme = (args["smooth"].boolValue ?? false) ? "catmullClark" : "none"
             let built = try makeInsert(
                 args: args, session: session,
-                extraAttributes: GeometryProbe.meshAttributes(from: flat),
+                extraAttributes: GeometryProbe.meshAttributes(from: flat, subdivisionScheme: scheme),
                 typeOverride: "Mesh")
             let outcome = try session.mutate(built.command)
             return outcome.asJSON(extra: ["path": .string(built.path.description)])
