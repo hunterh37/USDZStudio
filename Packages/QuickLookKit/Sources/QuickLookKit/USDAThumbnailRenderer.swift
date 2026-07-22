@@ -51,6 +51,7 @@ public enum USDAThumbnailRenderer {
         locatePython: () -> String?,
         fileExists: (String) -> Bool
     ) -> String? {
+        // 1. Explicit override wins; if set but missing, do not silently fall back.
         if let override = environment["DICYANIN_USDRECORD"], !override.isEmpty {
             return fileExists(override) ? override : nil
         }

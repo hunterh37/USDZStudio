@@ -1,4 +1,5 @@
 import AgentMCP
+import RenderKit
 import Foundation
 import RenderKit
 import ScriptingKit

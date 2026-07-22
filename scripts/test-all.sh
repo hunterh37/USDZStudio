@@ -13,6 +13,7 @@ PACKAGES=(
   Packages/USDCore
   Packages/DicyaninDesignSystem
   Packages/QuickLookKit
+  Packages/RenderKit
   Packages/USDBridge
   Packages/MeshKit
   Packages/CaptureKit

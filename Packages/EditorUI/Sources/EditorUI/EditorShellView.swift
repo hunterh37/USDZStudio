@@ -159,7 +159,7 @@ public struct EditorShellView: View {
 
 
     private enum Sheet: String, Identifiable {
-        case convert, batch, scripts, library, console, export, recolor
+        case convert, batch, scripts, library, console, export, recolor, capture
         var id: String { rawValue }
     }
 
@@ -167,7 +167,7 @@ public struct EditorShellView: View {
     /// menu shortcuts and toolbar buttons drive the same state.
     public enum MenuCommand: String {
         case convert, batch, scripts, library, console, validate, mcpActivity, export, sculptDemo
-        case commandPalette, diff, recolor
+        case commandPalette, diff, recolor, capture
         public static let notification = Notification.Name("EditorUI.MenuCommand")
     }
 
@@ -294,6 +294,15 @@ public struct EditorShellView: View {
         .sheet(item: $activeSheet) { sheet in
             switch sheet {
             case .convert: ConversionSheet(onClose: dismissSheet)
+            case .capture:
+                // Photos → editable USDZ (specs/capture-import.md). The model is
+                // created here with the production capture service (Object
+                // Capture hardware seam) injected; completion re-imports the
+                // produced USDZ as an editable document via the shell's path.
+                CaptureSheet(
+                    model: CaptureImportModel(service: PhotogrammetryCaptureService()),
+                    onOpen: { url in await onReimportFile(url) },
+                    onClose: dismissSheet)
             case .batch: BatchView(onClose: dismissSheet)
             case .scripts:
                 ScriptsPanel(onClose: dismissSheet,
@@ -329,6 +338,7 @@ public struct EditorShellView: View {
                   let command = MenuCommand(rawValue: raw) else { return }
             switch command {
             case .convert: activeSheet = .convert
+            case .capture: activeSheet = .capture
             case .batch: activeSheet = .batch
             case .scripts: activeSheet = .scripts
             case .library: activeSheet = .library
@@ -403,6 +413,10 @@ public struct EditorShellView: View {
             action("convert.file", "Convert File…", "Convert", shortcut: "⇧⌘K",
                    keywords: ["glb", "gltf", "obj", "fbx"]) { activeSheet = .convert },
             action("convert.batch", "Batch Convert…", "Convert", shortcut: "⇧⌘B") { activeSheet = .batch },
+            action("convert.capture", "Capture from Photos…", "Convert", shortcut: "⇧⌘C",
+                   keywords: ["photogrammetry", "photo", "object capture", "scan", "reconstruct"]) {
+                activeSheet = .capture
+            },
             action("convert.library", "Library…", "Convert", shortcut: "⇧⌘L",
                    keywords: ["shapes", "primitives", "insert"]) { activeSheet = .library },
             action("convert.scripts", "Scripts…", "Convert",
@@ -434,6 +448,20 @@ public struct EditorShellView: View {
             action("edit.lattice", "Lattice / FFD Deform", "Edit", shortcut: "⇧⌘L",
                    keywords: ["lattice", "ffd", "cage", "deform", "bulge", "taper", "bend", "free form"],
                    enabled: hasDocument) { document?.toggleLatticeMode() },
+            // Whole-mesh edit-mode ops surfaced to ⌘K (#69). Enabled only while
+            // in mesh edit mode; each arms its tool and applies it in one step.
+            action("mesh.mirror", "Mirror Mesh", "Mesh",
+                   keywords: ["symmetry", "flip", "reflect"],
+                   enabled: document?.meshEdit != nil) {
+                document?.meshEdit?.tool = .mirror
+                document?.applyActiveMeshTool()
+            },
+            action("mesh.solidify", "Solidify Mesh", "Mesh",
+                   keywords: ["thickness", "shell", "offset", "wall"],
+                   enabled: document?.meshEdit != nil) {
+                document?.meshEdit?.tool = .solidify
+                document?.applyActiveMeshTool()
+            },
         ]
     }
 
@@ -469,6 +497,7 @@ public struct EditorShellView: View {
     private var actionBar: some View {
         HStack(spacing: Spacing.xs) {
             actionButton("Convert", systemImage: "arrow.triangle.2.circlepath") { activeSheet = .convert }
+            actionButton("Capture", systemImage: "camera.viewfinder") { activeSheet = .capture }
             actionButton("Batch", systemImage: "square.stack.3d.up") { activeSheet = .batch }
             actionButton("Scripts", systemImage: "curlybraces") { activeSheet = .scripts }
             actionButton("Console", systemImage: "terminal") { openConsole() }

@@ -137,6 +137,27 @@ public final class SessionStore: Sendable {
         try? fileManager.removeItem(at: plan.directory)
     }
 
+    /// Removes *every* session directory under `root` — the active one plus any
+    /// left behind by prior launches — so a subsequent `recoverableSessions()`
+    /// finds nothing to restore. Backs the File ▸ "Reset Session" action.
+    ///
+    /// Best-effort and total: it sweeps the whole tree (WALs, sentinels, and
+    /// envelope `session.json` files alike) rather than only sentinel-bearing
+    /// sessions, so it also clears bare/partial directories that
+    /// `recoverableSessions()` would skip. A directory that can't be removed is
+    /// left in place rather than raising — resetting must never fail the caller.
+    /// Returns the number of top-level session directories removed.
+    @discardableResult
+    public func reset(fileManager: FileManager = .default) -> Int {
+        guard let entries = try? fileManager.contentsOfDirectory(
+            at: root, includingPropertiesForKeys: nil) else { return 0 }
+        var removed = 0
+        for dir in entries where (try? fileManager.removeItem(at: dir)) != nil {
+            removed += 1
+        }
+        return removed
+    }
+
     /// Reopens the write-ahead log for a recovered `plan` so the restored
     /// document keeps appending to the *same* session (continued crash-safety and
     /// session capture) instead of starting a fresh one.

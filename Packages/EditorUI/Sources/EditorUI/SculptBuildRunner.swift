@@ -22,9 +22,13 @@ public enum SculptBuildRunner {
     public static func apply(pass: SculptPass, of spec: ObjectSculptSpec,
                              to document: EditorDocument) -> [String] {
         var authored: [String] = []
+        var seen = Set<String>()
         for step in BuildPlanner.plan(for: spec, pass: pass) {
             if let path = apply(step: step, to: document) {
-                authored.append(path)
+                // Distinct prim paths only: blockout now emits a create *and* a
+                // setTransform for each prim (#115), which share a path — count
+                // the prim once so callers see authored prims, not steps.
+                if seen.insert(path).inserted { authored.append(path) }
             }
         }
         return authored

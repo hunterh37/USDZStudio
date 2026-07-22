@@ -72,10 +72,21 @@ public enum GeometryProbe {
     // MARK: - Mesh extraction
 
     /// Raw `points` positions of a single prim, when it has any.
+    ///
+    /// Accepts both the canonical `point3f[]` (`.float3Array`) that every native
+    /// authoring path writes and a flat `double[]` (`.doubleArray`) — the latter
+    /// is a legal USD encoding that arrives when reopening an externally authored
+    /// USDZ whose points are double-precision (`stage_snapshot.py` decodes a true
+    /// `double[]` to `.doubleArray`). Without this fallback such a mesh is
+    /// invisible to check_mesh, world-bbox, and raycast even though its geometry
+    /// is perfectly valid.
     static func points(of prim: Prim) -> [[Double]]? {
-        guard case .float3Array(let flat)? = prim.attribute(named: "points")?.value,
-              flat.count >= 3
-        else { return nil }
+        let flat: [Double]
+        switch prim.attribute(named: "points")?.value {
+        case .float3Array(let v), .doubleArray(let v): flat = v
+        default: return nil
+        }
+        guard flat.count >= 3 else { return nil }
         // Written imperatively with explicit types: the equivalent
         // `stride(...).map { [flat[$0], flat[$0+1], flat[$0+2]] }` one-liner
         // intermittently blows the Swift type-checker's time budget on CI.
@@ -111,11 +122,22 @@ public enum GeometryProbe {
     }
 
     /// Author a `FlatMesh` back onto a prim as USD attributes.
-    public static func meshAttributes(from flat: FlatMesh) -> [Attribute] {
+    /// Author the core USD Mesh attributes for `flat`.
+    ///
+    /// `subdivisionScheme` defaults to `"none"`: USD's own default is
+    /// `catmullClark`, so a polygonal cage we intend to display as-authored is
+    /// otherwise treated as a subdivision control cage and rendered as a rounded
+    /// blob (boxes → pills). Callers that genuinely want a subdivision surface can
+    /// pass `subdivisionScheme: "catmullClark"`. See issue #97.
+    public static func meshAttributes(
+        from flat: FlatMesh,
+        subdivisionScheme: String = "none"
+    ) -> [Attribute] {
         [
             Attribute(name: "points", value: .float3Array(flat.points.flatMap { [$0.x, $0.y, $0.z] })),
             Attribute(name: "faceVertexCounts", value: .intArray(flat.faceVertexCounts)),
             Attribute(name: "faceVertexIndices", value: .intArray(flat.faceVertexIndices)),
+            Attribute(name: "subdivisionScheme", value: .token(subdivisionScheme), isUniform: true),
         ]
     }
 

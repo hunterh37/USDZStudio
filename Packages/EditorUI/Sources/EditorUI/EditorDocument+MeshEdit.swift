@@ -8,9 +8,11 @@ import ViewportKit
 // MARK: - Mesh edit mode (roadmap Phase 6; specs/mesh-editing.md §Editor Integration)
 
 /// The component-level tools. Hotkeys follow Blender muscle memory:
-/// E extrude, I inset, X delete, M merge, F fill.
+/// E extrude, I inset, X delete, M merge, F fill, B bevel. Mirror/Solidify are
+/// whole-mesh ops (#69); Merge already owns `m`, so Mirror takes `r` (mirRor)
+/// and Solidify takes `s` to avoid the clash.
 public enum MeshTool: String, CaseIterable, Identifiable, Sendable {
-    case extrude, inset, delete, merge, fill, bevel
+    case extrude, inset, delete, merge, fill, bevel, mirror, solidify
 
     public var id: String { rawValue }
 
@@ -22,6 +24,8 @@ public enum MeshTool: String, CaseIterable, Identifiable, Sendable {
         case .merge: return "Merge"
         case .fill: return "Fill Hole"
         case .bevel: return "Bevel"
+        case .mirror: return "Mirror"
+        case .solidify: return "Solidify"
         }
     }
 
@@ -33,6 +37,8 @@ public enum MeshTool: String, CaseIterable, Identifiable, Sendable {
         case .merge: return "arrow.triangle.merge"
         case .fill: return "circle.grid.cross.fill"
         case .bevel: return "pentagon"
+        case .mirror: return "flip.horizontal"
+        case .solidify: return "square.stack.3d.up.fill"
         }
     }
 
@@ -44,8 +50,14 @@ public enum MeshTool: String, CaseIterable, Identifiable, Sendable {
         case .merge: return "m"
         case .fill: return "f"
         case .bevel: return "b"
+        case .mirror: return "r"
+        case .solidify: return "s"
         }
     }
+
+    /// Whole-mesh ops (v1): they require the selection to cover every face, so
+    /// the UI applies them to the entire mesh rather than a component subset.
+    public var isWholeMesh: Bool { self == .mirror || self == .solidify }
 }
 
 /// Vertex / edge / face sub-modes (1 / 2 / 3 keys).
@@ -105,6 +117,11 @@ public struct MeshEditState {
     public var bevelWidth: Double = 0.05
     /// HUD edge-picker position (sorted edge order) for the Bevel tool.
     public var selectedEdgeIndex: Int = 0
+    /// Mirror-tool HUD: the plane axis and its coordinate (#69, whole-mesh).
+    public var mirrorAxis: MeshKit.Mirror.Axis = .x
+    public var mirrorCoordinate: Double = 0
+    /// Solidify-tool HUD: shell thickness (#69, whole-mesh).
+    public var solidifyThickness: Double = 0.05
     /// Most recent op refusal / diagnostic for the HUD.
     public var lastDiagnostic: String?
     /// Live extrude-gizmo drag (`nil` = not dragging). The axis is frozen at
@@ -300,6 +317,17 @@ extension EditorDocument {
                 result = try BevelEdges.apply(mesh, selection: selection,
                                               params: .init(width: state.bevelWidth))
                 entry = "Bevel"
+            case .mirror:
+                // Whole-mesh v1: mirror every face across the chosen plane.
+                result = try Mirror.apply(mesh, selection: .faces(Set(mesh.faceOrder)),
+                                          params: .init(axis: state.mirrorAxis,
+                                                        coordinate: state.mirrorCoordinate))
+                entry = "Mirror"
+            case .solidify:
+                // Whole-mesh v1: give the entire open surface thickness.
+                result = try Solidify.apply(mesh, selection: .faces(Set(mesh.faceOrder)),
+                                            params: .init(thickness: state.solidifyThickness))
+                entry = "Solidify"
             }
             state.session.record(result, journalEntry: entry)
             state.componentSelection = result.resultSelection
