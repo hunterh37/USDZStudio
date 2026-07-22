@@ -1,21 +1,22 @@
 import Foundation
 import MeshKit
-import SculptKit
 import simd
 
 // Sculpt-accuracy P4 (#85): geometry expressiveness beyond primitives + inset.
 //
-// SculptKit's `MeshRefinement` carries only declarative intent (the module is a
-// pure leaf); this executor resolves each new op into a deterministic MeshKit
-// selection + op over the authored mesh. Determinism matters: the same spec
-// must always produce the same topology, so every derived selection is built
-// in a stable, sorted order — never from hash-map iteration order.
-enum RefinementGeometry {
+// `MeshRefinement` (this module) carries only declarative intent; this resolver
+// turns each op into a deterministic MeshKit selection + op over the authored
+// mesh. It lives in SculptKit next to the intent so both executors — the
+// AgentMCP tool pipeline and the in-app `SculptBuildRunner` — share one
+// implementation. Determinism matters: the same spec must always produce the
+// same topology, so every derived selection is built in a stable, sorted order
+// — never from hash-map iteration order.
+public enum RefinementGeometry {
 
     /// Taper: scale the cross-section linearly along `axis` — 1× at the low
     /// end, `scale`× at the high end — via a fitted 2×2×2 FFD lattice with the
     /// high-end control layer scaled about its centre. The wedge op.
-    static func taper(_ mesh: HalfEdgeMesh, axis: RefinementAxis, scale: Double) throws -> HalfEdgeMesh {
+    public static func taper(_ mesh: HalfEdgeMesh, axis: RefinementAxis, scale: Double) throws -> HalfEdgeMesh {
         var lo = SIMD3<Double>(repeating: .infinity)
         var hi = SIMD3<Double>(repeating: -.infinity)
         for p in mesh.positions.values {
@@ -71,7 +72,7 @@ enum RefinementGeometry {
     /// above `angleDegrees` is a candidate; MeshKit's v1 bevel requires the
     /// selection to be pairwise non-adjacent, so a deterministic greedy pass
     /// (sorted by vertex ids) picks a maximal independent subset to chamfer.
-    static func bevel(_ mesh: HalfEdgeMesh, width: Double, angleDegrees: Double) throws -> HalfEdgeMesh {
+    public static func bevel(_ mesh: HalfEdgeMesh, width: Double, angleDegrees: Double) throws -> HalfEdgeMesh {
         let byEdge = mesh.edgeFaceMap
         let threshold = angleDegrees * .pi / 180
         var candidates: [EdgeKey] = []
@@ -103,7 +104,7 @@ enum RefinementGeometry {
     /// Directional extrude: pull the faces whose outward normal aligns with
     /// `direction` (within 60°) by `distance` along that direction — splitters,
     /// intakes, cabin bulges. Negative distance recesses the region.
-    static func extrude(_ mesh: HalfEdgeMesh, direction: RefinementDirection, distance: Double) throws -> HalfEdgeMesh {
+    public static func extrude(_ mesh: HalfEdgeMesh, direction: RefinementDirection, distance: Double) throws -> HalfEdgeMesh {
         let unit = direction.unitVector
         let dir = SIMD3(unit.x, unit.y, unit.z)
         var region = Set<FaceID>()

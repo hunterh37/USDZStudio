@@ -268,6 +268,34 @@ struct SculptBuildRunnerTests {
         #expect(afterPts.count > beforePts.count)
     }
 
+    /// P4 (#85) expressiveness ops through the in-app runner: taper, bevel, and
+    /// extrude must reach the shared `SculptKit.RefinementGeometry` resolver the
+    /// same way the AgentMCP executor does, and author real new geometry.
+    @Test func formRefinementAppliesExpressivenessOpsLive() {
+        let doc = EditorDocument(snapshot: StageSnapshot(rootPrims: []))
+        let body = ComponentNode(name: "Body", shape: .primitive(.box), attachment: .weld,
+                                 refinements: [
+                                    .taper(axis: .y, scale: 0.5),
+                                    .bevel(width: 0.03, angleDegrees: 30),
+                                    .extrude(direction: .posY, distance: 0.2),
+                                 ])
+        let root = ComponentNode(name: "Obj", shape: .group, children: [body])
+        let spec = ObjectSculptSpec(name: "Obj", objectClass: .object, root: root)
+        SculptBuildRunner.apply(pass: .blockout, of: spec, to: doc)
+        let before = doc.snapshot.prim(at: PrimPath("/Obj/Body/Geo")!)
+        guard case .float3Array(let beforePts)? = before?.attribute(named: "points")?.value else {
+            Issue.record("no points before refinement"); return
+        }
+        let authored = SculptBuildRunner.apply(pass: .formRefinement, of: spec, to: doc)
+        #expect(authored == ["/Obj/Body"])
+        let after = doc.snapshot.prim(at: PrimPath("/Obj/Body/Geo")!)
+        guard case .float3Array(let afterPts)? = after?.attribute(named: "points")?.value else {
+            Issue.record("no points after refinement"); return
+        }
+        // Bevel + extrude add faces/vertices; the mesh grows.
+        #expect(afterPts.count > beforePts.count)
+    }
+
     @Test func optimizationWeldsCoincidentVerticesLive() {
         // A spec whose leaf is a box (no coincident verts) with a weld epsilon:
         // MeshKit refuses to weld nothing, so the step is skipped best-effort,
