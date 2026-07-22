@@ -15,6 +15,7 @@ OpenUSDZEditor/
 │   ├── MeshKit/                  # Pure Swift half-edge mesh model + topology ops (zero deps)
 │   ├── MechanismKit/             # Pure Swift rigid-articulation math: hinge/slider joints, pivot transforms, invariants (zero deps)
 │   ├── RigKit/                   # Pure Swift skeletal rig/skinning/motion math: FK, IK/FK solvers, constraints, auto-rig, retargeting, clip blending, motion-quality metric (zero deps)
+│   ├── CaptureKit/               # Pure Swift capture-planner: photos→USDZ pre-flight gate, detail→session mapping, staged plan (zero UI/GPU/Python; specs/capture-import.md)
 │   ├── ConversionKit/            # Importers, pipeline stages, batch engine
 │   ├── ViewportKit/              # RealityKit viewport, camera, gizmos, IBL
 │   ├── EditingKit/               # Command layer, undo, stage mutations
@@ -40,6 +41,8 @@ USDBridge ─▶ USDCore          (bridge implements USDCore protocols)
 {EditingKit, ViewportKit, ConversionKit} ─▶ MeshKit   (MeshKit itself imports nothing internal; ConversionKit uses MeshKit.VertexNormals to derive smooth normals for normal-less imports — issue #95)
 MechanismKit imports nothing internal (pure leaf, like MeshKit); its consumers ({EditingKit, SculptKit, AgentMCP}) import it for rigid-joint authoring (specs/articulation-mechanisms.md)
 RigKit imports nothing internal (pure leaf, like MeshKit/MechanismKit); its consumers ({EditingKit, ViewportKit, AgentMCP}) import it for skeletal rig/skinning/motion authoring (specs/animation-rigging.md)
+CaptureKit ─▶ {USDCore, MeshKit}   (pure capture-planner leaf; consumed by ConversionKit's ObjectCaptureImporter + CLI `capture`; runs no PhotogrammetrySession itself — that is an injected seam in ConversionKit, specs/capture-import.md)
+ConversionKit ─▶ CaptureKit         (ObjectCaptureImporter realizes a CapturePlan; the reconstruction session is injected behind PhotogrammetryRunning and coverage-excluded)
 SessionKit ─▶ {USDCore, ViewportKit, EditingKit}; consumed by EditorUI/App only — cross-launch session envelope + restore (reuses ViewportKit value types + the EditingKit WAL; authors no stage itself), specs/session-restoration.md
 DicyaninDesignSystem ◀─ EditorUI only
 QuickLookKit — leaf, zero internal deps (pure render-plan logic; App QuickLook .appex targets consume it)

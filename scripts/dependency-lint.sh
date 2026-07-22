@@ -35,7 +35,8 @@ policy_for() {
     DicyaninDesignSystem) echo "" ;;
     QuickLookKit)         echo "" ;;                    # pure Swift render-plan logic for the QuickLook .appex (specs/quicklook.md)
     USDBridge)            echo "USDCore" ;;
-    ConversionKit)        echo "USDCore MeshKit" ;;    # derives smooth vertex normals for normal-less imports via MeshKit.VertexNormals (issue #95)
+    CaptureKit)           echo "USDCore MeshKit" ;;    # pure capture-planner logic (specs/capture-import.md); leaf like MeshKit
+    ConversionKit)        echo "USDCore MeshKit CaptureKit" ;;    # derives smooth vertex normals for normal-less imports via MeshKit.VertexNormals (issue #95); CaptureKit: ObjectCaptureImporter realizes its CapturePlan (specs/capture-import.md)
     ValidationKit)        echo "USDCore" ;;
     ScriptingKit)         echo "USDCore" ;;
     ViewportKit)          echo "USDCore MeshKit RigKit" ;;     # component-overlay rendering (specs/mesh-editing.md); RigKit: skeletal rig-handle overlay (specs/animation-rigging.md)
@@ -45,7 +46,7 @@ policy_for() {
     AgentMCP)             echo "USDCore USDBridge EditingKit ValidationKit ConversionKit ScriptingKit MeshKit MechanismKit SculptKit RigKit" ;;  # MCP adapter over the kits (docs/AGENT_MCP_PLAN.md); never EditorUI; RigKit: .rig animation tool group
     EditorUI)             echo "USDCore USDBridge ConversionKit ViewportKit EditingKit ValidationKit ScriptingKit DicyaninDesignSystem MeshKit SculptKit SessionKit" ;;  # SculptKit: in-app staged-sculpt runner; SessionKit: cross-launch session restore (specs/session-restoration.md)
     App)                  echo "USDCore USDBridge ConversionKit ViewportKit EditingKit ValidationKit ScriptingKit EditorUI DicyaninDesignSystem MeshKit AgentMCP SessionKit" ;;  # App hosts the in-app MCP editing session (specs/agent-live-editing.md); composition root, like CLI. SessionKit: names ViewState for the restore hand-off
-    CLI)                  echo "USDCore USDBridge ConversionKit ValidationKit ScriptingKit EditingKit MeshKit AgentMCP" ;;  # never EditorUI/DesignSystem
+    CLI)                  echo "USDCore USDBridge ConversionKit CaptureKit ValidationKit ScriptingKit EditingKit MeshKit AgentMCP" ;;  # never EditorUI/DesignSystem; CaptureKit: `openusdz capture` pre-flight + plan (specs/capture-import.md)
     EditorHarness)        echo "USDCore USDBridge EditingKit MeshKit EditorUI" ;;  # dev tool: drives the real UI
     *)                    return 1 ;;
   esac

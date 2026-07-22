@@ -46,6 +46,7 @@ EXPECTATIONS=(
   "skel.usda|yes|yes|no"
   "skel.usdz|yes|yes|no"
   "animated.usda|no|yes|no"     # time-sampled values dropped on save — Phase 10
+  "capture-object.usda|yes|yes|no"   # photogrammetry capture result — geometry-only mesh (specs/capture-import.md)
 )
 # Files that must FAIL to open at all (malformed input must never be silently
 # accepted, and must never crash the harness).

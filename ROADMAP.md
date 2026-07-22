@@ -141,6 +141,19 @@ With the golden-image, round-trip, corpus, and XCUITest harnesses now built by e
 
 **Exit:** drop a GLB, get a validated USDZ. CLI usable in pipelines.
 
+## Phase 2.5 — Capture Import (Photos → USDZ, extends Phase 2)
+
+Turn a folder of photographs into a validated, editable USDZ inside the app, by wrapping Apple's native `PhotogrammetrySession` as a first-class importer with a staged, quality-gated pipeline (specs/capture-import.md; research/topics/gaussian-splatting-to-usdz/). Deterministic code does all mechanical/policy work; the only non-covered step is the reconstruction session, isolated behind an injected seam.
+
+- [x] **`CaptureKit`** new pure-Swift leaf (100% floor, governance ritual): `CaptureDetail`/`CaptureProfile`/`CaptureRequest` model, pre-flight `CaptureQualityReport` gate (too-few-images/mixed-resolution/unsupported-format blocking, low-overlap advisory), detail→session mapping, deterministic `CapturePlan` (golden-tested per detail).
+- [x] **`ObjectCaptureImporter: AssetImporter`** in ConversionKit driving the `PhotogrammetryRunning` seam → validate → session → normalize (ModelIO read into the IR) → advisories; new `ConversionKit → CaptureKit` edge. Real `PhotogrammetrySessionRunner` seam coverage-excluded; orchestration 100% against a fake runner.
+- [x] **CLI `openusdz capture <images-dir> <out.usdz> --detail medium [--profile arkit] [--meters-per-unit N] [--json]`** — same pre-flight/plan headless; matrix over {valid dir, too-few-images, missing dir, unsupported-format} × {default, --json}; exit code follows the validate verdict.
+- [x] Round-trip corpus fixture `capture-object.usda` (idempotent + edit/undo fixed point) in the `roundtrip` gate.
+- [ ] **EditorUI capture import sheet** (drop images → detail picker → pre-flight report → live progress → open + compliance advisories) — sequenced next; reuses the conversion sheet's log pane.
+- [ ] **Follow-ons (separate PRs):** splat *preview* viewport (`SplatKit` leaf + `ViewportKit`), and a CUDA-free GS→mesh importer — both out of this phase's scope (see research plan).
+
+**Exit:** drop ~50 photos, get an editable, `arkit`-valid textured USDZ fully in-app, no CUDA/third-party; same asset headless via `openusdz capture`.
+
 ## Phase 3 — Editing (v0.3)
 
 - [x] EditingKit command layer + undo/redo bridged to NSUndoManager — `CommandStack` + `InMemoryStage` + full command set (visibility/active/rename/remove/set-attr/composite) + `UndoManagerBridge`
