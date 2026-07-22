@@ -107,6 +107,11 @@ public enum SculptBuildRunner {
                         current = try InsetFaces.apply(
                             current, selection: .faces(faces),
                             params: .init(fraction: fraction, depth: depth)).mesh
+                    case let .subdivide(levels):
+                        let faces = Set(current.faceLoops.keys)
+                        current = try SubdivideCatmullClark.apply(
+                            current, selection: .faces(faces),
+                            params: .init(levels: levels)).mesh
                     }
                 }
                 return current

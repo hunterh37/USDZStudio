@@ -50,7 +50,7 @@ struct FuzzTests {
         for opIndex in 0..<3 {
             let result: MeshOpResult?
             do {
-                switch (Int(seed % 10) + opIndex) % 10 {
+                switch (Int(seed % 11) + opIndex) % 11 {
                 case 0:
                     result = try ExtrudeFaces.apply(mesh, selection: .faces(randomFaces(mesh, &rng)),
                                                     params: .init(distance: Double.random(in: 0.1...2, using: &rng)))
@@ -89,6 +89,13 @@ struct FuzzTests {
                     // self-intersection on the jittered surface.
                     result = try Solidify.apply(mesh, selection: .faces(Set(mesh.faceOrder)),
                                                 params: .init(thickness: 0.05))
+                case 8:
+                    // Catmull-Clark subdivide the whole mesh: always valid on a
+                    // healthy closed/open manifold, so it should never refuse
+                    // here — the invariant suite guards the smoothed result.
+                    result = try SubdivideCatmullClark.apply(
+                        mesh, selection: .faces(Set(mesh.faceOrder)),
+                        params: .init(levels: Int.random(in: 1...2, using: &rng)))
                 case 9:
                     // Lattice/FFD bake: fit a cage to the mesh bounds, jitter every
                     // control point, deform all vertices. A jitter that folds a face

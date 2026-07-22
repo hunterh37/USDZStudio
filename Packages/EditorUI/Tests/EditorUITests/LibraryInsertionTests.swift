@@ -2,6 +2,7 @@ import Testing
 import USDCore
 import EditingKit
 import MeshKit
+import ValidationKit
 @testable import EditorUI
 
 /// `LibraryInsertion` turns a `ShapeLibrary` entry into an undoable Xform+Mesh
@@ -31,6 +32,22 @@ struct LibraryInsertionTests {
         #expect(doc.canUndo)
         doc.undo()
         #expect(doc.snapshot.rootPrims.isEmpty)
+    }
+
+    /// An inserted library shape carries real per-vertex normals so it shades
+    /// smoothly and leaves zero `mesh.normals` diagnostics (issue #95).
+    @Test func insertAuthorsSmoothNormals() {
+        let doc = EditorDocument(snapshot: StageSnapshot(rootPrims: []))
+        LibraryInsertion.insert(cube(), into: doc)
+        let geo = doc.snapshot.rootPrims[0].children.first
+        guard case .float3Array(let normals)? = geo?.attribute(named: "normals")?.value,
+              case .float3Array(let points)? = geo?.attribute(named: "points")?.value else {
+            Issue.record("normals/points not authored"); return
+        }
+        #expect(!normals.isEmpty)
+        #expect(normals.count == points.count)
+        #expect(geo?.attribute(named: "normals")?.metadata["interpolation"] == "\"vertex\"")
+        #expect(MissingNormalsRule().evaluate(stage: doc.snapshot).isEmpty)
     }
 
     @Test func insertSelectsTheNewPrim() {

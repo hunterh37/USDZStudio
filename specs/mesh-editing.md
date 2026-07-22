@@ -55,6 +55,7 @@ Every op documents and enforces **preconditions** (e.g. Bevel: manifold edges on
 | FillHole | Fan/ear-clip triangulate a boundary loop | F+=n−2, E+=n−3 |
 | BevelEdges (v1) | Single-segment edge bevel, uniform width | analytic per edge class |
 | LoopCut (v1.5) | Insert edge loop through quad strip | analytic; op refuses on non-quad strips |
+| SubdivideCatmullClark | Whole-mesh Catmull-Clark smoothing (n levels) | per level: V+=E+F, E+=E+C, F+=C−F (C=Σ loop.count) |
 
 ## Correctness Invariants (the LLM-agent feedback loop)
 

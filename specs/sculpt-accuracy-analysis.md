@@ -99,6 +99,20 @@ Ordered by measured leverage. Each item states a hypothesis, method, and
   numbers as the baseline. *Acceptance:* harness reports per-image mask-IoU and
   pose error; metric-vs-human Spearman ρ reported.
 
+  *Status:* PR #88 landed the harness + a **synthetic** labelled corpus (masks
+  and poses exact by construction) and ρ against exact ground-truth rank. The
+  #94 follow-up adds the two pieces that need external assets/participants:
+  - `SculptKit/RealPhotoBaseline.swift` — a fixture format + loader for a real
+    reference (photo + **hand-labelled** mask + recorded pose + per-pass renders)
+    that reproduces its frozen §2 numbers within ±0.01 when committed. The §2
+    targets are frozen now as a *blueprint* (`Tests/.../Fixtures/RealPhoto/
+    aventador.blueprint.json`, no pixels → reported `pending`, not faked); a real
+    asset dropped in that directory is picked up and gated automatically.
+  - `SculptKit/HumanRankingStudy.swift` — ingests human orderings (CSV/JSON),
+    forms the consensus rank, and reports Spearman ρ(measured, human) with n and
+    a Fisher-z CI. Feed it real participant orderings and it emits the real
+    number; committing those orderings is what remains to fully close #94.
+
 - **P1 — Robust reference segmentation (addresses F1).** Replace the
   colour-threshold heuristic with a real matting stage (evaluate: GrabCut,
   saliency + guided filter, or a learned matte) producing a clean alpha.
@@ -130,6 +144,12 @@ Ordered by measured leverage. Each item states a hypothesis, method, and
   renders are correctly shaded (removes the 24 `mesh.normals` diagnostics).
   *Acceptance:* zero `mesh.normals` info diagnostics; appearance-term SSIM
   improvement quantified at the `material` pass.
+  *Status:* the sculpt build path authors normals via `MeshKit.VertexNormals`
+  (PR #87). The remaining authoring paths — library insertion, the tutorial
+  scene, the import/convert `USDAuthorStage`, and `MeshEditCommand` re-authoring
+  — route through the same `VertexNormals` helper (issue #95), and the editor's
+  `mesh.normals` quick-fix delegates to it too, so the smooth-normal math has a
+  single home in `MeshKit`.
 
 ## 5. Non-goals / guardrails
 

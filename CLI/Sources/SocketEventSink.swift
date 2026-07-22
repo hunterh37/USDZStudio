@@ -55,6 +55,14 @@ enum MCPActivityPaths {
         mcpDirectory(fileManager: fileManager)
             .appendingPathComponent("agent.sock", isDirectory: false)
     }
+
+    /// The reference-image hand-off file. A CLI-hosted session writes the
+    /// agent's reference here so an editor launched afterwards can restore it
+    /// (specs/agent-live-editing.md — "Reference panel").
+    static func referenceURL(fileManager: FileManager = .default) -> URL {
+        mcpDirectory(fileManager: fileManager)
+            .appendingPathComponent("reference.json", isDirectory: false)
+    }
 }
 
 /// `MCPEventSink` that pushes NDJSON activity lines to the running editor over a

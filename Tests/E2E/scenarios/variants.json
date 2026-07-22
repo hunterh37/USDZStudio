@@ -1,0 +1,17 @@
+{
+  "name": "variants",
+  "description": "Variant-selection flow: read a prim's variant sets, switch the active selection, and confirm the change is reflected back through the read tools.",
+  "open": "../fixtures/variants.usda",
+  "strictness": "warn",
+  "steps": [
+    { "call": "list_variants",
+      "args": { "path": "/Widget" },
+      "expect": { "path": ["variantSets", 0, "selection"], "equals": "red" } },
+    { "call": "set_variant",
+      "args": { "path": "/Widget", "set": "color", "selection": "blue" },
+      "expect": { "isError": false } },
+    { "call": "list_variants",
+      "args": { "path": "/Widget" },
+      "expect": { "path": ["variantSets", 0, "selection"], "equals": "blue" } }
+  ]
+}

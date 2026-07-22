@@ -168,6 +168,10 @@ public enum SpecValidator {
                 if !depth.isFinite {
                     issues.append(.init(.error, "component '\(node.name)' inset depth must be finite"))
                 }
+            case let .subdivide(levels):
+                if levels < 1 {
+                    issues.append(.init(.error, "component '\(node.name)' subdivide levels must be ≥ 1"))
+                }
             }
         }
         return issues

@@ -17,6 +17,14 @@ import Testing
         #expect(resolution?.groups == Set(ToolGroup.allCases))
         #expect(resolution?.strictness == .warn)
         #expect(resolution?.libraryDirectories.isEmpty == true)
+        // Relaying to a live editor is the default; opt out explicitly.
+        #expect(resolution?.noRelay == false)
+    }
+
+    @Test func parsesNoRelay() {
+        let (resolution, _) = resolve(["scene.usda", "--no-relay"])
+        #expect(resolution?.noRelay == true)
+        #expect(resolution?.fileURL.lastPathComponent == "scene.usda")
     }
 
     @Test func parsesGroupsStrictnessAndLibraries() {

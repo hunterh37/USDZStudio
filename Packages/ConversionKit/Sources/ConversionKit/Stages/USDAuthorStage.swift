@@ -1,6 +1,7 @@
 import Foundation
 import simd
 import USDCore
+import MeshKit
 
 /// Stage 8 of the standard sequence: IntermediateScene → USD stage
 /// (specs/conversion-pipeline.md). Authors a value-typed `StageSnapshot`;
@@ -107,6 +108,24 @@ public struct USDAuthorStage: ConversionStage {
         ]
         if !mesh.normals.isEmpty {
             attributes.append(Attribute(name: "normals", value: .doubleArray(mesh.normals.flatMap { [Double($0.x), Double($0.y), Double($0.z)] })))
+        } else {
+            // Sources that ship no normals (raw OBJ, some glTF) would otherwise
+            // author a mesh that falls back to faceted shading and trips the
+            // `mesh.normals` diagnostic. Derive smooth per-vertex normals from
+            // the authored topology via MeshKit — the one place this math lives
+            // (issue #95).
+            let flat = FlatMesh(
+                points: mesh.positions.map { SIMD3(Double($0.x), Double($0.y), Double($0.z)) },
+                faceVertexCounts: Array(repeating: 3, count: mesh.triangleCount),
+                faceVertexIndices: mesh.indices.map(Int.init))
+            let derived = VertexNormals.smoothFlat(for: flat)
+            // Only author when the derivation produced a real direction. A
+            // degenerate mesh (e.g. a collapsed triangle) yields an all-zero
+            // channel, which is "unshaded" and no better than leaving it off —
+            // that stays a `mesh.topology` problem, not a normals one.
+            if derived.contains(where: { $0 != 0 }) {
+                attributes.append(Attribute(name: "normals", value: .doubleArray(derived)))
+            }
         }
         if !mesh.uvs.isEmpty {
             attributes.append(Attribute(name: "primvars:st", value: .doubleArray(mesh.uvs.flatMap { [Double($0.x), Double($0.y)] })))
