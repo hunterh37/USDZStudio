@@ -1,7 +1,7 @@
 # Building USDZ Studio from source
 
 USDZ Studio is an open-source native macOS app. There are no signed installers;
-you either download an unsigned build from [Releases](https://github.com/hunterh37/OpenUSDZEditor/releases)
+you either download an unsigned build from [Releases](https://github.com/hunterh37/USDZStudio/releases)
 or build it yourself. This guide covers both.
 
 ## Requirements
@@ -19,8 +19,8 @@ registration, embedded Python), which is why it goes through Xcode.
 ## Quick start
 
 ```sh
-git clone https://github.com/hunterh37/OpenUSDZEditor.git
-cd OpenUSDZEditor
+git clone https://github.com/hunterh37/USDZStudio.git
+cd USDZStudio
 
 # One-time: fetch the embedded Python / usd-core runtime the app bundles.
 bash scripts/fetch-python-runtime.sh

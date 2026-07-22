@@ -18,7 +18,7 @@ import ValidationKit
 /// with no effect is worse than no setting.
 @Observable
 @MainActor
-public final class EditorSettings {
+public final class EditorSettings: HintPreferenceStore {
 
     /// Persisted-key namespace. Kept identical to the historical `@AppStorage`
     /// keys so this model and those wrappers share storage.

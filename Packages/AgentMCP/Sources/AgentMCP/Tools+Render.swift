@@ -1,5 +1,6 @@
 import Foundation
 import EditingKit
+import SculptKit
 import USDCore
 
 /// External renderer seam. The repo has no in-process renderer; rendering is
@@ -109,6 +110,42 @@ public enum RenderTools {
         })
 
         server.register(MCPTool(
+            name: "sculpt_align_pose", group: .render,
+            description: """
+            Estimate the reference photo's camera pose (sculpt-accuracy P3/#84) by \
+            analysis-by-synthesis: a deterministic coarse-to-fine orbit search renders the \
+            subject at candidate {azimuth, elevation} poses and keeps the pose whose \
+            silhouette best matches the (auto-matted) reference. Returns the matched pose, \
+            its shape score, the best render's path (feed both into sculpt_comparison_sheet \
+            so pose mismatch stops confounding shape error), and — with includeBaseline — \
+            the legacy 16-grid brute-force result plus the pose gain over it (the F4 ablation).
+            """,
+            inputSchema: Schema.object([
+                "referencePath": Schema.string("path to the reference image (opaque photos are matted automatically)"),
+                "paths": Schema.array(of: Schema.primRef, "isolate these subtrees (default whole stage)"),
+                "size": Schema.integer("render edge in pixels per candidate (default 128)"),
+                "includeBaseline": Schema.boolean("also run the legacy 16-angle grid and report the pose-vs-shape ablation (default false)"),
+            ], required: ["referencePath"])
+        ) { args in
+            guard let referencePath = args["referencePath"].stringValue else {
+                throw ToolError.invalidParams("'referencePath' is required")
+            }
+            var isolate: [PrimPath] = []
+            if let raw = args["paths"].arrayValue {
+                for entry in raw { isolate.append(try session.resolve(.object(["path": entry]))) }
+            }
+            guard let renderer else {
+                throw ToolError.unsupported(
+                    "this server was configured without a renderer — pose alignment needs to render candidate poses")
+            }
+            return try await alignPose(
+                session: session, isolate: isolate, referencePath: referencePath,
+                size: args["size"].intValue ?? 128,
+                includeBaseline: args["includeBaseline"].boolValue ?? false,
+                renderer: renderer, workDirectory: workDirectory)
+        })
+
+        server.register(MCPTool(
             name: "raycast", group: .render,
             description: "Cast a world-space ray against stage geometry; returns the nearest hit prim, distance, and point. Cheap spatial ground truth.",
             inputSchema: Schema.object([
@@ -132,6 +169,85 @@ public enum RenderTools {
                 "point": .array(hit.point.map { .number($0) }),
             ])
         })
+    }
+
+    // MARK: - Pose alignment (sculpt-accuracy P3/#84)
+
+    /// Core of `sculpt_align_pose`: match the reference camera pose by
+    /// rendering candidate orbit poses and scoring their concavity-preserving
+    /// shape agreement against the matted reference. The search itself is the
+    /// pure `PoseAlignment` coarse-to-fine estimator; this function supplies it
+    /// a real score function built on the injected renderer seam.
+    static func alignPose(
+        session: EditSession, isolate: [PrimPath], referencePath: String,
+        size: Int, includeBaseline: Bool,
+        renderer: any RenderExecuting, workDirectory: URL
+    ) async throws -> JSONValue {
+        guard size >= 64, size <= 1024 else {
+            throw ToolError.invalidParams("'size' must be within 64...1024")
+        }
+        // The reference goes through the P1 matting policy: opaque photos are
+        // segmented so the search matches the subject, not the background.
+        guard let reference = RasterLoader.loadReference(path: referencePath) else {
+            throw ToolError.failed("could not decode reference image at '\(referencePath)'")
+        }
+
+        let snapshot = session.stage.currentSnapshot
+        let roots = isolatedRoots(snapshot: snapshot, isolate: isolate)
+        guard let frame = bounds(of: roots, metadata: snapshot.metadata), frame.maxExtent > 0 else {
+            throw ToolError.failed("nothing renderable: subjects have no geometry")
+        }
+        try FileManager.default.createDirectory(at: workDirectory, withIntermediateDirectories: true)
+
+        /// Render the subject at one candidate pose and return the render.
+        func render(_ pose: ViewPose, name: String) async throws -> RasterImage {
+            let angle = Angle(azimuth: pose.azimuthDegrees, elevation: pose.elevationDegrees)
+            let camera = sphericalCamera(name: name, angle: angle, framing: frame)
+            let staged = StageSnapshot(metadata: snapshot.metadata, rootPrims: roots + [camera])
+            let stageURL = workDirectory.appendingPathComponent("align-pose-stage.usda")
+            try USDASerializer.serialize(staged).write(to: stageURL, atomically: true, encoding: .utf8)
+            let outputURL = workDirectory.appendingPathComponent("\(name).png")
+            do {
+                try await renderer.render(
+                    stageURL: stageURL, outputURL: outputURL,
+                    cameraPath: "/AgentCam_\(name)", size: size)
+            } catch {
+                throw ToolError.failed("pose render at az \(pose.azimuthDegrees)/el \(pose.elevationDegrees) failed: \(error)")
+            }
+            guard let image = RasterLoader.load(path: outputURL.path) else {
+                throw ToolError.failed("pose render at '\(outputURL.path)' did not decode")
+            }
+            return image
+        }
+
+        func score(_ pose: ViewPose) async throws -> Double {
+            let image = try await render(pose, name: "alignPose")
+            return ImageSimilarity.compare(reference: reference, render: image).shapeScore
+        }
+
+        let result = try await PoseAlignment.estimate(score: score)
+        // Persist the winning view so the agent can feed it (and the matched
+        // angle) straight into sculpt_comparison_sheet / render_views.
+        _ = try await render(result.pose, name: "alignPoseBest")
+        let bestPath = workDirectory.appendingPathComponent("alignPoseBest.png").path
+
+        var payload: [String: JSONValue] = [
+            "azimuth": .number(result.pose.azimuthDegrees),
+            "elevation": .number(result.pose.elevationDegrees),
+            "shapeScore": .number(result.score),
+            "evaluations": .number(Double(result.evaluations)),
+            "coarseAzimuth": .number(result.coarsePose.azimuthDegrees),
+            "coarseElevation": .number(result.coarsePose.elevationDegrees),
+            "renderPath": .string(bestPath),
+        ]
+        if includeBaseline {
+            let baseline = try await PoseAlignment.legacyGrid16(score: score)
+            payload["baselineAzimuth"] = .number(baseline.pose.azimuthDegrees)
+            payload["baselineElevation"] = .number(baseline.pose.elevationDegrees)
+            payload["baselineShapeScore"] = .number(baseline.score)
+            payload["poseGain"] = .number(result.score - baseline.score)
+        }
+        return .object(payload)
     }
 
     // MARK: - stats_only summary (freecad-mcp's token-saving toggle)
