@@ -1,3 +1,4 @@
+import AgentMCP
 import Foundation
 import Testing
 @testable import RenderKit
@@ -254,6 +255,23 @@ struct RenderStageParseTests {
         }
         """
         #expect(RenderStageParse.camera(named: "Cam", usda: stage) == nil)
+    }
+
+    @Test func scalarRejectsNonNumericValue() {
+        // A non-numeric token right after '=' yields nil (exercises the empty
+        // token break path).
+        #expect(RenderStageParse.scalar(after: "v", in: "token v = abc") == nil)
+    }
+
+    @Test func cameraWithMalformedMatrixReturnsNil() {
+        // A transform with fewer than 16 values is rejected.
+        let stage = """
+        def Camera "AgentCam_bad"
+        {
+            matrix4d xformOp:transform = ( (1, 0, 0, 0), (0, 1, 0, 0) )
+        }
+        """
+        #expect(RenderStageParse.camera(named: "AgentCam_bad", usda: stage) == nil)
     }
 }
 

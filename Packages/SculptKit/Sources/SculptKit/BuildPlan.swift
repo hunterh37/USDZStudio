@@ -184,22 +184,23 @@ public enum BuildPlanner {
         var steps: [BuildStep] = []
         walk(spec.root, parent: nil) { node, parentPath in
             let selfPath = path(for: node.name, under: parentPath)
-            // Emit the base component plus any repetition copies as real prims,
-            // each placed at its spec transform. Previously blockout authored
-            // geometry only, baking every component at the origin (a pile of
-            // overlapping parts); placement was deferred to the structural pass,
-            // so a blockout-only stage was meaningless to render or inspect
-            // (#115). We now place here too — the structural pass re-authors the
-            // same local transforms, so it remains correct and idempotent.
+            // Emit the base component as a real prim AND immediately place it at
+            // its authored transform. Without this the geometry is baked at the
+            // world origin and the per-component `translation` is dropped until
+            // the structural pass runs, so a blockout-only stage is a heap of
+            // overlapping parts at the floor (issue #115). The structural pass
+            // re-affirms the same transforms idempotently.
             steps.append(geometryStep(named: node.name, node: node, parentPath: parentPath))
             steps.append(.setTransform(
                 path: selfPath, translation: node.translation,
                 rotationEulerDegrees: node.rotationEulerDegrees, scale: node.scale))
+            // Repetition copies: author each prim and place it at its computed
+            // transform, matching what the structural pass would set.
             for copy in copies(for: node) {
+                let copyPath = path(for: copy.name, under: parentPath)
                 steps.append(geometryStep(named: copy.name, node: node, parentPath: parentPath))
                 steps.append(.setTransform(
-                    path: path(for: copy.name, under: parentPath),
-                    translation: copy.translation,
+                    path: copyPath, translation: copy.translation,
                     rotationEulerDegrees: copy.rotationEulerDegrees, scale: copy.scale))
             }
             return selfPath

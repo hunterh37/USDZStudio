@@ -102,12 +102,23 @@ public struct USDAuthorStage: ConversionStage {
     private func author(_ mesh: MeshData, at path: PrimPath, scene: IntermediateScene,
                         skeletonPath: PrimPath?, plan: inout AuthorPlan) -> Prim {
         var attributes: [Attribute] = [
-            Attribute(name: "points", value: .doubleArray(mesh.positions.flatMap { [Double($0.x), Double($0.y), Double($0.z)] })),
+            // Author positions as canonical `point3f[]` (`.float3Array`), not
+            // `double[]`. The authored snapshot is grafted straight into the
+            // live stage without a serialize→reparse, so the in-memory value
+            // type is what every geometry reader sees. `GeometryProbe` (and thus
+            // check_mesh, world-bbox, raycast) and RealityKit/QuickLook only
+            // recognize `point3f[]`; a `double[]` mesh is invisible to them —
+            // check_mesh reports "no topology" and bounds compute as empty. Every
+            // native authoring path (create_mesh, edit_mesh, sculpt, library
+            // insert) already uses `.float3Array`; the importer was the lone
+            // outlier. Storage is identical (`[Double]`), only the role type
+            // changes.
+            Attribute(name: "points", value: .float3Array(mesh.positions.flatMap { [Double($0.x), Double($0.y), Double($0.z)] })),
             Attribute(name: "faceVertexIndices", value: .intArray(mesh.indices.map(Int.init))),
             Attribute(name: "faceVertexCounts", value: .intArray(Array(repeating: 3, count: mesh.triangleCount))),
         ]
         if !mesh.normals.isEmpty {
-            attributes.append(Attribute(name: "normals", value: .doubleArray(mesh.normals.flatMap { [Double($0.x), Double($0.y), Double($0.z)] })))
+            attributes.append(Attribute(name: "normals", value: .float3Array(mesh.normals.flatMap { [Double($0.x), Double($0.y), Double($0.z)] })))
         } else {
             // Sources that ship no normals (raw OBJ, some glTF) would otherwise
             // author a mesh that falls back to faceted shading and trips the
@@ -124,7 +135,7 @@ public struct USDAuthorStage: ConversionStage {
             // channel, which is "unshaded" and no better than leaving it off —
             // that stays a `mesh.topology` problem, not a normals one.
             if derived.contains(where: { $0 != 0 }) {
-                attributes.append(Attribute(name: "normals", value: .doubleArray(derived)))
+                attributes.append(Attribute(name: "normals", value: .float3Array(derived)))
             }
         }
         if !mesh.uvs.isEmpty {

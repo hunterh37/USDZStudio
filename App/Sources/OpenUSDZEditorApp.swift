@@ -45,6 +45,9 @@ struct OpenUSDZEditorApp: App {
     @State private var restoredDocument: EditorDocument?
     @State private var showRestorePrompt = false
 
+    /// Drives the File ▸ "Reset Session" confirmation.
+    @State private var showResetSessionPrompt = false
+
     /// The shell-owned view state to reapply after accepting a restore (camera,
     /// outliner expansion, panels, playback); `nil` for a normal open, so a
     /// later open never re-applies a stale restore.
@@ -136,6 +139,13 @@ struct OpenUSDZEditorApp: App {
                 } message: {
                     Text(restorePromptMessage)
                 }
+                .confirmationDialog("Reset session?",
+                                    isPresented: $showResetSessionPrompt, titleVisibility: .visible) {
+                    Button("Reset Session", role: .destructive) { resetSession() }
+                    Button("Cancel", role: .cancel) {}
+                } message: {
+                    Text("This clears saved session-restoration data — the current session and any recoverable sessions from previous launches. The app won't offer to restore them next time it opens. Any document you have open stays open; its saved file is untouched.")
+                }
                 .task {
                     // Start the localhost activity listener + write the
                     // endpoint-discovery file so `openusdz mcp` can connect.
@@ -190,6 +200,12 @@ struct OpenUSDZEditorApp: App {
                 Button("Export…") { postMenu(.export) }
                     .keyboardShortcut("e", modifiers: [.command, .shift])
                     .disabled(document == nil)
+                Divider()
+                // Clears cross-launch session-restoration state
+                // (specs/session-restoration.md): drops the active WAL plus any
+                // recoverable leftovers so the next launch won't offer a
+                // restore. Confirmed first — it discards unsaved recovery data.
+                Button("Reset Session…") { showResetSessionPrompt = true }
             }
             // Drive undo/redo straight through the document's CommandStack. The
             // package's UndoManagerBridge stays available for the eventual
@@ -212,6 +228,8 @@ struct OpenUSDZEditorApp: App {
                 Divider()
                 Button("Convert File…") { postMenu(.convert) }
                     .keyboardShortcut("k", modifiers: [.command, .shift])
+                Button("Capture from Photos…") { postMenu(.capture) }
+                    .keyboardShortcut("c", modifiers: [.command, .shift])
                 Button("Batch Convert…") { postMenu(.batch) }
                     .keyboardShortcut("b", modifiers: [.command, .shift])
                 Divider()
@@ -429,6 +447,23 @@ struct OpenUSDZEditorApp: App {
         session.attach(doc)
         session.capture(doc)
         return doc
+    }
+
+    /// File ▸ "Reset Session": wipes all session-restoration state (the active
+    /// WAL plus any recoverable leftovers), then re-arms crash-safety for the
+    /// still-open document by starting a fresh journaled session over its current
+    /// scene. Rebuilding the document from its live snapshot is what re-attaches a
+    /// new WAL to the command stack; the trade-off is that undo history resets —
+    /// acceptable for an explicit "reset". Any pending restore hand-off is
+    /// dropped. No document open → the reset alone is the whole effect.
+    @MainActor
+    private func resetSession() {
+        session.reset()
+        restoreCandidate = nil
+        restoredDocument = nil
+        restoredViewStateToApply = nil
+        guard let current = document else { return }
+        document = makeSessionedDocument(snapshot: current.snapshot, modelURL: current.modelURL)
     }
 
     /// On launch, if a previous session left unsaved work, rebuild its document

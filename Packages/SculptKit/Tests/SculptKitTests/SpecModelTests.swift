@@ -13,18 +13,6 @@ import Testing
         #expect(ShapeKind.Primitive.allCases.count == 5)
     }
 
-    // #112: ShapeKind encodes as a friendly tagged form (no `_0` leak) and
-    // round-trips; it also still decodes the legacy synthesized form.
-    @Test func shapeKindEncodesFriendlyTaggedForm() throws {
-        let enc = JSONEncoder(); enc.outputFormatting = [.sortedKeys]
-        func json(_ k: ShapeKind) throws -> String {
-            String(decoding: try enc.encode(k), as: UTF8.self)
-        }
-        #expect(try json(.group) == #"{"kind":"group"}"#)
-        #expect(try json(.primitive(.box)) == #"{"kind":"primitive","primitive":"box"}"#)
-        #expect(try json(.library(entryID: "office-chair")) == #"{"entryID":"office-chair","kind":"library"}"#)
-    }
-
     @Test func shapeKindRoundTripsAllCases() throws {
         let enc = JSONEncoder(); let dec = JSONDecoder()
         for k in [ShapeKind.group, .primitive(.sphere), .library(entryID: "rock")] {
@@ -40,12 +28,6 @@ import Testing
         #expect(try decode(#"{"group":{}}"#) == .group)
         #expect(try decode(#"{"primitive":{"_0":"cone"}}"#) == .primitive(.cone))
         #expect(try decode(#"{"library":{"entryID":"rock"}}"#) == .library(entryID: "rock"))
-    }
-
-    @Test func shapeKindRejectsUnknownForm() {
-        #expect(throws: DecodingError.self) {
-            _ = try JSONDecoder().decode(ShapeKind.self, from: Data(#"{"nonsense":1}"#.utf8))
-        }
     }
 
     // MARK: - ComponentNode / spec derivations
@@ -198,5 +180,67 @@ import Testing
         let decoded = try ObjectSculptSpec.decoded(from: Data(legacy.utf8))
         #expect(decoded.surfaceProjection == nil)
         #expect(decoded.landmarks.isEmpty)
+    }
+
+    // MARK: - ShapeKind friendly Codable (issue #112)
+
+    private func roundTrip(_ kind: ShapeKind) throws -> (json: String, back: ShapeKind) {
+        let data = try JSONEncoder().encode(kind)
+        let back = try JSONDecoder().decode(ShapeKind.self, from: data)
+        return (String(decoding: data, as: UTF8.self), back)
+    }
+
+    @Test func shapeKindEncodesFriendlyTaggedForm() throws {
+        let group = try roundTrip(.group)
+        #expect(group.json.contains("\"kind\":\"group\""))
+        #expect(group.back == .group)
+
+        let prim = try roundTrip(.primitive(.box))
+        #expect(prim.json.contains("\"kind\":\"primitive\""))
+        #expect(prim.json.contains("\"primitive\":\"box\""))
+        #expect(!prim.json.contains("_0"))   // the leaky synthesized key is gone
+        #expect(prim.back == .primitive(.box))
+
+        // Exercises the `.library` encode branch specifically.
+        let lib = try roundTrip(.library(entryID: "prefab.rock"))
+        #expect(lib.json.contains("\"kind\":\"library\""))
+        #expect(lib.json.contains("\"entryID\":\"prefab.rock\""))
+        #expect(lib.back == .library(entryID: "prefab.rock"))
+    }
+
+    @Test func shapeKindDecodesFriendlyForms() throws {
+        func decode(_ json: String) throws -> ShapeKind {
+            try JSONDecoder().decode(ShapeKind.self, from: Data(json.utf8))
+        }
+        #expect(try decode(#"{"kind":"group"}"#) == .group)
+        #expect(try decode(#"{"kind":"primitive","primitive":"cone"}"#) == .primitive(.cone))
+        #expect(try decode(#"{"kind":"library","entryID":"prefab.gear"}"#) == .library(entryID: "prefab.gear"))
+    }
+
+    @Test func shapeKindDecodesLegacyAssociatedValueForms() throws {
+        func decode(_ json: String) throws -> ShapeKind {
+            try JSONDecoder().decode(ShapeKind.self, from: Data(json.utf8))
+        }
+        // The old Swift-default coding: group/{}, primitive/{_0}, library/{entryID}.
+        #expect(try decode(#"{"group":{}}"#) == .group)
+        #expect(try decode(#"{"primitive":{"_0":"sphere"}}"#) == .primitive(.sphere))
+        #expect(try decode(#"{"library":{"entryID":"prefab.rock"}}"#) == .library(entryID: "prefab.rock"))
+    }
+
+    @Test func shapeKindRejectsUnknownForm() {
+        #expect(throws: DecodingError.self) {
+            _ = try JSONDecoder().decode(ShapeKind.self, from: Data(#"{"mystery":true}"#.utf8))
+        }
+    }
+
+    // MARK: - Attachment authoring warning (issue #113)
+
+    @Test func componentsMissingAttachmentListsFloatingGeometry() {
+        let attached = ComponentNode(name: "Lid", shape: .primitive(.box), attachment: .weld)
+        let floating = ComponentNode(name: "Knob", shape: .primitive(.sphere))   // no attachment
+        let group = ComponentNode(name: "Slot", shape: .group)                    // exempt (no geometry)
+        let root = ComponentNode(name: "Root", shape: .group, children: [attached, floating, group])
+        let spec = ObjectSculptSpec(name: "Box", objectClass: .object, root: root)
+        #expect(SpecValidator.componentsMissingAttachment(spec) == ["Knob"])
     }
 }

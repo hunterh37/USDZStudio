@@ -1,6 +1,7 @@
 import AgentMCP
 import RenderKit
 import Foundation
+import RenderKit
 import ScriptingKit
 import USDBridge
 import USDCore
@@ -181,7 +182,6 @@ enum McpCommand {
     // coverage:enable
 }
 
-/// `usdrecord`-backed renderer for AgentMCP's `render_views`.
 /// Python-subprocess `ScriptExecuting` for AgentMCP's `run_script`.
 struct PythonProcessExecutor: ScriptExecuting {
     var pythonPath: String

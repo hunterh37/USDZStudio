@@ -11,10 +11,11 @@ let package = Package(
     ],
     dependencies: [
         .package(path: "../USDCore"),
-        .package(path: "../MeshKit")
+        .package(path: "../MeshKit"),
+        .package(path: "../MechanismKit")
     ],
     targets: [
-        .target(name: "ViewportKit", dependencies: ["USDCore", "MeshKit"], path: "Sources/ViewportKit"),
-        .testTarget(name: "ViewportKitTests", dependencies: ["ViewportKit"], path: "Tests/ViewportKitTests"),
+        .target(name: "ViewportKit", dependencies: ["USDCore", "MeshKit", "MechanismKit"], path: "Sources/ViewportKit"),
+        .testTarget(name: "ViewportKitTests", dependencies: ["ViewportKit", "MechanismKit"], path: "Tests/ViewportKitTests"),
     ]
 )

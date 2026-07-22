@@ -22,25 +22,47 @@ public enum ShapeKind: Codable, Sendable, Equatable {
         return true
     }
 
-    // MARK: Codable (#112)
-    //
-    // Swift's default enum-with-associated-value coding produced an
-    // implementation-detail `_0` wrapper (`{"shape":{"primitive":{"_0":"box"}}}`)
-    // that agents authoring a spec by hand could not possibly guess. Encode a
-    // friendly, self-describing tagged form instead:
-    //   {"kind":"group"}
-    //   {"kind":"primitive","primitive":"box"}
-    //   {"kind":"library","entryID":"office-chair"}
-    // Decoding accepts the friendly form and, for robustness against any spec
-    // persisted before this change, the legacy `_0`/bare-object form too.
-    private enum CodingKeys: String, CodingKey { case kind, primitive, entryID }
-    private enum Kind: String, Codable { case group, primitive, library }
+    // MARK: - Codable
+
+    /// Friendly, guessable wire form (issue #112). Instead of Swift's default
+    /// enum-with-associated-value coding — which leaks the `_0` synthesized key
+    /// (`{"primitive":{"_0":"box"}}`) that is impossible to author blind — a
+    /// `ShapeKind` encodes as a tagged object:
+    ///   • group     → `{"kind":"group"}`
+    ///   • primitive → `{"kind":"primitive","primitive":"box"}`
+    ///   • library   → `{"kind":"library","entryID":"…"}`
+    /// Decoding accepts that form AND the legacy `_0`/associated-value form, so
+    /// specs persisted before this change still load.
+    private enum CodingKeys: String, CodingKey {
+        case kind, primitive, entryID
+        // Legacy associated-value keys (default synthesized coding).
+        case group, library
+    }
+
+    private enum Tag: String, Codable { case group, primitive, library }
+
+    private enum LegacyPrimitiveKeys: String, CodingKey { case _0 }
+    private enum LegacyLibraryKeys: String, CodingKey { case entryID }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        switch self {
+        case .group:
+            try c.encode(Tag.group, forKey: .kind)
+        case .primitive(let primitive):
+            try c.encode(Tag.primitive, forKey: .kind)
+            try c.encode(primitive, forKey: .primitive)
+        case .library(let entryID):
+            try c.encode(Tag.library, forKey: .kind)
+            try c.encode(entryID, forKey: .entryID)
+        }
+    }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        // Friendly, tagged form.
-        if let kind = try c.decodeIfPresent(Kind.self, forKey: .kind) {
-            switch kind {
+        // Preferred friendly form: a `kind` discriminator.
+        if let tag = try c.decodeIfPresent(Tag.self, forKey: .kind) {
+            switch tag {
             case .group:
                 self = .group
             case .primitive:
@@ -50,37 +72,17 @@ public enum ShapeKind: Codable, Sendable, Equatable {
             }
             return
         }
-        // Legacy fallback: Swift's synthesized form keyed by case name.
-        let legacy = try decoder.container(keyedBy: LegacyKeys.self)
-        if legacy.contains(.group) {
+        // Legacy fallback: Swift's default associated-value coding.
+        if c.contains(.group) {
             self = .group
-        } else if legacy.contains(.primitive) {
-            let inner = try legacy.nestedContainer(keyedBy: LegacyPayload.self, forKey: .primitive)
-            self = .primitive(try inner.decode(Primitive.self, forKey: ._0))
-        } else if legacy.contains(.library) {
-            let inner = try legacy.nestedContainer(keyedBy: LegacyPayload.self, forKey: .library)
-            self = .library(entryID: try inner.decode(String.self, forKey: .entryID))
+        } else if let nested = try? c.nestedContainer(keyedBy: LegacyPrimitiveKeys.self, forKey: .primitive) {
+            self = .primitive(try nested.decode(Primitive.self, forKey: ._0))
+        } else if let nested = try? c.nestedContainer(keyedBy: LegacyLibraryKeys.self, forKey: .library) {
+            self = .library(entryID: try nested.decode(String.self, forKey: .entryID))
         } else {
             throw DecodingError.dataCorrupted(.init(
                 codingPath: decoder.codingPath,
-                debugDescription: "ShapeKind: expected a \"kind\" of group|primitive|library"))
-        }
-    }
-
-    private enum LegacyKeys: String, CodingKey { case group, primitive, library }
-    private enum LegacyPayload: String, CodingKey { case _0, entryID }
-
-    public func encode(to encoder: Encoder) throws {
-        var c = encoder.container(keyedBy: CodingKeys.self)
-        switch self {
-        case .group:
-            try c.encode(Kind.group, forKey: .kind)
-        case .primitive(let primitive):
-            try c.encode(Kind.primitive, forKey: .kind)
-            try c.encode(primitive, forKey: .primitive)
-        case .library(let entryID):
-            try c.encode(Kind.library, forKey: .kind)
-            try c.encode(entryID, forKey: .entryID)
+                debugDescription: "ShapeKind: expected a \"kind\" of group/primitive/library"))
         }
     }
 }

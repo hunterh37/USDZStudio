@@ -278,12 +278,9 @@ final class MCPActivityListener: ObservableObject {
             Task { @MainActor in self?.applyReference(image) }
         }
         hostSession = session
-        // Inject a renderer so the app-hosted server can satisfy render_views
-        // (and the sculpt review loop) out of the box — previously the app built
-        // a Configuration with no renderer, so every render failed with "no
-        // renderer available" and the sculpt loop deadlocked (#109). The native
-        // SceneKit renderer needs no usdrecord; Storm stays opt-in via
-        // DICYANIN_USDRECORD, exactly as the CLI wires it.
+        // Wire a renderer the same way the CLI-hosted server does (issue #109):
+        // without one, `render_views` (and the whole sculpt review loop) is dead
+        // in-app. The native SceneKit renderer needs no usd-core/usdrecord.
         let renderer = NativeRendererSelection.make(
             environment: ProcessInfo.processInfo.environment,
             fileExists: { FileManager.default.fileExists(atPath: $0) })

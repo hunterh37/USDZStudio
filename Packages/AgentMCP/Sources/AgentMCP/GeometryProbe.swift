@@ -72,10 +72,21 @@ public enum GeometryProbe {
     // MARK: - Mesh extraction
 
     /// Raw `points` positions of a single prim, when it has any.
+    ///
+    /// Accepts both the canonical `point3f[]` (`.float3Array`) that every native
+    /// authoring path writes and a flat `double[]` (`.doubleArray`) — the latter
+    /// is a legal USD encoding that arrives when reopening an externally authored
+    /// USDZ whose points are double-precision (`stage_snapshot.py` decodes a true
+    /// `double[]` to `.doubleArray`). Without this fallback such a mesh is
+    /// invisible to check_mesh, world-bbox, and raycast even though its geometry
+    /// is perfectly valid.
     static func points(of prim: Prim) -> [[Double]]? {
-        guard case .float3Array(let flat)? = prim.attribute(named: "points")?.value,
-              flat.count >= 3
-        else { return nil }
+        let flat: [Double]
+        switch prim.attribute(named: "points")?.value {
+        case .float3Array(let v), .doubleArray(let v): flat = v
+        default: return nil
+        }
+        guard flat.count >= 3 else { return nil }
         // Written imperatively with explicit types: the equivalent
         // `stride(...).map { [flat[$0], flat[$0+1], flat[$0+2]] }` one-liner
         // intermittently blows the Swift type-checker's time budget on CI.

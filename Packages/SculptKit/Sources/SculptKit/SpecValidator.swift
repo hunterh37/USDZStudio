@@ -352,6 +352,18 @@ public enum SpecValidator {
         return SpecValidationResult(issues: issues)
     }
 
+    /// Geometry components (excluding the root) that have not declared an
+    /// `attachment`. Surfaced as an authoring warning by `sculpt_author_spec`
+    /// so the effectively-required field isn't a surprise that only strict
+    /// validate rejects — and then all at once (issue #113). The strict gate
+    /// (`attachmentIssues`) still enforces it; this only warns earlier.
+    public static func componentsMissingAttachment(_ spec: ObjectSculptSpec) -> [String] {
+        let rootName = spec.root.name
+        return spec.allNodes
+            .filter { $0.name != rootName && $0.shape.authorsGeometry && $0.attachment == nil }
+            .map(\.name)
+    }
+
     // MARK: - Action-ready gate
 
     /// img2threejs's "Action-Ready Gate": confirms the object exposes a usable
@@ -418,17 +430,6 @@ public enum SpecValidator {
     /// Every geometry component other than the root must declare a join method
     /// (`attachment`) and it must not be `.free`. Groups are structural and
     /// exempt; the root grounds the object and needs no parent join.
-    /// Geometry components (excluding the root) that declare no `attachment`.
-    /// Surfaced as an authoring-time advisory (#113): a spec with no attachments
-    /// is silently accepted by `sculpt_author_spec` but rejected wholesale by the
-    /// strict-quality gate later, so callers benefit from an early heads-up.
-    public static func componentsMissingAttachment(_ spec: ObjectSculptSpec) -> [String] {
-        let rootName = spec.root.name
-        return spec.allNodes
-            .filter { $0.name != rootName && $0.shape.authorsGeometry && $0.attachment == nil }
-            .map(\.name)
-    }
-
     static func attachmentIssues(_ spec: ObjectSculptSpec) -> [SpecIssue] {
         var issues: [SpecIssue] = []
         let rootName = spec.root.name

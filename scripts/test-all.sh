@@ -26,6 +26,7 @@ PACKAGES=(
   Packages/SculptKit
   Packages/SessionKit
   Packages/AgentMCP
+  Packages/RenderKit
   Packages/ViewportKit
   Packages/EditorUI
   CLI

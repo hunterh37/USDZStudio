@@ -68,8 +68,8 @@ targets:
       # document so agent edits render live (specs/agent-live-editing.md).
       - package: AgentMCP
         product: AgentMCP
-      # Concrete render backends (native SceneKit + usdrecord) injected into the
-      # app-hosted MCP server so render_views works in-app (#109).
+      # Native render backend for the in-app MCP server's render_views /
+      # sculpt review loop (issue #109) — no usdrecord required.
       - package: RenderKit
         product: RenderKit
       # Finder-level QuickLook extensions, embedded in Contents/PlugIns.
