@@ -120,6 +120,21 @@ Ordered by measured leverage. Each item states a hypothesis, method, and
   raw→matted IoU swing reproduced and improved (> 0.42 → target ≥ 0.6 on the
   Aventador reference).
 
+  *Status:* implemented (#82) as `AgentMCP/ReferenceMatte` — a border-prior
+  **planar background model + residual keying + morphological open/close +
+  largest-connected-component** matte (the deterministic core shared by the
+  GrabCut/saliency candidates, chosen over a learned matte to stay
+  dependency-free and 100%-coverage-gated). `RasterLoader.loadReference` now
+  mattes any *opaque* reference automatically before the metric sees it
+  (alpha-bearing references pass through; an empty matte falls back to raw), so
+  `sculpt_comparison_sheet` measures the subject, not the background. Measured
+  on the P0 corpus: produced-mask IoU ≥ 0.95 on every entry (asserted in
+  `ReferenceMatteTests`), and the raw→matted metric swing is reproduced —
+  the auto-matte beats the corner-key baseline corpus-wide. Genuine interior
+  holes (the annulus, wheel gaps) survive, per the P2 concavity requirement.
+  The ≥ 0.6 Aventador row still awaits the committed real-photo fixture (#94);
+  the blueprint gate picks it up automatically when the asset lands.
+
 - **P2 — Concavity-preserving, shape-vs-appearance metric (addresses F2, F3, F6).**
   Stop over-filling the reference silhouette; preserve interior gaps. Split the
   metric into a **shape** term (silhouette IoU + symmetric contour/chamfer
