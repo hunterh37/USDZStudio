@@ -41,8 +41,9 @@ Tabs appear per selection type via `InspectorPanelProvider` registry:
 2. **Prim** — type, kind, purpose, active/instanceable toggles, applied schemas list, custom metadata key-value editor.
 3. **Material** (Material prim or bound-material shortcut on mesh) — every UsdPreviewSurface input as the right control: color wells, sliders (0–1), texture slots with 64pt previews, "reveal texture", replace/resize/re-encode actions, st/UV transform.
 4. **Geometry** (Mesh) — counts, subdivision scheme, normals source, extent, bound material with "go to" link.
-5. **Stage** (no selection) — upAxis, metersPerUnit, defaultPrim picker, startTime/endTime, layer stack list, customLayerData editor, file-size breakdown pie (geometry/textures/other).
-6. **Physics** (stretch, visionOS preset) — collision, mass on RigidBody-schema prims.
+5. **States** (stage-wide, not selection-scoped) — every rigid articulation (hinge/slider) and discrete variant set the asset carries, each with a state switcher and a fine scrub control. Discovery is `EditingKit.JointDiscovery` scanning the snapshot for `mechanism:joint` pivots (projected to the UI-only `DiscoveredJoint` value type so the panel needs no `MechanismKit` import); driving is `EditorDocument.setJointState`/`setJointValue` wrapping `SetJointStateCommand`, one undoable command per toggle/scrub. A joint's live pose is read back via `PivotMath.value(fromPivot…)` to highlight the active state (or "custom" for a hand-scrubbed angle). Variant sets reuse the per-prim `VariantPicker`, collected across the whole stage. Empty assets show an explainer pointing at the articulation tools. See specs/articulation-mechanisms.md §"Console & UI".
+6. **Material** (Material prim or bound-material shortcut on mesh) — every UsdPreviewSurface input as the right control (see tab 3 above).
+7. **Physics** (stretch, visionOS preset) — collision, mass on RigidBody-schema prims.
 
 All numeric fields commit through EditingKit commands → undoable, scrub-friendly (one undo group per scrub).
 

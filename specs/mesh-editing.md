@@ -124,3 +124,22 @@ A component edit mode (vertex sub-mode, hotkey `1`) that shows the vertex/edge p
 4. Component-mode UI (selection, overlays, HUD) — highest human-review budget here
 5. BevelEdges (single-segment) — last, most edge cases
 6. LoopCut + param polish (v1.5 follow-up)
+
+## Lattice deformer (FFD cage)
+
+Free-form deformation (Sederberg & Parry, SIGGRAPH 1986): wrap a selected mesh in an oriented `l×m×n` grid of control points and re-evaluate every vertex through a trivariate tensor product of the displaced control points, smoothly deforming the enclosed geometry. Object-level (deforms the whole mesh, not a component sub-selection), non-destructive until commit. Research + rationale: `research/topics/lattice-deformer/`.
+
+### Model (MeshKit — pure, 100% coverage)
+- `LatticeCage` (`Deformers/LatticeCage.swift`): oriented rest frame (`origin`, `edgeS/T/U`), `Resolution` (2…8 per axis), `Interpolation { trilinear, cubicBSpline }`, `affectOutside`, row-major `controlPoints`. `bind(points:)` caches each vertex's `(s,t,u)` local coordinate (scalar-triple-product solve) + rest position; `deform(_:)` re-evaluates the tensor product against the current control points.
+- `FFDBasis` (`Deformers/FFDBasis.swift`): per-axis samplers. Trilinear = degree-1 (C⁰, "Linear Sharp"); cubic B-spline = C² ("Cubic"), with **linearly-extrapolated phantom border nodes** so both bases have linear precision (a rest cage reproduces its input exactly; a `2×2×2` cage reproduces any affine map exactly).
+- `LatticeDeform` op (`Ops/LatticeDeform.swift`): validates the cage, bakes positions, guards non-finite results, and runs the shared invariant check (topology delta must be zero — FFD is purely positional). Added to the `FuzzCorpus` sweep.
+
+### Command (EditingKit — 100% coverage)
+- `LatticeDeformCommand.make(path:cage:in:)` reads the prim geometry, routes through the MeshKit op, recomputes area-weighted vertex normals for the deformed surface, and captures the prior `points`/`normals` for an exact `AttributeUndo` inverse. Refuses non-mesh prims, skinned meshes (would desync skin weights), missing/malformed geometry, and degenerate cages. `execute`/`undo` author/restore `points` (+ `normals`) as one coalesced step.
+
+### Editor integration
+- `EditorDocument+Lattice.swift`: `toggleLatticeMode` (⇧⌘L or command palette) descends to the first editable mesh and fits a padded rest cage to its **prim-local** bounds (same space as the extrude gizmo's prim-local ray — no world-matrix math). Panel controls set resolution (refits, resets deformation — Blender parity), interpolation basis, and affect-outside; Reset restores the rest cage. Commit bakes one undoable `LatticeDeformCommand`; cancel discards.
+- `LatticeCageGizmo` (ViewportKit): control-point handle hit-test (reuses `ExtrudeGizmoMath` ray/segment math), grid wireframe edge set, and camera-facing-plane free-drag delta. `LatticeOverlay` (EditorUI) is the parameter HUD around the gizmo.
+
+### RealityKit export profile
+- The bake authors only `points` + recomputed `normals` — ordinary mesh data, RealityKit-clean, no blocking diagnostics under `arkit`/`arkit-strict`, nothing to strip. The cage is authoring-only session state and is **never serialized** (there is no USD lattice schema), which is the correct lossless behavior for the deformed result.
