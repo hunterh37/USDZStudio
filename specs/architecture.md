@@ -40,6 +40,7 @@ USDBridge ─▶ USDCore          (bridge implements USDCore protocols)
 {EditingKit, ViewportKit, ConversionKit} ─▶ MeshKit   (MeshKit itself imports nothing internal; ConversionKit uses MeshKit.VertexNormals to derive smooth normals for normal-less imports — issue #95)
 MechanismKit imports nothing internal (pure leaf, like MeshKit); its consumers ({EditingKit, SculptKit, AgentMCP}) import it for rigid-joint authoring (specs/articulation-mechanisms.md)
 RigKit imports nothing internal (pure leaf, like MeshKit/MechanismKit); its consumers ({EditingKit, ViewportKit, AgentMCP}) import it for skeletal rig/skinning/motion authoring (specs/animation-rigging.md)
+MechanismKit imports nothing internal (pure leaf); its consumers ({EditingKit, SculptKit, AgentMCP, ViewportKit}) import it for rigid-joint articulation — EditingKit/SculptKit/AgentMCP author joints, ViewportKit reads a joint's axis/pivot/limits for the hinge-axis drag-to-open handle overlay (specs/articulation-mechanisms.md)
 SessionKit ─▶ {USDCore, ViewportKit, EditingKit}; consumed by EditorUI/App only — cross-launch session envelope + restore (reuses ViewportKit value types + the EditingKit WAL; authors no stage itself), specs/session-restoration.md
 DicyaninDesignSystem ◀─ EditorUI only
 QuickLookKit — leaf, zero internal deps (pure render-plan logic; App QuickLook .appex targets consume it)
