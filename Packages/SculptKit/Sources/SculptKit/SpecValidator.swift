@@ -172,6 +172,22 @@ public enum SpecValidator {
                 if levels < 1 {
                     issues.append(.init(.error, "component '\(node.name)' subdivide levels must be ≥ 1"))
                 }
+            case let .taper(_, scale):
+                // scale 1 is a no-op; 0/negative collapses the lattice layer.
+                if !scale.isFinite || scale <= 0 || scale == 1 {
+                    issues.append(.init(.error, "component '\(node.name)' taper scale must be finite, > 0, and ≠ 1"))
+                }
+            case let .bevel(width, angleDegrees):
+                if !width.isFinite || width <= 0 {
+                    issues.append(.init(.error, "component '\(node.name)' bevel width must be > 0"))
+                }
+                if !angleDegrees.isFinite || angleDegrees <= 0 || angleDegrees >= 180 {
+                    issues.append(.init(.error, "component '\(node.name)' bevel angle must be in (0, 180)"))
+                }
+            case let .extrude(_, distance):
+                if !distance.isFinite || distance == 0 {
+                    issues.append(.init(.error, "component '\(node.name)' extrude distance must be finite and non-zero"))
+                }
             }
         }
         return issues

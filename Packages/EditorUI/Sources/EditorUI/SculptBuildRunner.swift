@@ -116,6 +116,15 @@ public enum SculptBuildRunner {
                         current = try SubdivideCatmullClark.apply(
                             current, selection: .faces(faces),
                             params: .init(levels: levels)).mesh
+                    // P4 (#85) expressiveness ops — the same shared SculptKit
+                    // resolver the AgentMCP executor uses, so the in-app runner
+                    // produces identical topology.
+                    case let .taper(axis, scale):
+                        current = try RefinementGeometry.taper(current, axis: axis, scale: scale)
+                    case let .bevel(width, angleDegrees):
+                        current = try RefinementGeometry.bevel(current, width: width, angleDegrees: angleDegrees)
+                    case let .extrude(direction, distance):
+                        current = try RefinementGeometry.extrude(current, direction: direction, distance: distance)
                     }
                 }
                 return current

@@ -170,6 +170,23 @@ Ordered by measured leverage. Each item states a hypothesis, method, and
   measured silhouette-IoU ceiling on the Aventador reference rises from the
   ~0.46 primitive plateau to a target ≥ 0.65 with pose+segmentation held fixed.
 
+  *Status:* implemented (#85). `MeshRefinement` gains three declarative ops —
+  `taper` (linear cross-section scale along an axis: the wedge profile, executed
+  as a fitted 2×2×2 FFD lattice), `bevel` (chamfer edges sharper than a dihedral
+  threshold, deterministic non-adjacent selection over MeshKit's `BevelEdges`),
+  and `extrude` (pull the faces facing a direction: splitters/intakes/bulges) —
+  alongside the shipped `inset`/`subdivide`. SculptKit stays a pure leaf: the
+  ops carry intent only, resolved into deterministic MeshKit selections by
+  `AgentMCP/RefinementGeometry`, and the spec validator rejects degenerate
+  parameters (taper scale ≠ 1 and > 0, bevel width > 0 / angle ∈ (0,180),
+  non-zero extrude). New ops are round-trip-safe (coding round-trip asserted)
+  and covered to the SculptKit + AgentMCP 100% floors; each MeshKit op verifies
+  its own Euler/manifold invariants. The wedge+chamfer+pulled-nose combination
+  F5 said the 5-primitive set could not express now composes end-to-end through
+  the `refineMesh` build step. The ≥ 0.65 Aventador ceiling number activates
+  with the committed real-photo fixture (#94), measured under the P1 matte and
+  P3 pose alignment now in place.
+
 - **P5 — Author real normals (addresses F5 shading).** Emit vertex normals so
   renders are correctly shaded (removes the 24 `mesh.normals` diagnostics).
   *Acceptance:* zero `mesh.normals` info diagnostics; appearance-term SSIM

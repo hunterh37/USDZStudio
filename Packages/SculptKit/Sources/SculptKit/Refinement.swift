@@ -23,8 +23,34 @@ public enum MeshRefinement: Codable, Sendable, Equatable {
     /// the "lumpy / subdivision rounding" complaint directly.
     case subdivide(levels: Int)
 
-    private enum CodingKeys: String, CodingKey { case kind, fraction, depth, levels }
-    private enum Kind: String, Codable { case inset, subdivide }
+    // Sculpt-accuracy P4 (#85): expressiveness beyond primitives + inset. The
+    // F5 finding is that 5 primitives + inset cannot represent a wedge profile,
+    // chamfered shoulder lines, or a pulled intake/splitter — capping the
+    // achievable silhouette IoU (~0.46 plateau). These ops stay declarative
+    // (SculptKit performs no mesh surgery); the executor resolves each into a
+    // deterministic MeshKit selection + op.
+
+    /// Linearly scale the cross-section along `axis`: 1× at the low end,
+    /// `scale`× at the high end (0 < scale, ≠ 1). The wedge/taper op — an
+    /// Aventador profile is a tapered box before it is anything else. Executed
+    /// as a fitted 2×2×2 FFD lattice with the high-end control layer scaled.
+    case taper(axis: RefinementAxis, scale: Double)
+
+    /// Chamfer sharp edges: every edge whose dihedral angle exceeds
+    /// `angleDegrees` is a candidate; a deterministic non-adjacent subset is
+    /// bevelled by `width` (> 0). Softens box/cylinder shoulder lines into the
+    /// facet lines a real body panel shows.
+    case bevel(width: Double, angleDegrees: Double)
+
+    /// Pull the faces facing `direction` outward by `distance` (≠ 0, negative
+    /// recesses them): nose splitters, intakes, cabin bulges — local silhouette
+    /// features a whole-primitive transform cannot express.
+    case extrude(direction: RefinementDirection, distance: Double)
+
+    private enum CodingKeys: String, CodingKey {
+        case kind, fraction, depth, levels, axis, scale, width, angleDegrees, direction, distance
+    }
+    private enum Kind: String, Codable { case inset, subdivide, taper, bevel, extrude }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -35,6 +61,18 @@ public enum MeshRefinement: Codable, Sendable, Equatable {
                 depth: try c.decodeIfPresent(Double.self, forKey: .depth) ?? 0)
         case .subdivide:
             self = .subdivide(levels: try c.decodeIfPresent(Int.self, forKey: .levels) ?? 1)
+        case .taper:
+            self = .taper(
+                axis: try c.decode(RefinementAxis.self, forKey: .axis),
+                scale: try c.decode(Double.self, forKey: .scale))
+        case .bevel:
+            self = .bevel(
+                width: try c.decode(Double.self, forKey: .width),
+                angleDegrees: try c.decodeIfPresent(Double.self, forKey: .angleDegrees) ?? 30)
+        case .extrude:
+            self = .extrude(
+                direction: try c.decode(RefinementDirection.self, forKey: .direction),
+                distance: try c.decode(Double.self, forKey: .distance))
         }
     }
 
@@ -48,6 +86,42 @@ public enum MeshRefinement: Codable, Sendable, Equatable {
         case let .subdivide(levels):
             try c.encode(Kind.subdivide, forKey: .kind)
             try c.encode(levels, forKey: .levels)
+        case let .taper(axis, scale):
+            try c.encode(Kind.taper, forKey: .kind)
+            try c.encode(axis, forKey: .axis)
+            try c.encode(scale, forKey: .scale)
+        case let .bevel(width, angleDegrees):
+            try c.encode(Kind.bevel, forKey: .kind)
+            try c.encode(width, forKey: .width)
+            try c.encode(angleDegrees, forKey: .angleDegrees)
+        case let .extrude(direction, distance):
+            try c.encode(Kind.extrude, forKey: .kind)
+            try c.encode(direction, forKey: .direction)
+            try c.encode(distance, forKey: .distance)
+        }
+    }
+}
+
+/// The unsigned model-space axis a refinement varies along.
+public enum RefinementAxis: String, Codable, Sendable, Equatable, CaseIterable {
+    case x, y, z
+}
+
+/// A signed model-space direction: which way a refinement faces.
+public enum RefinementDirection: String, Codable, Sendable, Equatable, CaseIterable {
+    case posX = "+x", negX = "-x"
+    case posY = "+y", negY = "-y"
+    case posZ = "+z", negZ = "-z"
+
+    /// The unit vector for the direction, as (x, y, z).
+    public var unitVector: (x: Double, y: Double, z: Double) {
+        switch self {
+        case .posX: return (1, 0, 0)
+        case .negX: return (-1, 0, 0)
+        case .posY: return (0, 1, 0)
+        case .negY: return (0, -1, 0)
+        case .posZ: return (0, 0, 1)
+        case .negZ: return (0, 0, -1)
         }
     }
 }
