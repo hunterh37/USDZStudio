@@ -120,7 +120,7 @@ struct StubRenderer: RenderExecuting {
         #expect(isolated["subjects"].arrayValue?.first?["triangles"].intValue == 12)
         // statsOnly=false with no renderer → structured unsupported error.
         let message = await callError(server, "render_views", ["statsOnly": false])
-        #expect(message.contains("no renderer"))
+        #expect(message.contains("without a renderer"))
         _ = await callError(server, "render_views", ["views": ["hero-shot"]])
     }
 

@@ -152,6 +152,17 @@ public final class SessionController {
         sessions.discard(recoverable.plan)
     }
 
+    /// Wipes all session state: ends the active WAL session and removes *every*
+    /// on-disk session (the active one plus any recoverable leftovers from prior
+    /// launches), so the next launch offers nothing to restore. Backs the
+    /// File ▸ "Reset Session" command. After this the controller holds no active
+    /// session; the caller re-arms crash-safety for the current document by
+    /// starting a fresh session via `begin(for:)`.
+    public func reset() {
+        endActive()
+        sessions.reset()
+    }
+
     /// Ends the active session (a document was superseded). Kept out of the clean
     /// quit path on purpose: leaving the session on disk is what lets the next
     /// launch offer to restore it.

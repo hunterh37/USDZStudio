@@ -69,6 +69,59 @@ import USDCore
         _ = await callError(server, "sculpt_author_spec", ["spec": ["bogus": "shape"]])
     }
 
+    /// A decode failure inside a nested node names the offending key AND its
+    /// path, not a cryptic `keyNotFound(CodingKeys(...))` (issue #112).
+    @Test func authorDecodeErrorNamesNestedKey() async {
+        let session = Fixtures.session()
+        let server = Fixtures.server(session: session)
+        // `root` is present but its `shape` is missing → keyNotFound at "root".
+        let bad: JSONValue = .object([
+            "name": .string("X"), "objectClass": .string("object"),
+            "root": .object(["name": .string("Root")]),
+        ])
+        let message = await callError(server, "sculpt_author_spec", ["spec": bad])
+        #expect(message.contains("shape"))
+        #expect(message.contains("root"))
+
+        // An unrecognized `shape` form is a data-corrupted error (the ShapeKind
+        // decoder) — still reported with its path, not a raw dump.
+        let corrupt: JSONValue = .object([
+            "name": .string("X"), "objectClass": .string("object"),
+            "root": .object(["name": .string("Root"), "shape": .object(["mystery": .bool(true)])]),
+        ])
+        let corruptMessage = await callError(server, "sculpt_author_spec", ["spec": corrupt])
+        #expect(corruptMessage.contains("invalid data"))
+        #expect(corruptMessage.contains("shape"))
+    }
+
+    /// Authoring a component with no `attachment` still succeeds but surfaces a
+    /// warning naming it, so the requirement isn't a surprise at strict-validate
+    /// (issue #113).
+    @Test func authorWarnsOnMissingAttachment() async {
+        let session = Fixtures.session()
+        let server = Fixtures.server(session: session)
+        let floating = ComponentNode(name: "Knob", shape: .primitive(.sphere))  // no attachment
+        let root = ComponentNode(name: "Root", shape: .group, children: [floating])
+        let spec = ObjectSculptSpec(name: "W", objectClass: .object, root: root)
+        let out = await callOK(server, "sculpt_author_spec", ["spec": Self.specArg(spec)])
+        let warnings = out["warnings"].arrayValue ?? []
+        #expect(warnings.contains { $0.stringValue?.contains("Knob") == true })
+    }
+
+    /// Re-running `sculpt_build_pass` on blockout must not error with "'X'
+    /// already exists" — the create steps are idempotent (issue #111).
+    @Test func rebuildBlockoutIsIdempotent() async {
+        let session = Fixtures.session()
+        let server = Fixtures.server(session: session)
+        _ = await callOK(server, "sculpt_author_spec", ["spec": Self.specArg(Self.richSpec())])
+        let first = await callOK(server, "sculpt_build_pass")
+        #expect(first["pass"].stringValue == "blockout")
+        // Second run over the already-authored subtree succeeds (no throw), with
+        // the same step count — every create resolves to the existing prim.
+        let second = await callOK(server, "sculpt_build_pass")
+        #expect(second["stepCount"].doubleValue == first["stepCount"].doubleValue)
+    }
+
     @Test func strictQualityGateRejectsShallowSpec() async {
         let session = Fixtures.session()
         let server = Fixtures.server(session: session)
@@ -93,10 +146,12 @@ import USDCore
         let status0 = await callOK(server, "sculpt_status")
         #expect(status0["currentPass"].stringValue == "blockout")
 
-        // Blockout authors geometry (group + 5 primitives + 1 repetition copy + library = 8).
+        // Blockout authors geometry AND places each component at its transform
+        // (issue #115): 8 prims (group + 5 primitives + 1 repetition copy +
+        // library) × (create + setTransform) = 16 steps.
         let blockout = await callOK(server, "sculpt_build_pass")
         #expect(blockout["pass"].stringValue == "blockout")
-        #expect(blockout["stepCount"].doubleValue == 8)
+        #expect(blockout["stepCount"].doubleValue == 16)
         #expect(blockout["reviewOnly"].boolValue == false)
         #expect(session.stage.prim(at: PrimPath("/Sculpt/Cy_r1")!) != nil)
 

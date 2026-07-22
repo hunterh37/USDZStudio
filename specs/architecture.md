@@ -24,6 +24,7 @@ OpenUSDZEditor/
 │   ├── SculptKit/                # Pure staged-sculpt pipeline logic (image→USD spec, passes, gates)
 │   ├── SessionKit/               # Cross-launch session envelope + restore (models, persistence, WAL recovery)
 │   ├── AgentMCP/                 # MCP server: typed, transactional agent editing API over the kits
+│   ├── RenderKit/                # Shared render_views backends (native SceneKit + opt-in usdrecord) for both MCP hosts
 │   ├── EditorUI/                 # Panels: outliner, inspector, console, toolbar
 │   ├── QuickLookKit/             # Pure render-plan logic for the Finder QuickLook .appex (zero deps)
 │   └── DicyaninDesignSystem/     # Tokens, colors, typography, reusable controls
@@ -41,6 +42,7 @@ USDBridge ─▶ USDCore          (bridge implements USDCore protocols)
 {EditingKit, ViewportKit, ConversionKit} ─▶ MeshKit   (MeshKit itself imports nothing internal; ConversionKit uses MeshKit.VertexNormals to derive smooth normals for normal-less imports — issue #95)
 MechanismKit imports nothing internal (pure leaf, like MeshKit); its consumers ({EditingKit, SculptKit, AgentMCP}) import it for rigid-joint authoring (specs/articulation-mechanisms.md)
 RigKit imports nothing internal (pure leaf, like MeshKit/MechanismKit); its consumers ({EditingKit, ViewportKit, AgentMCP}) import it for skeletal rig/skinning/motion authoring (specs/animation-rigging.md)
+MechanismKit imports nothing internal (pure leaf); its consumers ({EditingKit, SculptKit, AgentMCP, ViewportKit}) import it for rigid-joint articulation — EditingKit/SculptKit/AgentMCP author joints, ViewportKit reads a joint's axis/pivot/limits for the hinge-axis drag-to-open handle overlay (specs/articulation-mechanisms.md)
 CaptureKit ─▶ {USDCore, MeshKit}   (pure capture-planner leaf; consumed by ConversionKit's ObjectCaptureImporter + CLI `capture`; runs no PhotogrammetrySession itself — that is an injected seam in ConversionKit, specs/capture-import.md)
 ConversionKit ─▶ CaptureKit         (ObjectCaptureImporter realizes a CapturePlan; the reconstruction session is injected behind PhotogrammetryRunning and coverage-excluded)
 SessionKit ─▶ {USDCore, ViewportKit, EditingKit}; consumed by EditorUI/App only — cross-launch session envelope + restore (reuses ViewportKit value types + the EditingKit WAL; authors no stage itself), specs/session-restoration.md
@@ -49,8 +51,11 @@ QuickLookKit — leaf, zero internal deps (pure render-plan logic; App QuickLook
 CLI ─▶ kits (never EditorUI)
 SculptKit ─▶ {USDCore, MeshKit}   (pure pipeline logic — spec model, validation, pass state machine; no UI/GPU/Python, authors no stage itself)
 EditorUI ─▶ SculptKit             (in-app staged-sculpt runner: applies BuildSteps as live document commands)
+EditorUI ─▶ CaptureKit            (capture-import sheet: the detail/profile model + pre-flight gate for photos→USDZ; the reconstruction seam itself comes via ConversionKit, specs/capture-import.md)
 App ─▶ AgentMCP                    (composition root hosts the in-app MCP editing session on the open document; specs/agent-live-editing.md. EditorUI still must NOT import AgentMCP)
 AgentMCP ─▶ {USDBridge, EditingKit, ValidationKit, ConversionKit, ScriptingKit, MeshKit, SculptKit} ─▶ USDCore   (thin MCP adapter, docs/AGENT_MCP_PLAN.md; never EditorUI)
+RenderKit ─▶ {AgentMCP, USDBridge}   (implements AgentMCP.RenderExecuting with a native SceneKit renderer + opt-in usdrecord; consumed by BOTH App and CLI so each hosted MCP server gets a renderer — issue #109)
+{App, CLI} ─▶ RenderKit               (composition roots inject the native renderer into their AgentMCPServer.Configuration)
 ```
 
 The authoritative, machine-checked form of this graph is the policy table in

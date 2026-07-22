@@ -15,6 +15,7 @@ let package = Package(
         .package(path: "../ViewportKit"),
         .package(path: "../EditingKit"),
         .package(path: "../ConversionKit"),
+        .package(path: "../CaptureKit"),
         .package(path: "../ValidationKit"),
         .package(path: "../ScriptingKit"),
         .package(path: "../DicyaninDesignSystem"),
@@ -27,7 +28,7 @@ let package = Package(
             name: "EditorUI",
             dependencies: [
                 "USDCore", "USDBridge", "ViewportKit", "EditingKit",
-                "ConversionKit", "ValidationKit", "ScriptingKit",
+                "ConversionKit", "CaptureKit", "ValidationKit", "ScriptingKit",
                 "DicyaninDesignSystem", "MeshKit", "SculptKit", "SessionKit",
             ],
             path: "Sources/EditorUI"),
