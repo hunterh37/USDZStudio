@@ -218,9 +218,30 @@ public enum SculptTools {
     private static func registerAuthor(on server: MCPServer, store: SculptStore) {
         server.register(MCPTool(
             name: "sculpt_author_spec", group: .sculpt,
-            description: "Author (or replace) the ObjectSculptSpec: the component tree, materials, sockets, detail inventory, and — for objects that realistically open/swing (case or chest lid, door, cap, drawer) — `joints` (revolute hinge / prismatic slider, each with an axis + a pivot point on the hinge line, targeting a component) so the interaction pass authors real articulation. Pass the full spec as JSON (SculptKit.ObjectSculptSpec shape). Resets the pass orchestrator to blockout and persists the spec to the work directory.",
+            description: """
+            Author (or replace) the ObjectSculptSpec: the component tree, materials, sockets, \
+            detail inventory, and — for objects that realistically open/swing (case or chest lid, \
+            door, cap, drawer) — `joints` (revolute hinge / prismatic slider, each with an axis + \
+            a pivot point on the hinge line, targeting a component) so the interaction pass authors \
+            real articulation. Resets the pass orchestrator to blockout and persists the spec.
+
+            SCHEMA (SculptKit.ObjectSculptSpec). Required top-level keys: `name` (string), \
+            `objectClass` (object|character|environment|vehicle|prop), `root` (a ComponentNode). \
+            A ComponentNode is: {name, shape, translation:[x,y,z], rotationEulerDegrees:[x,y,z], \
+            scale:[x,y,z], width, height, depth, radius, segments, materialID, attachment, \
+            children:[…]}. `shape` is tagged: {"kind":"group"} | {"kind":"primitive","primitive":\
+            "box|cylinder|cone|sphere|plane"} | {"kind":"library","entryID":"…"}. Every non-root \
+            geometry component SHOULD declare `attachment` (root|weld|socket|pin|free); a spec with \
+            no attachments is accepted here but rejected by strict `sculpt_validate_spec`.
+
+            MINIMAL EXAMPLE:
+            {"name":"Mug","objectClass":"object","root":{"name":"Mug","shape":{"kind":"group"},\
+            "attachment":"root","children":[{"name":"Body","shape":{"kind":"primitive","primitive":\
+            "cylinder"},"attachment":"weld","materialID":"clay"}]},"materials":[{"id":"clay",\
+            "baseColor":[0.6,0.3,0.2]}]}
+            """,
             inputSchema: Schema.object([
-                "spec": .object(["type": "object", "description": "the full ObjectSculptSpec JSON"]),
+                "spec": .object(["type": "object", "description": "the full ObjectSculptSpec JSON (see tool description for the schema + a minimal example)"]),
             ], required: ["spec"])
         ) { args in
             guard case .object = args["spec"] else {
@@ -231,17 +252,54 @@ public enum SculptTools {
                 let data = Data(args["spec"].serializedString.utf8)
                 spec = try ObjectSculptSpec.decoded(from: data)
             } catch {
-                throw ToolError.invalidParams("could not decode spec: \(error)")
+                throw ToolError.invalidParams(decodeHint(for: error))
             }
             await store.setSpec(spec)
+            // #113: surface missing attachments now, not only at strict validate.
+            var warnings: [JSONValue] = []
+            let floating = SpecValidator.componentsMissingAttachment(spec)
+            if !floating.isEmpty {
+                warnings.append(.string(
+                    "components without an attachment (weld/socket/pin/root): \(floating.joined(separator: ", ")) — strict sculpt_validate_spec will reject these."))
+            }
             return .object([
                 "name": .string(spec.name),
                 "componentCount": .number(Double(spec.componentCount)),
                 "materialCount": .number(Double(spec.materials.count)),
                 "detailItems": .number(Double(spec.detailInventory.items.count)),
                 "currentPass": .string(SculptPass.blockout.rawValue),
+                "warnings": .array(warnings),
             ])
         })
+    }
+
+    /// Turn a raw `DecodingError` into an actionable message that names the
+    /// offending key/path, instead of the cryptic `keyNotFound(CodingKeys(...))`
+    /// dump agents saw before (#112).
+    static func decodeHint(for error: Error) -> String {
+        func pathString(_ path: [CodingKey]) -> String {
+            path.map { $0.intValue.map { "[\($0)]" } ?? $0.stringValue }.joined(separator: ".")
+        }
+        guard let decodingError = error as? DecodingError else {
+            return "could not decode spec: \(error)"
+        }
+        switch decodingError {
+        case .keyNotFound(let key, let ctx):
+            let loc = pathString(ctx.codingPath)
+            let at = loc.isEmpty ? "at the top level" : "under '\(loc)'"
+            return "spec is missing required key '\(key.stringValue)' \(at). Required top-level keys: name, objectClass, root. See the tool description for the full schema + example."
+        case .typeMismatch(let type, let ctx):
+            return "spec has the wrong type for '\(pathString(ctx.codingPath))' (expected \(type)). \(ctx.debugDescription)"
+        case .valueNotFound(_, let ctx):
+            return "spec has a null where a value is required at '\(pathString(ctx.codingPath))'. \(ctx.debugDescription)"
+        case .dataCorrupted(let ctx):
+            let loc = pathString(ctx.codingPath)
+            return "spec is malformed\(loc.isEmpty ? "" : " at '\(loc)'"): \(ctx.debugDescription)"
+        // coverage:disable — @unknown default guards future DecodingError cases; unreachable with today's enum.
+        @unknown default:
+            return "could not decode spec: \(decodingError)"
+        // coverage:enable
+        }
     }
 
     // MARK: - Validate
@@ -290,6 +348,20 @@ public enum SculptTools {
                     throw ToolError.rejectedByValidation(ready.errors.map(\.message))
                 }
             }
+            // #114: warn when the stage already holds geometry outside the
+            // sculpt subtree — foreign prims skew scene_stats/render bounds and
+            // any silhouette-based measuredSimilarity. Computed before authoring
+            // so the sculpt root itself (created by this pass) isn't flagged.
+            var warnings: [JSONValue] = []
+            let sculptRoot = spec.root.name
+            let foreign = session.stage.rootPrims
+                .map(\.name)
+                .filter { $0 != sculptRoot }
+            if !foreign.isEmpty {
+                warnings.append(.string(
+                    "stage is not empty — unrelated prim(s) present: \(foreign.joined(separator: ", ")). These contaminate bounds/scene_stats and any silhouette similarity; remove them or start from a clean stage for a meaningful reconstruction."))
+            }
+
             let steps = BuildPlanner.plan(for: spec, pass: pass)
             var authored: [String] = []
             for step in steps {
@@ -302,6 +374,7 @@ public enum SculptTools {
                 "stepCount": .number(Double(steps.count)),
                 "authored": .array(authored.map { .string($0) }),
                 "reviewOnly": .bool(steps.isEmpty),
+                "warnings": .array(warnings),
             ])
         })
     }

@@ -189,19 +189,33 @@ import Testing
 
     @Test func blockoutEmitsGeometry() {
         let steps = BuildPlanner.plan(for: Self.spec(), pass: .blockout)
-        // group Barrel + Body + 2 repetition copies + library Cap = 5.
-        #expect(steps.count == 5)
+        // Each component emits a create + a setTransform (#115): group Barrel,
+        // Body + 2 repetition copies, library Cap = 5 prims → 10 steps.
+        #expect(steps.count == 10)
         #expect(steps[0] == .createGroup(name: "Barrel", parentPath: nil))
-        if case .createMesh(let name, let parent, let prim, _, _, _, _, _) = steps[1] {
+        // Barrel (root) is placed at its own transform right after creation.
+        if case .setTransform(let path, _, _, _) = steps[1] {
+            #expect(path == "/Barrel")
+        } else { Issue.record("expected root placement") }
+        if case .createMesh(let name, let parent, let prim, _, _, _, _, _) = steps[2] {
             #expect(name == "Body")
             #expect(parent == "/Barrel")
             #expect(prim == .cylinder)
         } else { Issue.record("expected createMesh") }
-        // Repetition copies are real prims in the blockout.
-        if case .createMesh(let name, _, _, _, _, _, _, _) = steps[2] {
+        // #115: Body carries its spec translation in the blockout, not identity.
+        if case .setTransform(let path, let t, _, _) = steps[3] {
+            #expect(path == "/Barrel/Body")
+            #expect(t == [0, 1, 0])
+        } else { Issue.record("expected Body placement") }
+        // Repetition copies are real, placed prims in the blockout.
+        if case .createMesh(let name, _, _, _, _, _, _, _) = steps[4] {
             #expect(name == "Body_hoop1")
         } else { Issue.record("expected copy mesh") }
-        #expect(steps[4] == .createLibraryMesh(name: "Cap", parentPath: "/Barrel", entryID: "prefab.rock"))
+        if case .setTransform(let path, let t, _, _) = steps[5] {
+            #expect(path == "/Barrel/Body_hoop1")
+            #expect(t[1] > 1)   // base y=1 + repetition offset
+        } else { Issue.record("expected copy placement") }
+        #expect(steps[8] == .createLibraryMesh(name: "Cap", parentPath: "/Barrel", entryID: "prefab.rock"))
     }
 
     @Test func blockoutCopiesRespectShapeKind() {

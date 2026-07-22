@@ -13,6 +13,41 @@ import Testing
         #expect(ShapeKind.Primitive.allCases.count == 5)
     }
 
+    // #112: ShapeKind encodes as a friendly tagged form (no `_0` leak) and
+    // round-trips; it also still decodes the legacy synthesized form.
+    @Test func shapeKindEncodesFriendlyTaggedForm() throws {
+        let enc = JSONEncoder(); enc.outputFormatting = [.sortedKeys]
+        func json(_ k: ShapeKind) throws -> String {
+            String(decoding: try enc.encode(k), as: UTF8.self)
+        }
+        #expect(try json(.group) == #"{"kind":"group"}"#)
+        #expect(try json(.primitive(.box)) == #"{"kind":"primitive","primitive":"box"}"#)
+        #expect(try json(.library(entryID: "office-chair")) == #"{"entryID":"office-chair","kind":"library"}"#)
+    }
+
+    @Test func shapeKindRoundTripsAllCases() throws {
+        let enc = JSONEncoder(); let dec = JSONDecoder()
+        for k in [ShapeKind.group, .primitive(.sphere), .library(entryID: "rock")] {
+            #expect(try dec.decode(ShapeKind.self, from: enc.encode(k)) == k)
+        }
+    }
+
+    @Test func shapeKindDecodesLegacySynthesizedForm() throws {
+        let dec = JSONDecoder()
+        func decode(_ s: String) throws -> ShapeKind {
+            try dec.decode(ShapeKind.self, from: Data(s.utf8))
+        }
+        #expect(try decode(#"{"group":{}}"#) == .group)
+        #expect(try decode(#"{"primitive":{"_0":"cone"}}"#) == .primitive(.cone))
+        #expect(try decode(#"{"library":{"entryID":"rock"}}"#) == .library(entryID: "rock"))
+    }
+
+    @Test func shapeKindRejectsUnknownForm() {
+        #expect(throws: DecodingError.self) {
+            _ = try JSONDecoder().decode(ShapeKind.self, from: Data(#"{"nonsense":1}"#.utf8))
+        }
+    }
+
     // MARK: - ComponentNode / spec derivations
 
     static func sampleSpec() -> ObjectSculptSpec {

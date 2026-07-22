@@ -185,9 +185,22 @@ public enum BuildPlanner {
         walk(spec.root, parent: nil) { node, parentPath in
             let selfPath = path(for: node.name, under: parentPath)
             // Emit the base component plus any repetition copies as real prims,
-            // so the structural pass has concrete paths to place.
-            for name in geometryNames(for: node) {
-                steps.append(geometryStep(named: name, node: node, parentPath: parentPath))
+            // each placed at its spec transform. Previously blockout authored
+            // geometry only, baking every component at the origin (a pile of
+            // overlapping parts); placement was deferred to the structural pass,
+            // so a blockout-only stage was meaningless to render or inspect
+            // (#115). We now place here too — the structural pass re-authors the
+            // same local transforms, so it remains correct and idempotent.
+            steps.append(geometryStep(named: node.name, node: node, parentPath: parentPath))
+            steps.append(.setTransform(
+                path: selfPath, translation: node.translation,
+                rotationEulerDegrees: node.rotationEulerDegrees, scale: node.scale))
+            for copy in copies(for: node) {
+                steps.append(geometryStep(named: copy.name, node: node, parentPath: parentPath))
+                steps.append(.setTransform(
+                    path: path(for: copy.name, under: parentPath),
+                    translation: copy.translation,
+                    rotationEulerDegrees: copy.rotationEulerDegrees, scale: copy.scale))
             }
             return selfPath
         }

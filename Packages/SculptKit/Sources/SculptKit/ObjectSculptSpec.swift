@@ -21,6 +21,68 @@ public enum ShapeKind: Codable, Sendable, Equatable {
         if case .group = self { return false }
         return true
     }
+
+    // MARK: Codable (#112)
+    //
+    // Swift's default enum-with-associated-value coding produced an
+    // implementation-detail `_0` wrapper (`{"shape":{"primitive":{"_0":"box"}}}`)
+    // that agents authoring a spec by hand could not possibly guess. Encode a
+    // friendly, self-describing tagged form instead:
+    //   {"kind":"group"}
+    //   {"kind":"primitive","primitive":"box"}
+    //   {"kind":"library","entryID":"office-chair"}
+    // Decoding accepts the friendly form and, for robustness against any spec
+    // persisted before this change, the legacy `_0`/bare-object form too.
+    private enum CodingKeys: String, CodingKey { case kind, primitive, entryID }
+    private enum Kind: String, Codable { case group, primitive, library }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        // Friendly, tagged form.
+        if let kind = try c.decodeIfPresent(Kind.self, forKey: .kind) {
+            switch kind {
+            case .group:
+                self = .group
+            case .primitive:
+                self = .primitive(try c.decode(Primitive.self, forKey: .primitive))
+            case .library:
+                self = .library(entryID: try c.decode(String.self, forKey: .entryID))
+            }
+            return
+        }
+        // Legacy fallback: Swift's synthesized form keyed by case name.
+        let legacy = try decoder.container(keyedBy: LegacyKeys.self)
+        if legacy.contains(.group) {
+            self = .group
+        } else if legacy.contains(.primitive) {
+            let inner = try legacy.nestedContainer(keyedBy: LegacyPayload.self, forKey: .primitive)
+            self = .primitive(try inner.decode(Primitive.self, forKey: ._0))
+        } else if legacy.contains(.library) {
+            let inner = try legacy.nestedContainer(keyedBy: LegacyPayload.self, forKey: .library)
+            self = .library(entryID: try inner.decode(String.self, forKey: .entryID))
+        } else {
+            throw DecodingError.dataCorrupted(.init(
+                codingPath: decoder.codingPath,
+                debugDescription: "ShapeKind: expected a \"kind\" of group|primitive|library"))
+        }
+    }
+
+    private enum LegacyKeys: String, CodingKey { case group, primitive, library }
+    private enum LegacyPayload: String, CodingKey { case _0, entryID }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        switch self {
+        case .group:
+            try c.encode(Kind.group, forKey: .kind)
+        case .primitive(let primitive):
+            try c.encode(Kind.primitive, forKey: .kind)
+            try c.encode(primitive, forKey: .primitive)
+        case .library(let entryID):
+            try c.encode(Kind.library, forKey: .kind)
+            try c.encode(entryID, forKey: .entryID)
+        }
+    }
 }
 
 /// A physically-based material in the spec, kept channel-independent
