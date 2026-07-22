@@ -1,6 +1,6 @@
-# Building OpenUSDZEditor from source
+# Building USDZ Studio from source
 
-OpenUSDZEditor is an open-source native macOS app. There are no signed installers;
+USDZ Studio is an open-source native macOS app. There are no signed installers;
 you either download an unsigned build from [Releases](https://github.com/hunterh37/USDZStudio/releases)
 or build it yourself. This guide covers both.
 
@@ -43,7 +43,7 @@ To build the same unsigned, distributable artifact the CI Release workflow
 uploads:
 
 ```sh
-bash scripts/build-release.sh        # writes dist/OpenUSDZEditor-macos.zip
+bash scripts/build-release.sh        # writes dist/USDZStudio-macos.zip
 ```
 
 This builds the `Release` configuration with signing disabled and packages the
@@ -58,7 +58,7 @@ quarantine them on first launch. After unzipping, clear the quarantine
 attribute once:
 
 ```sh
-xattr -dr com.apple.quarantine OpenUSDZEditor.app
+xattr -dr com.apple.quarantine USDZStudio.app
 ```
 
 Then open the app normally. (Right-click ▸ Open also works, but the `xattr`
@@ -68,12 +68,12 @@ identical.
 
 ## The Xcode project
 
-`project.yml` is the source of truth; the generated `OpenUSDZEditor.xcodeproj`
+`project.yml` is the source of truth; the generated `USDZStudio.xcodeproj`
 is git-ignored. Regenerate it after editing `project.yml`:
 
 ```sh
-bash scripts/generate-xcodeproj.sh   # project.yml -> OpenUSDZEditor.xcodeproj
-open OpenUSDZEditor.xcodeproj
+bash scripts/generate-xcodeproj.sh   # project.yml -> USDZStudio.xcodeproj
+open USDZStudio.xcodeproj
 ```
 
 For a fast, unbundled dev loop, `cd App && swift run` still works — it resolves

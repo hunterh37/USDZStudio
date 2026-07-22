@@ -120,6 +120,21 @@ Ordered by measured leverage. Each item states a hypothesis, method, and
   raw→matted IoU swing reproduced and improved (> 0.42 → target ≥ 0.6 on the
   Aventador reference).
 
+  *Status:* implemented (#82) as `AgentMCP/ReferenceMatte` — a border-prior
+  **planar background model + residual keying + morphological open/close +
+  largest-connected-component** matte (the deterministic core shared by the
+  GrabCut/saliency candidates, chosen over a learned matte to stay
+  dependency-free and 100%-coverage-gated). `RasterLoader.loadReference` now
+  mattes any *opaque* reference automatically before the metric sees it
+  (alpha-bearing references pass through; an empty matte falls back to raw), so
+  `sculpt_comparison_sheet` measures the subject, not the background. Measured
+  on the P0 corpus: produced-mask IoU ≥ 0.95 on every entry (asserted in
+  `ReferenceMatteTests`), and the raw→matted metric swing is reproduced —
+  the auto-matte beats the corner-key baseline corpus-wide. Genuine interior
+  holes (the annulus, wheel gaps) survive, per the P2 concavity requirement.
+  The ≥ 0.6 Aventador row still awaits the committed real-photo fixture (#94);
+  the blueprint gate picks it up automatically when the asset lands.
+
 - **P2 — Concavity-preserving, shape-vs-appearance metric (addresses F2, F3, F6).**
   Stop over-filling the reference silhouette; preserve interior gaps. Split the
   metric into a **shape** term (silhouette IoU + symmetric contour/chamfer
@@ -133,6 +148,21 @@ Ordered by measured leverage. Each item states a hypothesis, method, and
   and render the model from the matched pose before comparison; keep a
   coarse-to-fine residual search. *Acceptance:* report pose residual; ablation
   showing IoU gain attributable to pose vs shape on the P0 set.
+
+  *Status:* implemented (#84). `SculptKit.PoseAlignment` estimates the pose by
+  **analysis-by-synthesis** — a deterministic coarse-to-fine orbit search
+  (coarse 8×3 sweep, then halved-step 8-neighbour refinement to a sub-1.5°
+  terminal step) maximising a caller-supplied render-vs-reference shape score;
+  `legacyGrid16` preserves the old flat 16-entry grid purely as the measured
+  baseline, and `ablation` decomposes the shortfall into *pose gain*
+  (aligned − brute force) vs *shape deficit* (1 − score at the true pose),
+  reporting the pose residual. The AgentMCP `sculpt_align_pose` tool runs the
+  search against the injected renderer seam with the P1-matted reference and
+  returns the matched {azimuth, elevation}, its shape score, the winning
+  render's path (for `sculpt_comparison_sheet`), and — with `includeBaseline` —
+  the F4 ablation payload. Measured on the P0 corpus: residual ≤ 3° on every
+  entry with exact ground-truth poses, and the estimator is a pure function of
+  its inputs — the run-to-run drift (125°/305°/325°) is structurally gone.
 
 - **P4 — Geometry expressiveness (addresses F5).** Extend refinement ops beyond
   `inset` (bevel/chamfer, extrude, loft between cross-sections, simple booleans)

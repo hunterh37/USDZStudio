@@ -2,7 +2,7 @@
 
 - **Slug:** `lattice-deformer`
 - **Date:** 2026-07-21
-- **Question:** How do modern DCCs/engines implement a lattice (FFD) cage deformer — the box-of-control-points gizmo that smoothly deforms an enclosed mesh — and what is the state-of-the-art, RealityKit-compatible way to build a *contained* version in OpenUSDZEditor?
+- **Question:** How do modern DCCs/engines implement a lattice (FFD) cage deformer — the box-of-control-points gizmo that smoothly deforms an enclosed mesh — and what is the state-of-the-art, RealityKit-compatible way to build a *contained* version in USDZ Studio?
 - **Status:** planned
 - **Related topics:** `../` mesh-editing (`specs/mesh-editing.md` §Live vertex edit — shares the proportional-falloff/soft-selection deformation lineage); transform gizmos (ROADMAP Milestone 1 — reuses the shared gizmo hit-test/drag seam).
 
@@ -49,7 +49,7 @@ Binding is done **once on entry**: compute and cache each vertex's `(s,t,u)` (an
 
 **Compute location.** Heath and modern EEVEE run the deform in a compute shader for live 60fps feedback on skinned characters. That is a *rendering-preview* optimization. For us the authoritative deform must be a **pure, deterministic CPU function** (coverage gate + round-trip determinism); a GPU preview kernel, if ever needed, is a parity-tested accelerator like the `RecolorEngine` Metal kernel (Milestone 6), not the source of truth.
 
-## Recommended approach for OpenUSDZEditor
+## Recommended approach for USDZ Studio
 
 Build a **contained lattice deformer** as a mesh-editing tool, not a persistent scene object:
 
