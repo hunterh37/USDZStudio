@@ -18,6 +18,7 @@ public struct InspectorView: View {
     public enum Tab: String, CaseIterable, Identifiable, Sendable {
         case prim = "Prim"
         case transform = "Transform"
+        case states = "States"
         case material = "Material"
         case stage = "Stage"
         public var id: String { rawValue }
@@ -26,6 +27,7 @@ public struct InspectorView: View {
             switch self {
             case .prim: return "cube"
             case .transform: return "move.3d"
+            case .states: return "switch.2"
             case .material: return "paintpalette"
             case .stage: return "square.stack.3d.up"
             }
@@ -64,6 +66,7 @@ public struct InspectorView: View {
                         switch tab {
                         case .prim: primTab
                         case .transform: transformTab
+                        case .states: statesTab
                         case .material: materialTab
                         case .stage: stageTab
                         }
@@ -220,6 +223,17 @@ public struct InspectorView: View {
                 .id(prim.path)
         } else {
             emptyState("No selection")
+        }
+    }
+
+    // MARK: States (rigid articulations + discrete variant sets)
+
+    @ViewBuilder
+    private var statesTab: some View {
+        if let document {
+            StatesEditor(document: document)
+        } else {
+            emptyState("No stage open")
         }
     }
 
@@ -464,5 +478,141 @@ private struct TransformEditor: View {
                            suffix: suffix) { set(axis, $0) }
             }
         }
+    }
+}
+
+// MARK: - States editor (rigid articulations + discrete variant sets)
+
+/// The stage-wide "States" panel: every openable mechanism (hinge/slider) the
+/// asset carries, each with a state switcher and a scrub control, plus the
+/// stage's discrete variant sets. Unlike the other inspector tabs this is *not*
+/// selection-scoped — a loaded USDZ's articulations are a property of the whole
+/// asset, and the point of the panel is to discover and drive them without first
+/// hunting for the pivot prim in the outliner.
+///
+/// Declarative only: discovery and driving live in `EditorDocument` +
+/// `EditingKit.JointDiscovery`; every toggle/scrub is one undoable command.
+struct StatesEditor: View {
+    let document: EditorDocument
+
+    var body: some View {
+        let joints = document.articulations
+        let variantSets = document.stageVariantSets
+
+        if joints.isEmpty && variantSets.isEmpty {
+            emptyState
+        } else {
+            if !joints.isEmpty {
+                InspectorSection(title: "Mechanisms", subtitle: String(joints.count)) {
+                    ForEach(joints) { joint in
+                        JointStateRow(document: document, joint: joint)
+                    }
+                }
+            }
+            if !variantSets.isEmpty {
+                InspectorSection(title: "Variant Sets", subtitle: String(variantSets.count)) {
+                    // A stage may repeat a set name across prims, so key on the
+                    // owning path too rather than the set name alone.
+                    ForEach(variantSets, id: \.path) { entry in
+                        LabeledField(label: entry.set.name) {
+                            VariantPicker(variantSet: entry.set) { newSelection in
+                                document.setVariantSelection(
+                                    entry.path, set: entry.set.name, to: newSelection)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// Shown when the asset has no articulations or variants: explains what the
+    /// panel is for and how to add a mechanism, rather than dead-ending blank.
+    private var emptyState: some View {
+        InspectorSection(title: "States") {
+            Text("This asset has no openable parts or variant sets.")
+                .font(.system(size: TypeScale.body))
+                .foregroundStyle(Palette.textSecondary.color)
+            Text("Give a part a hinge or slider — a lid, door, cap, or drawer — "
+                 + "and it appears here as an open/close switch. Add one with the "
+                 + "articulation tools (create a joint on the moving part).")
+                .font(.system(size: TypeScale.caption))
+                .foregroundStyle(Palette.textTertiary.color)
+        }
+    }
+}
+
+/// One mechanism: a state switcher (closed/open/…) over the joint's named states
+/// plus a scrub-slider for arbitrary in-limit poses. The active state is
+/// highlighted; an in-between (hand-scrubbed) pose highlights nothing.
+struct JointStateRow: View {
+    let document: EditorDocument
+    let joint: DiscoveredJoint
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Spacing.xs) {
+            HStack(spacing: Spacing.xs) {
+                Text(joint.name)
+                    .font(.system(size: TypeScale.body, weight: .medium))
+                    .foregroundStyle(Palette.textPrimary.color)
+                Badge(joint.kindLabel)
+                Spacer(minLength: 0)
+                Text(joint.activeState ?? "custom")
+                    .font(.system(size: TypeScale.caption, design: .monospaced))
+                    .foregroundStyle(Palette.textTertiary.color)
+            }
+
+            // State switcher — a segmented row of the joint's named states.
+            HStack(spacing: Spacing.xxs) {
+                ForEach(joint.stateNames, id: \.self) { state in
+                    StateChip(title: state, isActive: state == joint.activeState) {
+                        document.setJointState(joint.pivotPath, state: state)
+                    }
+                }
+            }
+
+            // Fine control: scrub anywhere within the joint's limits. Committed on
+            // release, so a drag is a single undo entry (ScrubField's contract).
+            LabeledField(label: "Value") {
+                ScrubField(value: joint.currentValue,
+                           range: joint.minValue...joint.maxValue,
+                           step: joint.isRevolute ? 1 : 0.01,
+                           suffix: joint.unitSuffix) { value in
+                    document.setJointValue(joint.pivotPath, value: value)
+                }
+                .frame(maxWidth: 160)
+            }
+        }
+        .padding(.vertical, Spacing.xxs)
+    }
+}
+
+/// A single state button in the joint's segmented switcher — accent-filled when
+/// it is the current pose.
+struct StateChip: View {
+    let title: String
+    let isActive: Bool
+    let action: () -> Void
+    @State private var hovering = false
+
+    var body: some View {
+        Button(action: action) {
+            Text(title)
+                .font(.system(size: TypeScale.caption, weight: .medium))
+                .foregroundStyle(isActive ? Palette.accent.color : Palette.textSecondary.color)
+                .padding(.horizontal, Spacing.sm)
+                .padding(.vertical, 3)
+                .background(RoundedRectangle(cornerRadius: Radius.md)
+                    .fill(isActive
+                        ? Palette.accent.color.opacity(0.18)
+                        : (hovering ? Palette.surfaceHover.color : Palette.surfaceSunken.color)))
+                .overlay(RoundedRectangle(cornerRadius: Radius.md)
+                    .strokeBorder(isActive ? Palette.accent.color.opacity(0.5) : Palette.borderSubtle.color,
+                                  lineWidth: 1))
+                .contentShape(RoundedRectangle(cornerRadius: Radius.md))
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+        .accessibilityIdentifier("joint.state.\(title)")
     }
 }

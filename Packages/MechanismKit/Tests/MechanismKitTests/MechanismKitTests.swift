@@ -251,6 +251,49 @@ final class JointInvariantsTests: XCTestCase {
             XCTAssertLessThan(JointInvariants.geometryInPlaceResidual(j, childLocal: childLocal), 1e-6)
         }
     }
+
+    // MARK: Inverse — value(fromPivot…)
+
+    func testRevoluteValueInverseRecoversAngle() {
+        let j = Joint.openable(name: "lid", kind: .revolute, target: "Lid",
+                               axis: [1, 0, 0], pivot: [0, 1, 0], openValue: 105)
+        let rowMajor = PivotMath.pivotTransformRowMajor(j, value: 72)
+        XCTAssertEqual(PivotMath.value(fromPivotRowMajor: rowMajor, joint: j), 72, accuracy: 1e-6)
+    }
+
+    func testRevoluteValueInverseRecoversNegativeAngle() {
+        let j = Joint.openable(name: "hatch", kind: .revolute, target: "H",
+                               axis: [0, 0, 1], pivot: [2, 0, 0], openValue: -40)
+        let m = PivotMath.pivotLocalMatrix(j, value: -33)
+        XCTAssertEqual(PivotMath.value(fromPivotLocal: m, joint: j), -33, accuracy: 1e-6)
+    }
+
+    func testPrismaticValueInverseRecoversDistance() {
+        let j = Joint.openable(name: "drawer", kind: .prismatic, target: "D",
+                               axis: [0, 1, 0], pivot: [0, 2, 0], openValue: 4)
+        let rowMajor = PivotMath.pivotTransformRowMajor(j, value: 2.5)
+        XCTAssertEqual(PivotMath.value(fromPivotRowMajor: rowMajor, joint: j), 2.5, accuracy: 1e-9)
+    }
+
+    /// Fuzz: value → pivot matrix → value round-trips within the interior of the
+    /// angular range (both joint kinds), the property the inspector relies on to
+    /// seed its scrub control from a loaded asset.
+    func testFuzzValueInverseRoundTrips() {
+        var rng = SystemRandomNumberGenerator()
+        for _ in 0..<500 {
+            func r() -> Double { Double.random(in: -5...5, using: &rng) }
+            let axis = [r(), r(), r()]
+            guard simd_length(PivotMath.simd3(axis)) > 0.1 else { continue }
+            let kind: JointKind = Bool.random(using: &rng) ? .revolute : .prismatic
+            let j = Joint.openable(name: "j", kind: kind, target: "T",
+                                   axis: axis, pivot: [r(), r(), r()], openValue: 1)
+            let value = kind == .revolute
+                ? Double.random(in: -175...175, using: &rng)
+                : Double.random(in: -5...5, using: &rng)
+            let m = PivotMath.pivotLocalMatrix(j, value: value)
+            XCTAssertEqual(PivotMath.value(fromPivotLocal: m, joint: j), value, accuracy: 1e-6)
+        }
+    }
 }
 
 final class ArticulationManifestTests: XCTestCase {
