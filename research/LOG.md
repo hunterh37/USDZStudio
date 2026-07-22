@@ -9,5 +9,6 @@ build) · `building` (a PR is implementing it) · `landed` (shipped) · `superse
 
 | Date | Slug | Question (short) | Recommendation (one line) | Target module(s) | Roadmap slot | Status |
 |---|---|---|---|---|---|---|
+| 2026-07-21 | `lattice-deformer` | How to build a lattice/FFD cage deformer (control-point box gizmo) RealityKit-compatibly | Pure-Swift trivariate FFD in MeshKit, cage gizmo via the shared gizmo seam, bake deformed `points` on commit (no USD lattice schema) | MeshKit, EditingKit, ViewportKit, EditorUI | Phase 8 (mesh modeling), extends mesh-editing §Live vertex edit | building (PR #108) |
 | _example_ | `wireframe-overlay` | How to render wireframe-on-shaded in a RealityKit viewport | Metal line-overlay pass keyed off the debug-mode material swap | ViewportKit | Milestone 2 (viewer surface) | _example row — delete_ |
 | 2026-07-21 | `gaussian-splatting-to-usdz` | Where do Gaussian Splatting & real-world capture fit a mesh-shipping, RealityKit-first USDZ editor? | Build an Apple `PhotogrammetrySession` "photos → USDZ" importer first (native, CUDA-free, outputs our exact format); splat preview viewport second; GS→mesh reconstruction third. Splats are never a USDZ payload. | CaptureKit (new), ConversionKit, EditorUI, CLI; SplatKit (new)+ViewportKit for follow-on | New Phase 2.5 (Capture Import), extends Phase 2 | planned |
