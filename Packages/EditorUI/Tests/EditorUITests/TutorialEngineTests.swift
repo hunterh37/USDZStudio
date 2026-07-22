@@ -105,6 +105,32 @@ struct TutorialEngineTests {
         #expect(!FileManager.default.fileExists(atPath: url.path))
     }
 
+    /// Regression (memory leak): the orbit task must not retain the engine.
+    /// It used to `guard let self` once before its unbounded loop, so the task
+    /// held the engine (and its sandbox document) strongly forever — `deinit`
+    /// could never run and the 30 Hz camera loop outlived an abandoned tour.
+    /// The loop now re-acquires `self` weakly each frame, so releasing the
+    /// engine mid-tour deallocates it and ends the orbit.
+    @Test func abandonedTourReleasesTheEngine() async throws {
+        var engine: TutorialEngine? = try TutorialEngine()
+        let url = try #require(engine?.document.modelURL)
+        defer { try? FileManager.default.removeItem(at: url) }
+        weak var leaked = engine
+        engine?.start()
+        // Let the orbit loop actually begin (start() sleeps 900 ms first),
+        // so the test exercises the steady-state loop, not the warm-up.
+        try await Task.sleep(for: .milliseconds(1100))
+        engine = nil
+        // The loop releases its per-frame strong ref between iterations
+        // (~33 ms); give it a few cycles to observe the drop and unwind.
+        var waited = 0.0
+        while leaked != nil, waited < 3 {
+            try await Task.sleep(for: .milliseconds(50))
+            waited += 0.05
+        }
+        #expect(leaked == nil, "the orbit task must not keep the engine alive")
+    }
+
     @Test func sceneSerializesAValidCube() throws {
         let (snapshot, url) = try TutorialScene.makeStage()
         defer { try? FileManager.default.removeItem(at: url) }
