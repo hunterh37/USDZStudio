@@ -149,6 +149,21 @@ Ordered by measured leverage. Each item states a hypothesis, method, and
   coarse-to-fine residual search. *Acceptance:* report pose residual; ablation
   showing IoU gain attributable to pose vs shape on the P0 set.
 
+  *Status:* implemented (#84). `SculptKit.PoseAlignment` estimates the pose by
+  **analysis-by-synthesis** — a deterministic coarse-to-fine orbit search
+  (coarse 8×3 sweep, then halved-step 8-neighbour refinement to a sub-1.5°
+  terminal step) maximising a caller-supplied render-vs-reference shape score;
+  `legacyGrid16` preserves the old flat 16-entry grid purely as the measured
+  baseline, and `ablation` decomposes the shortfall into *pose gain*
+  (aligned − brute force) vs *shape deficit* (1 − score at the true pose),
+  reporting the pose residual. The AgentMCP `sculpt_align_pose` tool runs the
+  search against the injected renderer seam with the P1-matted reference and
+  returns the matched {azimuth, elevation}, its shape score, the winning
+  render's path (for `sculpt_comparison_sheet`), and — with `includeBaseline` —
+  the F4 ablation payload. Measured on the P0 corpus: residual ≤ 3° on every
+  entry with exact ground-truth poses, and the estimator is a pure function of
+  its inputs — the run-to-run drift (125°/305°/325°) is structurally gone.
+
 - **P4 — Geometry expressiveness (addresses F5).** Extend refinement ops beyond
   `inset` (bevel/chamfer, extrude, loft between cross-sections, simple booleans)
   and/or lofted body cross-sections; fix subdivision rounding. *Acceptance:*
