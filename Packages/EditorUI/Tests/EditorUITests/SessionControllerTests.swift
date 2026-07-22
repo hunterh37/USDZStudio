@@ -143,6 +143,32 @@ struct SessionControllerTests {
         #expect(controller.activeDirectory == nil)
     }
 
+    @Test func resetClearsActiveAndAllRecoverableSessions() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("sc-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let envelopes = InMemoryEnvelopeStore()
+
+        // A recoverable session left behind by a prior launch.
+        let prior = makeController(root: root, envelopes: envelopes)
+        let priorJournal = prior.begin(for: nil)
+        let priorDoc = EditorDocument(snapshot: sampleSnapshot(), journal: priorJournal)
+        prior.attach(priorDoc)
+        priorDoc.setVisibility(PrimPath("/Car/Body")!, .invisible)
+        prior.capture(priorDoc)
+
+        // This launch's controller sees it, and also opens its own active session.
+        let controller = makeController(root: root, envelopes: envelopes)
+        #expect(controller.findRecoverable() != nil)
+        _ = controller.begin(for: URL(fileURLWithPath: "/tmp/live.usda"))
+        #expect(controller.activeDirectory != nil)
+
+        controller.reset()
+
+        #expect(controller.activeDirectory == nil)             // active session ended
+        #expect(controller.findRecoverable() == nil)           // leftovers swept too
+    }
+
     @Test func beginSupersedesPriorSession() {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("sc-\(UUID().uuidString)", isDirectory: true)
