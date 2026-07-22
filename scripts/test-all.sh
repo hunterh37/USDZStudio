@@ -18,6 +18,7 @@ PACKAGES=(
   Packages/MeshKit
   Packages/CaptureKit
   Packages/MechanismKit
+  Packages/DiagnosticsKit
   Packages/RigKit
   Packages/EditingKit
   Packages/ValidationKit

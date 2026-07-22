@@ -33,6 +33,7 @@ policy_for() {
     MechanismKit)         echo "" ;;                    # pure Swift, zero deps — rigid articulation math (specs/articulation-mechanisms.md)
     RigKit)               echo "" ;;                    # pure Swift, zero deps — skeletal rig/skinning/motion math (specs/animation-rigging.md)
     DicyaninDesignSystem) echo "" ;;
+    DiagnosticsKit)       echo "" ;;                    # pure Swift, zero deps — per-session breadcrumb logging + crash sentinel (specs/diagnostics-logging.md)
     QuickLookKit)         echo "" ;;                    # pure Swift render-plan logic for the QuickLook .appex (specs/quicklook.md)
     USDBridge)            echo "USDCore" ;;
     CaptureKit)           echo "USDCore MeshKit" ;;    # pure capture-planner logic (specs/capture-import.md); leaf like MeshKit
@@ -45,8 +46,8 @@ policy_for() {
     SessionKit)           echo "USDCore ViewportKit EditingKit" ;;  # cross-launch session envelope + restore; reuses ViewportKit value types + EditingKit WAL (specs/session-restoration.md)
     AgentMCP)             echo "USDCore USDBridge EditingKit ValidationKit ConversionKit ScriptingKit MeshKit MechanismKit SculptKit RigKit" ;;  # MCP adapter over the kits (docs/AGENT_MCP_PLAN.md); never EditorUI; RigKit: .rig animation tool group
     RenderKit)            echo "AgentMCP USDBridge" ;;   # shared render_views backends (native SceneKit + opt-in usdrecord) for both hosts (issue #109); implements AgentMCP.RenderExecuting
-    EditorUI)             echo "USDCore USDBridge ConversionKit CaptureKit ViewportKit EditingKit ValidationKit ScriptingKit DicyaninDesignSystem MeshKit SculptKit SessionKit" ;;  # SculptKit: in-app staged-sculpt runner; SessionKit: cross-launch session restore (specs/session-restoration.md); CaptureKit: capture-import sheet detail/profile model + pre-flight (specs/capture-import.md)
-    App)                  echo "USDCore USDBridge ConversionKit ViewportKit EditingKit ValidationKit ScriptingKit EditorUI DicyaninDesignSystem MeshKit AgentMCP RenderKit SessionKit" ;;  # App hosts the in-app MCP editing session (specs/agent-live-editing.md); composition root, like CLI. RenderKit: native render backend for the in-app MCP render_views (issue #109). SessionKit: names ViewState for the restore hand-off
+    EditorUI)             echo "USDCore USDBridge ConversionKit CaptureKit ViewportKit EditingKit ValidationKit ScriptingKit DicyaninDesignSystem MeshKit SculptKit SessionKit DiagnosticsKit" ;;  # SculptKit: in-app staged-sculpt runner; SessionKit: cross-launch session restore (specs/session-restoration.md); CaptureKit: capture-import sheet detail/profile model + pre-flight (specs/capture-import.md)
+    App)                  echo "USDCore USDBridge ConversionKit ViewportKit EditingKit ValidationKit ScriptingKit EditorUI DicyaninDesignSystem MeshKit AgentMCP RenderKit SessionKit DiagnosticsKit" ;;  # App hosts the in-app MCP editing session (specs/agent-live-editing.md); composition root, like CLI. RenderKit: native render backend for the in-app MCP render_views (issue #109). SessionKit: names ViewState for the restore hand-off
     CLI)                  echo "USDCore USDBridge ConversionKit CaptureKit ValidationKit ScriptingKit EditingKit MeshKit AgentMCP RenderKit" ;;  # never EditorUI/DesignSystem; CaptureKit: `openusdz capture` pre-flight + plan (specs/capture-import.md); RenderKit: shared render_views backends (issue #109)
     EditorHarness)        echo "USDCore USDBridge EditingKit MeshKit EditorUI" ;;  # dev tool: drives the real UI
     *)                    return 1 ;;

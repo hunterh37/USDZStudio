@@ -297,6 +297,10 @@ public struct EditorShellView: View {
         // Flush the session envelope (including this view's state) on
         // background/quit; the WAL already captured edits per command.
         .onChange(of: scenePhase) { _, phase in
+            // Lifecycle crumb: phase transitions bracket the trail when a crash
+            // happens in the background (specs/diagnostics-logging.md).
+            document?.breadcrumbs?.log(.lifecycle, "scenePhase",
+                                       metadata: ["phase": "\(phase)"])
             if phase != .active { captureSession() }
         }
         .sheet(item: $activeSheet) { sheet in
@@ -377,6 +381,9 @@ public struct EditorShellView: View {
     /// Rebuilds the action set against the current document/context and opens the
     /// palette fresh (cleared query, first row highlighted).
     private func openCommandPalette() {
+        // The document carries the injected breadcrumb logger; the palette
+        // borrows it so dispatched actions land in the same session trail.
+        paletteModel.breadcrumbs = document?.breadcrumbs
         paletteModel.setActions(paletteActions())
         paletteModel.reset()
         showPalette = true

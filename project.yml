@@ -42,6 +42,8 @@ packages:
     path: Packages/AgentMCP
   RenderKit:
     path: Packages/RenderKit
+  DiagnosticsKit:
+    path: Packages/DiagnosticsKit
 
 targets:
   USDZStudio:
@@ -68,6 +70,9 @@ targets:
       # document so agent edits render live (specs/agent-live-editing.md).
       - package: AgentMCP
         product: AgentMCP
+      # Session breadcrumb log + crash sentinel (specs/diagnostics-logging.md).
+      - package: DiagnosticsKit
+        product: DiagnosticsKit
       # Native render backend for the in-app MCP server's render_views /
       # sculpt review loop (issue #109) — no usdrecord required.
       - package: RenderKit

@@ -22,6 +22,7 @@ let package = Package(
         .package(path: "../MeshKit"),
         .package(path: "../SculptKit"),
         .package(path: "../SessionKit"),
+        .package(path: "../DiagnosticsKit"),
     ],
     targets: [
         .target(
@@ -30,6 +31,7 @@ let package = Package(
                 "USDCore", "USDBridge", "ViewportKit", "EditingKit",
                 "ConversionKit", "CaptureKit", "ValidationKit", "ScriptingKit",
                 "DicyaninDesignSystem", "MeshKit", "SculptKit", "SessionKit",
+                "DiagnosticsKit",
             ],
             path: "Sources/EditorUI"),
         .testTarget(name: "EditorUITests", dependencies: ["EditorUI"], path: "Tests/EditorUITests"),

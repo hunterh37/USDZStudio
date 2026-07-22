@@ -1,4 +1,5 @@
 import AgentMCP
+import DiagnosticsKit
 import EditorUI
 import Foundation
 import RenderKit
@@ -133,7 +134,8 @@ final class MCPActivityListener: ObservableObject {
                 Task { @MainActor in self?.markDisconnected() }
             })
         guard ok else {
-            NSLog("MCPActivityListener: failed to bind \(socketPath)")
+            breadcrumbs?.log(.mcp, level: .warning, "failed to bind activity socket",
+                             metadata: ["path": socketPath])
             restartListener()
             return
         }
@@ -381,8 +383,13 @@ final class MCPActivityListener: ObservableObject {
 
     // MARK: Pure reducer (unit-tested)
 
+    /// Session breadcrumb trail (specs/diagnostics-logging.md): agent activity
+    /// is logged under `agent.mcp`. Injected at launch; `nil` (tests) is silent.
+    var breadcrumbs: (any BreadcrumbLogging)?
+
     /// Fold one decoded event into the presentational model.
     func apply(_ event: InboundEvent) {
+        crumb(for: event)
         switch event.type {
         case "session_start":
             model.isConnected = true
@@ -419,6 +426,32 @@ final class MCPActivityListener: ObservableObject {
     func markDisconnected() {
         model.isConnected = false
         model.connectedSince = nil
+    }
+
+    /// Maps an inbound MCP event to an `agent.mcp` breadcrumb. Tool failures
+    /// log at `.warning` so they flush (and survive) immediately.
+    private func crumb(for event: InboundEvent) {
+        guard let breadcrumbs else { return }
+        switch event.type {
+        case "session_start":
+            breadcrumbs.log(.mcp, "session start",
+                            metadata: ["file": event.servedFile ?? ""])
+        case "tool_started":
+            breadcrumbs.log(.mcp, "tool start",
+                            metadata: ["tool": event.tool ?? "",
+                                       "args": event.argsSummary ?? ""])
+        case "tool_finished":
+            breadcrumbs.log(.mcp, level: event.isError == true ? .warning : .info,
+                            "tool finish",
+                            metadata: ["seq": "\(event.seq ?? -1)",
+                                       "ms": "\(event.durationMs ?? -1)",
+                                       "error": "\(event.isError == true)",
+                                       "summary": event.summary ?? ""])
+        case "session_end":
+            breadcrumbs.log(.mcp, "session end")
+        default:
+            break // heartbeats aren't breadcrumbs
+        }
     }
 }
 

@@ -1,4 +1,5 @@
 import SwiftUI
+import DiagnosticsKit
 import EditorUI
 import USDBridge
 import USDCore
@@ -12,7 +13,13 @@ import SessionKit
 /// as a background accessory: the window never comes forward. Promoting the
 /// activation policy to `.regular` and activating makes the dev-run behave like
 /// the eventual bundled app. No-op cost for the packaged build.
+@MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    /// Session breadcrumb log + crash sentinel, alive for the whole process
+    /// (specs/diagnostics-logging.md). Built eagerly so the launch crumb and
+    /// prior-crash check happen before any document work.
+    let diagnostics = DiagnosticsBootstrap()
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApplication.shared.setActivationPolicy(.regular)
         NSApplication.shared.activate(ignoringOtherApps: true)
@@ -23,6 +30,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // try to reach a dead editor — but only if this instance owns them, so a
         // quitting second instance never orphans the first's endpoint.
         MCPActivityListener.removeEndpointIfOwned()
+        // Final crumb + synchronous drain, then disarm the crash sentinel —
+        // after this the session reads as a clean exit.
+        diagnostics.shutdown()
     }
 }
 
@@ -147,6 +157,10 @@ struct USDZStudioApp: App {
                     Text("This clears saved session-restoration data — the current session and any recoverable sessions from previous launches. The app won't offer to restore them next time it opens. Any document you have open stays open; its saved file is untouched.")
                 }
                 .task {
+                    // Route MCP activity + any already-open document into the
+                    // session breadcrumb log (specs/diagnostics-logging.md).
+                    mcp.breadcrumbs = appDelegate.diagnostics.logger
+                    document?.breadcrumbs = appDelegate.diagnostics.logger
                     // Start the localhost activity listener + write the
                     // endpoint-discovery file so `openusdz mcp` can connect.
                     mcp.start()
@@ -181,6 +195,10 @@ struct USDZStudioApp: App {
                     mcp.bindDocument(document)
                 }
                 .onChange(of: document.map(ObjectIdentifier.init)) {
+                    // Every document — opened, scratch, restored, or agent-
+                    // conjured — flows through this observer, so this is the
+                    // single injection point for the breadcrumb trail.
+                    document?.breadcrumbs = appDelegate.diagnostics.logger
                     mcp.bindDocument(document)
                 }
                 .onDrop(of: [.fileURL], isTargeted: nil) { providers in
@@ -271,6 +289,12 @@ struct USDZStudioApp: App {
                 // viewport); reads from EditorUI's ShortcutRegistry.
                 Button("Keyboard Shortcuts") { postMenu(.keyboardShortcuts) }
                     .keyboardShortcut("/", modifiers: [.command])
+                Divider()
+                // Opens the per-session breadcrumb logs folder in Finder — the
+                // trail to inspect after a crash (specs/diagnostics-logging.md).
+                Button("Reveal Diagnostics Logs") {
+                    appDelegate.diagnostics.revealLogsInFinder()
+                }
             }
             CommandGroup(after: .toolbar) {
                 // ⌘K opens the command palette — the single entry point that

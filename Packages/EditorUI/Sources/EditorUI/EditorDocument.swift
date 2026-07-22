@@ -3,6 +3,7 @@ import Observation
 import simd
 import USDCore
 import USDBridge
+import DiagnosticsKit
 import EditingKit
 import ValidationKit
 import ViewportKit
@@ -221,15 +222,40 @@ public final class EditorDocument {
     public var undoLabel: String? { stack.undoLabel }
     public var redoLabel: String? { stack.redoLabel }
 
-    public func undo() { _ = try? stack.undo() }
-    public func redo() { _ = try? stack.redo() }
+    /// Session breadcrumb trail (specs/diagnostics-logging.md). Property-
+    /// injected by the composition root after creation (documents are built in
+    /// several places — open, scratch, restore — and crumbs are diagnostics,
+    /// not construction-critical). `nil` (tests, previews) is silent.
+    /// `@ObservationIgnored`: never drives view updates.
+    @ObservationIgnored public var breadcrumbs: (any BreadcrumbLogging)?
+
+    public func undo() {
+        breadcrumbs?.log(.command, level: .info, "undo",
+                         metadata: ["label": undoLabel ?? ""])
+        _ = try? stack.undo()
+    }
+    public func redo() {
+        breadcrumbs?.log(.command, level: .info, "redo",
+                         metadata: ["label": redoLabel ?? ""])
+        _ = try? stack.redo()
+    }
 
     /// Runs a command, surfacing (but not throwing) mutation errors so a bad
     /// edit from the UI never crashes the app. Returns the applied label.
     @discardableResult
     public func run(_ command: any EditCommand) -> String? {
-        do { return try stack.run(command) }
-        catch { lastError = "\(error)"; return nil }
+        do {
+            let label = try stack.run(command)
+            breadcrumbs?.log(.command, level: .info, "run", metadata: ["label": label])
+            return label
+        } catch {
+            // A failed mutation is exactly the kind of trouble a crash log
+            // should retain — .error also forces an immediate flush.
+            breadcrumbs?.log(.command, level: .error, "command failed",
+                             metadata: ["error": "\(error)"])
+            lastError = "\(error)"
+            return nil
+        }
     }
 
     /// The most recent mutation error, for surfacing in the UI.

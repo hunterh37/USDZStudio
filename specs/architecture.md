@@ -27,7 +27,8 @@ USDZStudio/
 │   ├── RenderKit/                # Shared render_views backends (native SceneKit + opt-in usdrecord) for both MCP hosts
 │   ├── EditorUI/                 # Panels: outliner, inspector, console, toolbar
 │   ├── QuickLookKit/             # Pure render-plan logic for the Finder QuickLook .appex (zero deps)
-│   └── DicyaninDesignSystem/     # Tokens, colors, typography, reusable controls
+│   ├── DicyaninDesignSystem/     # Tokens, colors, typography, reusable controls
+│   └── DiagnosticsKit/           # Pure Swift per-session breadcrumb logging + crash sentinel (zero deps; specs/diagnostics-logging.md)
 ├── CLI/                          # openusdz command-line target (links kits, no UI)
 ├── Resources/Python/             # Bundled Python runtime + usd-core wheel + scripts
 ├── Tests/                        # Per-package tests + integration corpus tests
@@ -41,6 +42,7 @@ App ─▶ EditorUI ─▶ {ViewportKit, EditingKit, ConversionKit, ValidationKi
 USDBridge ─▶ USDCore          (bridge implements USDCore protocols)
 {EditingKit, ViewportKit, ConversionKit} ─▶ MeshKit   (MeshKit itself imports nothing internal; ConversionKit uses MeshKit.VertexNormals to derive smooth normals for normal-less imports — issue #95)
 MechanismKit imports nothing internal (pure leaf, like MeshKit); its consumers ({EditingKit, SculptKit, AgentMCP}) import it for rigid-joint authoring (specs/articulation-mechanisms.md)
+DiagnosticsKit imports nothing internal (pure leaf); its consumers ({App, EditorUI}) import it for per-session breadcrumb logging and crash-sentinel detection (specs/diagnostics-logging.md)
 RigKit imports nothing internal (pure leaf, like MeshKit/MechanismKit); its consumers ({EditingKit, ViewportKit, AgentMCP}) import it for skeletal rig/skinning/motion authoring (specs/animation-rigging.md)
 MechanismKit imports nothing internal (pure leaf); its consumers ({EditingKit, SculptKit, AgentMCP, ViewportKit}) import it for rigid-joint articulation — EditingKit/SculptKit/AgentMCP author joints, ViewportKit reads a joint's axis/pivot/limits for the hinge-axis drag-to-open handle overlay (specs/articulation-mechanisms.md)
 CaptureKit ─▶ {USDCore, MeshKit}   (pure capture-planner leaf; consumed by ConversionKit's ObjectCaptureImporter + CLI `capture`; runs no PhotogrammetrySession itself — that is an injected seam in ConversionKit, specs/capture-import.md)

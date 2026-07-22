@@ -1,4 +1,5 @@
 import Foundation
+import DiagnosticsKit
 
 /// Pairs an `ActionItem` descriptor with the closure that performs it. The
 /// closure is `@MainActor` (it mutates view state / drives menus), so this type
@@ -37,6 +38,11 @@ public final class CommandPaletteModel {
 
     private var actions: [PaletteAction]
     private var registry: ActionRegistry
+
+    /// Session breadcrumb trail: every palette-dispatched action is logged
+    /// under `ui.action` (specs/diagnostics-logging.md). Property-injected by
+    /// the shell; `nil` (tests, previews) is silent.
+    @ObservationIgnored public var breadcrumbs: (any BreadcrumbLogging)?
 
     public init(actions: [PaletteAction] = []) {
         self.actions = actions
@@ -83,6 +89,8 @@ public final class CommandPaletteModel {
         guard let item = selectedItem, item.isEnabled,
               let action = actions.first(where: { $0.item.id == item.id })
         else { return false }
+        breadcrumbs?.log(.action, level: .info, "palette",
+                         metadata: ["id": item.id, "title": item.title])
         action.run()
         return true
     }
