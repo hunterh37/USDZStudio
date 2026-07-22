@@ -905,8 +905,12 @@ public struct EditorShellView: View {
         return panel.runModal() == .OK ? panel.url : nil
     }
 
-    @ViewBuilder
-    private var viewport: some View {
+    // Base viewport + its lifecycle/lighting wiring. Kept separate from the
+    // overlay stack in `viewport` so neither modifier chain exceeds the Swift
+    // type-checker's complexity budget — two feature branches (QuickLook
+    // environment controls and modal G/R/S transform) merged overlays onto a
+    // single expression that no longer type-checks in reasonable time.
+    private var viewportBase: some View {
         // Always render the live viewport — with no document open it shows the
         // default empty scene (grid + axis gizmo wireframe) rather than an
         // "open a file" placeholder, so the app opens straight into 3D space.
@@ -997,6 +1001,11 @@ public struct EditorShellView: View {
                 .onChange(of: stage?.metadata) { _, newValue in
                     playback.configure(from: newValue)
                 }
+    }
+
+    @ViewBuilder
+    private var viewport: some View {
+        viewportBase
                 .overlay {
                     // Mesh edit mode: tool strip + active-tool indicator over
                     // the viewport (Phase 6; specs/mesh-editing.md).
