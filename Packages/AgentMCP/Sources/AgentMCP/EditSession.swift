@@ -40,9 +40,29 @@ public struct MutationOutcome: Sendable {
     public var verb: String
     public var diff: StageDiff
     public var validation: ValidationReport?
+    /// Diagnostics *introduced* by this mutation (delta vs. the pre-mutation
+    /// stage). The inline payload reports only these, not the whole stage
+    /// (issue #142); `validation` retains the full totals.
+    public var newDiagnostics: [ValidationKit.Diagnostic]
     public var undoToken: Int
     /// Affected path → session-stable prim id.
     public var primIds: [PrimPath: String]
+
+    public init(
+        verb: String,
+        diff: StageDiff,
+        validation: ValidationReport?,
+        newDiagnostics: [ValidationKit.Diagnostic] = [],
+        undoToken: Int,
+        primIds: [PrimPath: String]
+    ) {
+        self.verb = verb
+        self.diff = diff
+        self.validation = validation
+        self.newDiagnostics = newDiagnostics
+        self.undoToken = undoToken
+        self.primIds = primIds
+    }
 
     public func asJSON(extra: [String: JSONValue] = [:]) -> JSONValue {
         var ids: [String: JSONValue] = [:]
@@ -53,9 +73,40 @@ public struct MutationOutcome: Sendable {
             "undoToken": .number(Double(undoToken)),
             "primIds": .object(ids),
         ]
-        if let validation { payload["validation"] = validation.asJSON }
+        if let validation {
+            payload["validation"] = Self.inlineValidationJSON(full: validation, new: newDiagnostics)
+        }
         for (k, v) in extra { payload[k] = v }
         return .object(payload)
+    }
+
+    /// Compact inline validation payload (issue #142): stage-wide totals plus a
+    /// `new` block scoped to the diagnostics this mutation introduced. Info-level
+    /// diagnostics are collapsed to counts (never listed inline) so a bulk build
+    /// on a large scene doesn't repeat ~100 `mesh.normals` lines on every call;
+    /// the full per-diagnostic list stays behind an explicit `validate` call.
+    static func inlineValidationJSON(
+        full: ValidationReport,
+        new: [ValidationKit.Diagnostic]
+    ) -> JSONValue {
+        var byRule: [String: Int] = [:]
+        for d in new { byRule[d.ruleID, default: 0] += 1 }
+        // Only errors + warnings are listed in detail; info stays counts-only.
+        let listed = new.filter { $0.severity != .info }.map(\.asJSON)
+        let newBlock: [String: JSONValue] = [
+            "errors": .number(Double(new.lazy.filter { $0.severity == .error }.count)),
+            "warnings": .number(Double(new.lazy.filter { $0.severity == .warning }.count)),
+            "info": .number(Double(new.lazy.filter { $0.severity == .info }.count)),
+            "byRule": .object(byRule.mapValues { .number(Double($0)) }),
+            "diagnostics": .array(listed),
+        ]
+        return .object([
+            "errors": .number(Double(full.errorCount)),
+            "warnings": .number(Double(full.warningCount)),
+            "info": .number(Double(full.infoCount)),
+            "isCompliant": .bool(full.isCompliant),
+            "new": .object(newBlock),
+        ])
     }
 }
 
@@ -190,8 +241,10 @@ public final class EditSession: @unchecked Sendable {
         removed: [PrimPath] = []
     ) throws -> MutationOutcome {
         let before = stage.currentSnapshot
-        let beforeErrors = strictness == .strict
-            ? profile.engine.validate(stage).errorCount : 0
+        // The pre-mutation report anchors both strict-mode rollback (new errors)
+        // and the warn-mode delta the inline payload reports (issue #142).
+        let beforeReport: ValidationReport? = strictness != .off
+            ? profile.engine.validate(stage) : nil
 
         let verb: String
         do {
@@ -204,11 +257,14 @@ public final class EditSession: @unchecked Sendable {
         let diff = StageDiff.compute(before: before, after: after)
 
         var report: ValidationReport?
+        var newDiagnostics: [ValidationKit.Diagnostic] = []
         if strictness != .off {
             let r = profile.engine.validate(stage)
             report = r
-            if strictness == .strict, r.errorCount > beforeErrors {
-                let messages = r.diagnostics
+            let beforeSet = Set(beforeReport?.diagnostics ?? [])
+            newDiagnostics = r.diagnostics.filter { !beforeSet.contains($0) }
+            if strictness == .strict, r.errorCount > (beforeReport?.errorCount ?? 0) {
+                let messages = newDiagnostics
                     .filter { $0.severity == .error }
                     .map { "\($0.ruleID): \($0.message)" }
                 _ = try? stack.undo()
@@ -225,6 +281,7 @@ public final class EditSession: @unchecked Sendable {
             verb: verb,
             diff: diff,
             validation: report,
+            newDiagnostics: newDiagnostics,
             undoToken: stack.undoCount,
             primIds: handles(for: affected))
     }
