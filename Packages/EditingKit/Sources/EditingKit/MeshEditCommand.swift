@@ -44,6 +44,16 @@ public struct MeshEditCommand: EditCommand {
             Attribute(name: "faceVertexCounts", value: .intArray(mesh.faceVertexCounts))))
         try stage.apply(.setAttribute(path: path, attribute:
             Attribute(name: "faceVertexIndices", value: .intArray(mesh.faceVertexIndices))))
+        // Re-author normals for the edited topology so the mesh keeps shading
+        // smoothly instead of pointing at the pre-edit surface, and so an edit
+        // never re-introduces a `mesh.normals` diagnostic (issue #95). The math
+        // lives once in `MeshKit.VertexNormals`.
+        let normals = VertexNormals.smoothFlat(for: mesh)
+        if !normals.isEmpty {
+            try stage.apply(.setAttribute(path: path, attribute:
+                Attribute(name: "normals", value: .float3Array(normals),
+                          metadata: ["interpolation": "\"vertex\""])))
+        }
         if !mesh.faceVaryingUVs.isEmpty {
             var uvs: [Double] = []
             uvs.reserveCapacity(mesh.faceVaryingUVs.count * 2)

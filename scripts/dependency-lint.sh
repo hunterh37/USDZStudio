@@ -35,7 +35,7 @@ policy_for() {
     DicyaninDesignSystem) echo "" ;;
     QuickLookKit)         echo "" ;;                    # pure Swift render-plan logic for the QuickLook .appex (specs/quicklook.md)
     USDBridge)            echo "USDCore" ;;
-    ConversionKit)        echo "USDCore" ;;
+    ConversionKit)        echo "USDCore MeshKit" ;;    # derives smooth vertex normals for normal-less imports via MeshKit.VertexNormals (issue #95)
     ValidationKit)        echo "USDCore" ;;
     ScriptingKit)         echo "USDCore" ;;
     ViewportKit)          echo "USDCore MeshKit RigKit" ;;     # component-overlay rendering (specs/mesh-editing.md); RigKit: skeletal rig-handle overlay (specs/animation-rigging.md)

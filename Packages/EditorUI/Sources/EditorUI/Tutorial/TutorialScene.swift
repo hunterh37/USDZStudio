@@ -20,17 +20,23 @@ enum TutorialScene {
         points.reserveCapacity(flat.points.count * 3)
         for p in flat.points { points += [p.x, p.y, p.z] }
 
-        let mesh = Prim(
-            path: meshPath,
-            typeName: "Mesh",
-            attributes: [
-                Attribute(name: "points", value: .float3Array(points)),
-                Attribute(name: "faceVertexCounts", value: .intArray(flat.faceVertexCounts)),
-                Attribute(name: "faceVertexIndices", value: .intArray(flat.faceVertexIndices)),
-                // Without this USD defaults to catmullClark and the cube
-                // renders as a subdivided blob.
-                Attribute(name: "subdivisionScheme", value: .token("none"), isUniform: true),
-            ])
+        var attributes: [Attribute] = [
+            Attribute(name: "points", value: .float3Array(points)),
+            Attribute(name: "faceVertexCounts", value: .intArray(flat.faceVertexCounts)),
+            Attribute(name: "faceVertexIndices", value: .intArray(flat.faceVertexIndices)),
+            // Without this USD defaults to catmullClark and the cube
+            // renders as a subdivided blob.
+            Attribute(name: "subdivisionScheme", value: .token("none"), isUniform: true),
+        ]
+        // Real normals so the tour's scratch cube shades like an imported asset
+        // and the sandbox stage carries no `mesh.normals` diagnostic (issue #95).
+        let normals = VertexNormals.smoothFlat(for: flat)
+        if !normals.isEmpty {
+            attributes.append(Attribute(
+                name: "normals", value: .float3Array(normals),
+                metadata: ["interpolation": "\"vertex\""]))
+        }
+        let mesh = Prim(path: meshPath, typeName: "Mesh", attributes: attributes)
 
         return Prim(
             path: cubePath,
