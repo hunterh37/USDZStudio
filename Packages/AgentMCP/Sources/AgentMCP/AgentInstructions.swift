@@ -12,7 +12,7 @@ import Foundation
 /// object that realistically opens or swings, not only when the user says so.
 public enum AgentInstructions {
     public static let text = """
-    You are editing a live USD stage through the OpenUSDZEditor agent API. The USD stage is the \
+    You are editing a live USD stage through the USDZ Studio agent API. The USD stage is the \
     single source of truth; every mutation is an undoable command that is validated inline. Build \
     with verification in the loop — mutate, then `validate` / `score` / `check_compliance` — rather \
     than generating blindly. Prefer primIds over paths (they survive renames), place parts \

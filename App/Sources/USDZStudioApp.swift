@@ -27,7 +27,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 }
 
 @main
-struct OpenUSDZEditorApp: App {
+struct USDZStudioApp: App {
 
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @State private var document: EditorDocument?
@@ -74,7 +74,7 @@ struct OpenUSDZEditorApp: App {
     @StateObject private var mcp = MCPActivityListener()
 
     var body: some Scene {
-        WindowGroup("Open USDZ Editor") {
+        WindowGroup("USDZ Studio") {
             EditorShellView(document: document,
                             isImporting: isImporting,
                             importingFileName: importingFileName,
@@ -153,7 +153,7 @@ struct OpenUSDZEditorApp: App {
                     // Offer to restore a previous session with unsaved work
                     // before anything else opens a document.
                     if document == nil { await offerSessionRestore() }
-                    // Dev convenience: `swift run OpenUSDZEditorApp file.usda`
+                    // Dev convenience: `swift run USDZStudioApp file.usda`
                     // opens straight into the file.
                     if document == nil, !showRestorePrompt,
                        let arg = CommandLine.arguments.dropFirst().first(where: {
@@ -249,7 +249,7 @@ struct OpenUSDZEditorApp: App {
                     .disabled(document == nil)
             }
             // Replace (not just prepend to) the default Help group. macOS
-            // otherwise leaves its stock "OpenUSDZEditor Help" item in place,
+            // otherwise leaves its stock "USDZ Studio Help" item in place,
             // which — with no bundled help book — pops the useless "Help isn't
             // available" alert. Here the Help menu re-runs the first-launch
             // guided tour instead.

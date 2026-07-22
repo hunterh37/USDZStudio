@@ -1,4 +1,4 @@
-# OpenUSDZEditor — Roadmap
+# USDZ Studio — Roadmap
 
 Everything below is scoped to what native Swift + RealityKit + embedded Python/usd-core can realistically deliver. Phases gate each other; a phase ships as a tagged release.
 

@@ -6,22 +6,22 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-if [[ ! -d OpenUSDZEditor.xcodeproj ]]; then
+if [[ ! -d USDZStudio.xcodeproj ]]; then
   scripts/generate-xcodeproj.sh
 fi
 
 CONFIG="${CONFIG:-Debug}"
 DERIVED="$(pwd)/.build/xcode"
 
-echo "──── xcodebuild: OpenUSDZEditor ($CONFIG)"
+echo "──── xcodebuild: USDZStudio ($CONFIG)"
 xcodebuild \
-  -project OpenUSDZEditor.xcodeproj \
-  -scheme OpenUSDZEditor \
+  -project USDZStudio.xcodeproj \
+  -scheme USDZStudio \
   -configuration "$CONFIG" \
   -derivedDataPath "$DERIVED" \
   build | tail -5
 
-APP="$DERIVED/Build/Products/$CONFIG/OpenUSDZEditor.app"
+APP="$DERIVED/Build/Products/$CONFIG/USDZStudio.app"
 if [[ ! -d "$APP" ]]; then
   echo "error: build succeeded but app bundle not found at $APP" >&2
   exit 1

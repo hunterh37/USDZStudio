@@ -256,7 +256,7 @@ communicate over a **localhost socket** whose **JSON wire format is the only con
 each side keeps its own Codable mirror.
 
 **Discovery.** The app hosts an `NWListener` on `127.0.0.1` (ephemeral port) and writes
-`~/Library/Application Support/OpenUSDZEditor/mcp/endpoint.json` `{port, pid, token}` on
+`~/Library/Application Support/USDZStudio/mcp/endpoint.json` `{port, pid, token}` on
 launch (removed on quit). The server's sink reads this lazily, verifies the app pid is
 alive (`kill(pid,0)`), connects, and re-reads on failure. App not running ⇒ the sink is a
 graceful no-op and never blocks the tool path.

@@ -76,7 +76,7 @@ final class MCPActivityListener: ObservableObject {
             .urls(for: .applicationSupportDirectory, in: .userDomainMask).first
             ?? FileManager.default.temporaryDirectory
         return base
-            .appendingPathComponent("OpenUSDZEditor", isDirectory: true)
+            .appendingPathComponent("USDZStudio", isDirectory: true)
             .appendingPathComponent("mcp", isDirectory: true)
     }
 
