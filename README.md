@@ -1,8 +1,8 @@
 <div align="center">
 
-<img src="Resources/AppIcon/icon.png" alt="OpenUSDZEditor app icon" width="128" height="128" />
+<img src="Resources/AppIcon/icon.png" alt="USDZ Studio app icon" width="128" height="128" />
 
-# OpenUSDZEditor
+# USDZ Studio
 
 **The professional, open-source USDZ viewer and editor for macOS.**
 
@@ -35,7 +35,7 @@ A native Mac app — SwiftUI + RealityKit + an embedded Python/`usd-core` runtim
 
 Apple bet the spatial ecosystem on USD, but the tooling around it is fragmented: Reality Composer Pro is closed-source and visionOS-centric, `usdview` is a developer utility with a dated Qt UI, and online converters are lossy black boxes. There is no open tool that lets you *edit* a USDZ — rename prims, swap materials, adjust transforms, fix metadata, recolor a model — without round-tripping through a full DCC like Blender.
 
-OpenUSDZEditor is the missing piece: a beautiful, enterprise-grade native editor for the format, in the spirit of what Sketch or Nova did for their domains. Built for AR/spatial developers prepping RealityKit and QuickLook assets, 3D artists converting GLB/FBX/OBJ deliverables, e-commerce teams producing AR product visuals at volume, and pipeline engineers who want scriptable USD tooling.
+USDZ Studio is the missing piece: a beautiful, enterprise-grade native editor for the format, in the spirit of what Sketch or Nova did for their domains. Built for AR/spatial developers prepping RealityKit and QuickLook assets, 3D artists converting GLB/FBX/OBJ deliverables, e-commerce teams producing AR product visuals at volume, and pipeline engineers who want scriptable USD tooling.
 
 ## What it does
 
@@ -98,7 +98,7 @@ Requires Xcode 16+ / Swift 6 on macOS 14+ (Apple Silicon primary, Intel best-eff
 Prebuilt **unsigned** macOS builds are attached to every tagged [Release](https://github.com/hunterh37/OpenUSDZEditor/releases) (produced by [`.github/workflows/release.yml`](.github/workflows/release.yml) via `scripts/build-release.sh`). They aren't code-signed, so clear the quarantine flag once after unzipping:
 
 ```sh
-xattr -dr com.apple.quarantine OpenUSDZEditor.app
+xattr -dr com.apple.quarantine USDZStudio.app
 ```
 
 Prefer to build it yourself? See the full build-from-source guide in [`docs/BUILD.md`](docs/BUILD.md).
@@ -108,8 +108,8 @@ Prefer to build it yourself? See the full build-from-source guide in [`docs/BUIL
 The SPM packages under `Packages/` are the source of truth for all library code, tests, and the CLI — build them with `swift build` / `swift test`. The editor *shell* additionally needs a real `.app` bundle (Info.plist, bundle id, USD document-type registration, embedded Python scripts), which a bare `swift run` executable can't produce. That bundle is generated from [`project.yml`](project.yml) with [XcodeGen](https://github.com/yonaskolb/XcodeGen) (`brew install xcodegen`):
 
 ```sh
-bash scripts/generate-xcodeproj.sh     # project.yml -> OpenUSDZEditor.xcodeproj
-open OpenUSDZEditor.xcodeproj       # or work in Xcode directly
+bash scripts/generate-xcodeproj.sh     # project.yml -> USDZStudio.xcodeproj
+open USDZStudio.xcodeproj       # or work in Xcode directly
 bash scripts/run-app.sh [model.usdz]    # build + launch the bundle in one step
 ```
 

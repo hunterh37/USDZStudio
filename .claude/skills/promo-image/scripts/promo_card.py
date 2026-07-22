@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Branded before/after split card for OpenUSDZEditor promos.
+"""Branded before/after split card for USDZ Studio promos.
 
 House style: dark vertical-gradient bg, one blue accent (#5696FF), two rounded
 square panels (BEFORE muted border / AFTER accent border), a circular arrow

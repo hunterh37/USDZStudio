@@ -19,14 +19,14 @@ DERIVED="$(pwd)/.build/xcode-release"
 # the shipped build is a full editor, not a viewer-only degraded shell.
 bash scripts/fetch-python-runtime.sh
 
-if [[ ! -d OpenUSDZEditor.xcodeproj ]]; then
+if [[ ! -d USDZStudio.xcodeproj ]]; then
   scripts/generate-xcodeproj.sh
 fi
 
-echo "──── xcodebuild: OpenUSDZEditor ($CONFIG, unsigned)"
+echo "──── xcodebuild: USDZStudio ($CONFIG, unsigned)"
 xcodebuild \
-  -project OpenUSDZEditor.xcodeproj \
-  -scheme OpenUSDZEditor \
+  -project USDZStudio.xcodeproj \
+  -scheme USDZStudio \
   -configuration "$CONFIG" \
   -derivedDataPath "$DERIVED" \
   CODE_SIGNING_ALLOWED=NO \
@@ -34,14 +34,14 @@ xcodebuild \
   CODE_SIGN_STYLE=Manual \
   build | tail -8
 
-APP="$DERIVED/Build/Products/$CONFIG/OpenUSDZEditor.app"
+APP="$DERIVED/Build/Products/$CONFIG/USDZStudio.app"
 if [[ ! -d "$APP" ]]; then
   echo "error: build succeeded but app bundle not found at $APP" >&2
   exit 1
 fi
 
 mkdir -p "$OUT_DIR"
-ZIP="$OUT_DIR/OpenUSDZEditor-macos.zip"
+ZIP="$OUT_DIR/USDZStudio-macos.zip"
 rm -f "$ZIP"
 # ditto preserves the bundle's symlinks/permissions (a plain zip corrupts the
 # framework layout).

@@ -7,7 +7,7 @@ Modularity is the product strategy: an open-source contributor should be able to
 ## Workspace Layout
 
 ```
-OpenUSDZEditor/
+USDZStudio/
 ├── App/                          # Thin app target (SwiftUI lifecycle, DI wiring)
 ├── Packages/
 │   ├── USDCore/                  # Pure Swift USD stage model (no UI, no Python)

@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-Guidance for agents working in OpenUSDZEditor — a native macOS USDZ viewer/editor (SwiftUI + RealityKit + embedded Python/`usd-core`).
+Guidance for agents working in USDZ Studio — a native macOS USDZ viewer/editor (SwiftUI + RealityKit + embedded Python/`usd-core`).
 
 ## Concurrency (read first)
 

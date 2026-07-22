@@ -3,7 +3,7 @@ name: verify
 description: Verify a change to this editor by driving the real app headlessly — real bridge, real document, real SwiftUI panels, rendered to PNG. Use when confirming an editor/inspector/bridge change actually works, not just that tests pass.
 ---
 
-# Verifying OpenUSDZEditor
+# Verifying USDZ Studio
 
 **Never launch the app on the user's screen. Never use AppleScript/System Events
 to click.** This is a desktop app on the user's own machine — driving the GUI

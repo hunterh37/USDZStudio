@@ -4,7 +4,7 @@ import USDCore
 /// Owns the on-disk layout of crash-recovery sessions and turns a leftover WAL
 /// from a killed process back into a replayable `RecoveryPlan`.
 ///
-/// Layout (under `root`, typically Application Support/OpenUSDZEditor/Sessions):
+/// Layout (under `root`, typically Application Support/USDZStudio/Sessions):
 /// ```
 /// <root>/<sessionID>/journal.wal    ← the write-ahead log
 /// <root>/<sessionID>/session.live   ← sentinel: present ⇒ process didn't exit cleanly
@@ -24,7 +24,7 @@ public final class SessionStore: Sendable {
 
     /// Default location under the user's Application Support directory.
     public static func defaultStore(
-        appName: String = "OpenUSDZEditor",
+        appName: String = "USDZStudio",
         fileManager: FileManager = .default
     ) -> SessionStore {
         let base = (try? fileManager.url(

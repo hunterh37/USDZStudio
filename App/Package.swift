@@ -2,7 +2,7 @@
 import PackageDescription
 
 let package = Package(
-    name: "OpenUSDZEditorApp",
+    name: "USDZStudioApp",
     platforms: [.macOS(.v15)],
     dependencies: [
         .package(path: "../Packages/EditorUI"),
@@ -12,7 +12,7 @@ let package = Package(
     ],
     targets: [
         .executableTarget(
-            name: "OpenUSDZEditorApp",
+            name: "USDZStudioApp",
             dependencies: ["EditorUI", "USDBridge", "USDCore", "AgentMCP"],
             path: "Sources")
     ]
