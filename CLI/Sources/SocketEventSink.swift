@@ -2,7 +2,7 @@ import AgentMCP
 import Foundation
 
 /// The app's discovery record, written to
-/// `~/Library/Application Support/OpenUSDZEditor/mcp/endpoint.json` while the
+/// `~/Library/Application Support/USDZStudio/mcp/endpoint.json` while the
 /// editor is running. The sink reads it to find the editor's UNIX-domain socket.
 ///
 /// The transport is an AF_UNIX socket (a file path), not loopback TCP: `port`
@@ -41,7 +41,7 @@ enum MCPActivityPaths {
         let base = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
             ?? fileManager.temporaryDirectory
         return base
-            .appendingPathComponent("OpenUSDZEditor", isDirectory: true)
+            .appendingPathComponent("USDZStudio", isDirectory: true)
             .appendingPathComponent("mcp", isDirectory: true)
     }
 

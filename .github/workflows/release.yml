@@ -36,17 +36,17 @@ jobs:
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
-          name: OpenUSDZEditor-macos
-          path: dist/OpenUSDZEditor-macos.zip
+          name: USDZStudio-macos
+          path: dist/USDZStudio-macos.zip
 
       - name: Attach to GitHub Release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/OpenUSDZEditor-macos.zip
+          files: dist/USDZStudio-macos.zip
           body: |
-            Unsigned macOS build of OpenUSDZEditor ${{ github.ref_name }}.
+            Unsigned macOS build of USDZ Studio ${{ github.ref_name }}.
 
             This build is **not code-signed or notarized**. To run it, see
-            [docs/BUILD.md](https://github.com/hunterh37/OpenUSDZEditor/blob/main/docs/BUILD.md)
+            [docs/BUILD.md](https://github.com/hunterh37/USDZStudio/blob/main/docs/BUILD.md)
             § Running an unsigned build.

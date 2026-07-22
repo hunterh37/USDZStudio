@@ -1,6 +1,6 @@
 # Bundled Scripts
 
-Starter scripts shipped with OpenUSDZEditor. They surface in the **Scripts**
+Starter scripts shipped with USDZ Studio. They surface in the **Scripts**
 panel (bundled section) and are the reference implementations for the scripting
 model in `specs/scripting.md`.
 

@@ -1,9 +1,9 @@
 ---
 name: promo-image
-description: Produce a marketing/promo image for OpenUSDZEditor — the "before/after" split card (untextured primitive → photoreal textured render) and the photoreal orthographic sphere/globe render behind it. Use when asked to make a promo, hero shot, before/after card, launch image, README banner, or social/marketing visual for the app. Renders with pure Python (numpy + Pillow) in the bundled usd-core runtime; does NOT depend on the app's preview renderer.
+description: Produce a marketing/promo image for USDZ Studio — the "before/after" split card (untextured primitive → photoreal textured render) and the photoreal orthographic sphere/globe render behind it. Use when asked to make a promo, hero shot, before/after card, launch image, README banner, or social/marketing visual for the app. Renders with pure Python (numpy + Pillow) in the bundled usd-core runtime; does NOT depend on the app's preview renderer.
 ---
 
-# OpenUSDZEditor promo images
+# USDZ Studio promo images
 
 Two reusable pieces, each a standalone script under `scripts/`:
 

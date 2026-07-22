@@ -16,7 +16,7 @@ An audit of the codebase (2026-07) found the hard primitives already built, but 
 
 What is missing is purely the coordinator:
 
-- **No `scenePhase` observer and no launch-time restore hook.** `OpenUSDZEditorApp` is a `WindowGroup` (not `DocumentGroup`), so there is no free `NSDocument` autosave/state restoration — it must be hand-rolled.
+- **No `scenePhase` observer and no launch-time restore hook.** `USDZStudioApp` is a `WindowGroup` (not `DocumentGroup`), so there is no free `NSDocument` autosave/state restoration — it must be hand-rolled.
 - **No session descriptor** recording which document was open, its source URL, the associated WAL file, and the transient view/UI state.
 - **The WAL is configured per document with no durable, discoverable on-disk home** tying a journal to a document across launches.
 
@@ -31,7 +31,7 @@ What is missing is purely the coordinator:
 
 1. **Restore-but-prompt.** On launch we reconstruct the full document (open source + WAL replay + view state) into a *staged, not-yet-shown* document, then present a lightweight "Restore your previous session?" prompt reporting the unsaved-edit count. Committing shows it; declining deletes the session artifacts and opens clean. Recovery is cheap and reversible, so building before prompting is fine and yields an accurate count.
 2. **Single document (v1).** One session directory per document; multi-window is additive later (see Architecture).
-3. **Application Support files.** Session envelope + WAL live under `~/Library/Application Support/OpenUSDZEditor/Sessions/<sessionID>/`. A `SourceReference` (bookmark + path) identifies the source file so it reopens across launches; the app is unsandboxed (specs/architecture.md), so a plain bookmark — not a security-scoped one — suffices.
+3. **Application Support files.** Session envelope + WAL live under `~/Library/Application Support/USDZStudio/Sessions/<sessionID>/`. A `SourceReference` (bookmark + path) identifies the source file so it reopens across launches; the app is unsandboxed (specs/architecture.md), so a plain bookmark — not a security-scoped one — suffices.
 
 ## Architecture: reuse the existing WAL, add the envelope
 
@@ -63,7 +63,7 @@ Implementation revealed that `EditingKit` **already owns** the write-ahead-log h
 ## Persistence layout
 
 ```
-~/Library/Application Support/OpenUSDZEditor/Sessions/
+~/Library/Application Support/USDZStudio/Sessions/
 └── <sessionID>/
     ├── journal.wal       # EditingKit.SessionStore WAL (fsync per append)
     ├── session.live      # crash sentinel (present ⇒ offer for restore)

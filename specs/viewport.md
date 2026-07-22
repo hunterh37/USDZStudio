@@ -21,8 +21,11 @@ The center viewport: rendering, camera, selection, gizmos, environments, debug m
 ## Environment & Lighting
 
 - IBL presets bundled (studio, outdoor, neutral gray, pure white) + drag-in custom `.hdr`/`.exr`.
-- Exposure slider, environment intensity, background: environment / solid color / transparent checkerboard.
-- Optional key light with shadow for AR-preview realism; ground plane with contact shadow (matches QuickLook look).
+- Exposure slider, environment intensity, background: environment / **AR preview** / solid color / transparent checkerboard.
+- Tone-mapping operator (linear / Reinhard / ACES filmic) so authored exposure maps predictably rather than to RealityKit's uncontrolled default (#126). Pure `ToneMapping` operator in ViewportKit.
+- Key light + soft fill rig with shadow for AR-preview realism, composed on top of the resolved IBL (#126) — pure `LightingRig` value type; QuickLook-tuned `.quickLook` default.
+- Ground plane with contact shadow (matches QuickLook look), gated to the AR-preview background (#126). Pure `GroundingSettings` value type (`isActive(for:)` gating); RealityKit `GroundingShadowComponent` + shadow-receiver plane applied in the `ViewportPane` layer. Grounding/lighting/tone-mapping are viewer-only state — they author nothing to the stage, so they are export-profile-neutral.
+- **Render parity is gated by the T1 golden-image ΔE harness** (`GoldenImageComparator`, specs/testing.md layer 6): the perceptual-diff gate is pure/CI-green; offscreen frame production runs local/nightly.
 
 ## Debug View Modes (toolbar segmented control)
 
@@ -37,6 +40,8 @@ The center viewport: rendering, camera, selection, gizmos, environments, debug m
 - Hidden/deactivated prims render ghosted when "show disabled" is on in View menu, so users can find and re-enable parts visually.
 - Selection highlight: outline post-process (Metal overlay) — enterprise subtle, not glow-spam.
 - Gizmos: translate/rotate/scale (W/E/R), local/world toggle, snapping (grid, angle) with ⇧ modifier. Gizmo drags emit `SetTransformCommand` continuously with a single undo group per drag.
+- **Modal transform (Blender idiom, coexists with the handle gizmos):** `G`/`R`/`S` start a live grab/rotate/scale that follows the cursor with no handle click; `X`/`Y`/`Z` lock an axis (repeat toggles world↔local, ⇧+axis locks the plane); typed digits enter an exact delta (`G Z 2.4 ⏎`); `⏎`/left-click confirm as one coalesced undo entry, `⎋`/right-click cancel back to the original transform. A left-drag beginning on the *selected* body starts an unconstrained grab (body-drag); the left-drag priority is a pure, exhaustively tested router (`ViewportDragRouter`: handle → body-grab → marquee/orbit). The state machine (`ModalTransform`/`ModalConstraint`/`NumericEntry`, ViewportKit) is pure and reuses the handle gizmos' axis/angle math; a HUD line shows the running delta + constraint.
+- **Hotkey discoverability:** one `ShortcutRegistry` (EditorUI) is the single source of truth for all viewport hotkeys; `?` (and Help ▸ Keyboard Shortcuts / the viewport corner affordance) toggles a translucent reference card grouping the whole registry, and a transient hint toast (pure `ShortcutHintController`, injected clock; once per session, suppressible via the persisted `showHotkeyHints` preference) fades in on scene appear.
 
 ## Animation Playback
 

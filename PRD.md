@@ -1,4 +1,4 @@
-# OpenUSDZEditor — Product Requirements Document
+# USDZ Studio — Product Requirements Document
 
 **Version:** 0.1 (Draft)
 **Date:** 2026-07-14
@@ -10,7 +10,7 @@
 
 ## 1. Vision
 
-OpenUSDZEditor is the missing professional, open-source USDZ viewer and editor for macOS. Today the ecosystem is fragmented: Reality Composer Pro is closed-source and visionOS-centric, `usdview` is a developer utility with a dated Qt UI, and online converters are lossy black boxes. We build a native, enterprise-grade 3D editor that treats USDZ as a first-class document format — view it, inspect it, edit it, convert into it, and ship it.
+USDZ Studio is the missing professional, open-source USDZ viewer and editor for macOS. Today the ecosystem is fragmented: Reality Composer Pro is closed-source and visionOS-centric, `usdview` is a developer utility with a dated Qt UI, and online converters are lossy black boxes. We build a native, enterprise-grade 3D editor that treats USDZ as a first-class document format — view it, inspect it, edit it, convert into it, and ship it.
 
 **One-liner:** "The Sketch/Nova of USDZ — a beautiful native Mac editor for the format Apple bet the spatial ecosystem on."
 

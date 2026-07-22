@@ -126,6 +126,14 @@ public struct EditorShellView: View {
     @State private var showPalette = false
     @State private var paletteModel = CommandPaletteModel()
 
+    /// The `?` keyboard-shortcut reference card (specs/viewport.md; modal
+    /// grab/transform discoverability). Toggled by `?`, the corner affordance,
+    /// or Help ▸ Keyboard Shortcuts; `Esc`/`?`/click-away closes.
+    @State private var showShortcuts = false
+    /// Pure show/hold/fade logic for the transient hint toast; created on
+    /// appear so the persisted "don't show" preference can be injected.
+    @State private var hintController: ShortcutHintController?
+
     /// Output format for the one-click export, shared with the export panel and
     /// persisted across launches.
     @AppStorage("editor.export.format") private var exportFormatRaw = ExportFormat.usdz.rawValue
@@ -167,7 +175,7 @@ public struct EditorShellView: View {
     /// menu shortcuts and toolbar buttons drive the same state.
     public enum MenuCommand: String {
         case convert, batch, scripts, library, console, validate, mcpActivity, export, sculptDemo
-        case commandPalette, diff, recolor, capture
+        case commandPalette, diff, recolor, capture, keyboardShortcuts
         public static let notification = Notification.Name("EditorUI.MenuCommand")
     }
 
@@ -354,6 +362,7 @@ public struct EditorShellView: View {
             case .commandPalette: openCommandPalette()
             case .diff: if document != nil { showDiff.toggle() }
             case .recolor: if document != nil { activeSheet = .recolor }
+            case .keyboardShortcuts: showShortcuts.toggle()
             }
         }
         .overlay {
@@ -896,8 +905,12 @@ public struct EditorShellView: View {
         return panel.runModal() == .OK ? panel.url : nil
     }
 
-    @ViewBuilder
-    private var viewport: some View {
+    // Base viewport + its lifecycle/lighting wiring. Kept separate from the
+    // overlay stack in `viewport` so neither modifier chain exceeds the Swift
+    // type-checker's complexity budget — two feature branches (QuickLook
+    // environment controls and modal G/R/S transform) merged overlays onto a
+    // single expression that no longer type-checks in reasonable time.
+    private var viewportBase: some View {
         // Always render the live viewport — with no document open it shows the
         // default empty scene (grid + axis gizmo wireframe) rather than an
         // "open a file" placeholder, so the app opens straight into 3D space.
@@ -933,6 +946,17 @@ public struct EditorShellView: View {
                 onScaleGizmoDrag: { [weak document] phase in
                     document?.handleScaleGizmoDrag(phase)
                 },
+                // Modal transform (Blender-style G/R/S): the document owns the
+                // session; the viewport follows the cursor and reports ops.
+                modalTransform: document?.modalTransform,
+                onModalUpdate: { [weak document] op in document?.updateModalTransform(op) },
+                onModalConfirm: { [weak document] in document?.confirmModalTransform() },
+                onModalCancel: { [weak document] in document?.cancelModalTransform() },
+                bodySelection: Set(document?.selection.paths ?? []),
+                onBodyGrab: { [weak document] in
+                    document?.beginModalTransform(kind: .grab)
+                },
+                onViewportKey: { key, shift in handleViewportKey(key, shift: shift) },
                 cameraPose: tutorial?.cameraPose ?? appliedBookmarkPose,
                 // The tour's scripted tweens own the channel while running;
                 // otherwise the document's authored transforms render live
@@ -946,6 +970,7 @@ public struct EditorShellView: View {
                     HStack(spacing: 0) {
                         cameraBookmarksButton
                         environmentButton
+                        shortcutsButton
                     }
                 }
                 .onAppear {
@@ -953,6 +978,21 @@ public struct EditorShellView: View {
                     // Seed the viewport lighting from the persisted settings so
                     // the environment survives relaunch (specs/viewport.md).
                     if let settings { environment = settings.loadEnvironment() }
+                    // The transient shortcut hint: pure controller + injected
+                    // persisted preference; shown once per document-open.
+                    if hintController == nil {
+                        hintController = ShortcutHintController(preferences: settings)
+                    }
+                    if document != nil {
+                        hintController?.onSceneAppear(now: Date().timeIntervalSinceReferenceDate)
+                    }
+                }
+                .onChange(of: document?.revision ?? 0) { _, _ in
+                    // Any edit is an interaction: dismiss the hint toast early.
+                    hintController?.onInteraction()
+                }
+                .onChange(of: document?.selection ?? .empty) { _, _ in
+                    hintController?.onInteraction()
                 }
                 .onChange(of: environment) { _, newValue in
                     // Persist every lighting edit; a no-op when settings absent.
@@ -961,6 +1001,11 @@ public struct EditorShellView: View {
                 .onChange(of: stage?.metadata) { _, newValue in
                     playback.configure(from: newValue)
                 }
+    }
+
+    @ViewBuilder
+    private var viewport: some View {
+        viewportBase
                 .overlay {
                     // Mesh edit mode: tool strip + active-tool indicator over
                     // the viewport (Phase 6; specs/mesh-editing.md).
@@ -980,6 +1025,11 @@ public struct EditorShellView: View {
                     // runs; the hotkey hints return afterwards. The transport bar
                     // (auto-hidden without animation) sits above whichever shows.
                     VStack(spacing: 0) {
+                        // Transient shortcut hint (fade in → hold → auto-fade).
+                        if let hintController {
+                            ShortcutHintToast(controller: hintController)
+                                .padding(.bottom, Spacing.xs)
+                        }
                         if let tutorial {
                             TutorialOverlay(engine: tutorial)
                         } else if let document {
@@ -990,8 +1040,106 @@ public struct EditorShellView: View {
                         }
                     }
                 }
+                .overlay(alignment: .top) {
+                    // Modal transform HUD: the running delta + constraint line
+                    // produced by the pure state machine.
+                    if let hud = document?.modalTransform?.hudText {
+                        Text(hud)
+                            .font(.system(size: TypeScale.body, weight: .medium,
+                                          design: .monospaced))
+                            .foregroundStyle(Palette.textPrimary.color)
+                            .padding(.horizontal, Spacing.sm)
+                            .padding(.vertical, Spacing.xs)
+                            .background(Capsule().fill(Palette.surfaceElevated.color.opacity(0.92)))
+                            .overlay(Capsule().strokeBorder(Palette.accent.color.opacity(0.6),
+                                                            lineWidth: 1))
+                            .padding(.top, 44)   // clear of the breadcrumb bar
+                            .allowsHitTesting(false)
+                            .accessibilityIdentifier("modalTransform.hud")
+                    }
+                }
+                .overlay {
+                    // The `?` full shortcut reference card (single registry
+                    // source; zero persistent chrome until summoned).
+                    if showShortcuts {
+                        ShortcutsOverlay(isPresented: $showShortcuts)
+                    }
+                }
                 .background(editModeToggleShortcut)
                 .background(partEditingShortcuts)
+    }
+
+    /// The always-present corner affordance for the shortcut reference card.
+    private var shortcutsButton: some View {
+        Button {
+            showShortcuts.toggle()
+        } label: {
+            Image(systemName: "questionmark.circle")
+        }
+        .buttonStyle(.borderless)
+        .padding(6)
+        .help("Keyboard Shortcuts (?)")
+        .accessibilityIdentifier("viewport.shortcutsButton")
+    }
+
+    /// Routes raw viewport keys (the viewport NSView holds first responder, so
+    /// these arrive via `keyDown`, not SwiftUI focus). Returns `true` when the
+    /// key was consumed. Display strings for all of these live in
+    /// `ShortcutRegistry` — this is the single behavioural router.
+    private func handleViewportKey(_ key: Character, shift: Bool) -> Bool {
+        // `?` toggles the reference overlay in any state.
+        if key == "?" { showShortcuts.toggle(); return true }
+        guard let document else { return false }
+        hintController?.onInteraction()
+        let lower = Character(key.lowercased())
+
+        if document.modalTransform != nil {
+            switch key {
+            case "\r": document.confirmModalTransform(); return true
+            case "\u{1b}": document.cancelModalTransform(); return true
+            case "\u{8}": document.modalBackspaceNumeric(); return true
+            default: break
+            }
+            if let axis = Self.axisKey(lower) {
+                document.modalSetConstraint(axis: axis, shift: shift)
+                return true
+            }
+            if key.isNumber || key == "." || key == "-" {
+                document.modalTypeDigit(key)
+                return true
+            }
+            // Blender lets a running modal switch kind (G→R→S mid-gesture).
+            if let kind = ModalTransformKind.forShortcut(lower) {
+                document.cancelModalTransform()
+                document.beginModalTransform(kind: kind)
+                return true
+            }
+            return true   // a modal session swallows all other keys
+        }
+
+        // Idle: Esc closes the overlay (selection/isolate Esc handled elsewhere).
+        if key == "\u{1b}" {
+            if showShortcuts { showShortcuts = false; return true }
+            return false
+        }
+        guard !shift else { return false }
+        // W/E select the Maya-style handle gizmo; G/R/S start the Blender-style
+        // modal transform. `R` goes to modal rotate (Blender muscle memory) —
+        // the scale gizmo stays reachable via W→E→… UI and the registry
+        // documents both idioms (plan.md §Decisions).
+        if let kind = ModalTransformKind.forShortcut(lower) {
+            return document.beginModalTransform(kind: kind)
+        }
+        if let mode = GizmoMode.forShortcut(lower), mode != .scale {
+            document.gizmoMode = mode
+            return true
+        }
+        return false
+    }
+
+    /// X/Y/Z constraint keys.
+    private static func axisKey(_ c: Character) -> GizmoAxis? {
+        switch c { case "x": .x; case "y": .y; case "z": .z; default: nil }
     }
 
     /// Hidden hotkeys for part-level navigation (ROADMAP Milestone 3):

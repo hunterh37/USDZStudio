@@ -2,6 +2,7 @@
 import SwiftUI
 import RealityKit
 import AppKit
+import USDCore
 
 /// The Phase 1 viewport (specs/viewport.md): RealityKit fast-path loading
 /// via `Entity(contentsOf:)`, turntable orbit / pan / dolly, `F` frame,
@@ -109,6 +110,22 @@ public struct ViewportPane: View {
     /// phases through `onScaleGizmoDrag`.
     let scaleGizmo: ScaleGizmoDescriptor?
     let onScaleGizmoDrag: ((ScaleGizmoDragPhase) -> Void)?
+    /// The active Blender-style modal transform (G/R/S), or `nil` when none is
+    /// running. While non-nil the viewport follows the cursor and reports the
+    /// proposed op through `onModalUpdate`; a left-click confirms, a right-click
+    /// or `Esc` cancels (`onModalConfirm`/`onModalCancel`).
+    let modalTransform: ModalTransform?
+    let onModalUpdate: ((ModalOp) -> Void)?
+    let onModalConfirm: (() -> Void)?
+    let onModalCancel: (() -> Void)?
+    /// Body-drag: paths currently selected + a hit-test callback letting the
+    /// host start a `.free` grab when a left-drag begins on the selected body.
+    let bodySelection: Set<PrimPath>
+    let onBodyGrab: (() -> Void)?
+    /// Raw viewport keys (character, shift-held); returns `true` when consumed.
+    /// Drives the modal transform + `?` overlay from the host (which owns the
+    /// document + `ShortcutRegistry`).
+    let onViewportKey: ((Character, Bool) -> Bool)?
     /// Scripted camera (guided tour): while non-nil the pose overrides the
     /// user-driven orbit camera. `nil` = normal mouse control.
     let cameraPose: ViewportCameraPose?
@@ -164,6 +181,13 @@ public struct ViewportPane: View {
                 onRotateGizmoDrag: ((RotateGizmoDragPhase) -> Void)? = nil,
                 scaleGizmo: ScaleGizmoDescriptor? = nil,
                 onScaleGizmoDrag: ((ScaleGizmoDragPhase) -> Void)? = nil,
+                modalTransform: ModalTransform? = nil,
+                onModalUpdate: ((ModalOp) -> Void)? = nil,
+                onModalConfirm: (() -> Void)? = nil,
+                onModalCancel: (() -> Void)? = nil,
+                bodySelection: Set<PrimPath> = [],
+                onBodyGrab: (() -> Void)? = nil,
+                onViewportKey: ((Character, Bool) -> Bool)? = nil,
                 cameraPose: ViewportCameraPose? = nil,
                 liveTransforms: [String: float4x4]? = nil,
                 materialOverrides: [String: MaterialOverride]? = nil,
@@ -188,6 +212,13 @@ public struct ViewportPane: View {
         self.onRotateGizmoDrag = onRotateGizmoDrag
         self.scaleGizmo = scaleGizmo
         self.onScaleGizmoDrag = onScaleGizmoDrag
+        self.modalTransform = modalTransform
+        self.onModalUpdate = onModalUpdate
+        self.onModalConfirm = onModalConfirm
+        self.onModalCancel = onModalCancel
+        self.bodySelection = bodySelection
+        self.onBodyGrab = onBodyGrab
+        self.onViewportKey = onViewportKey
         self.cameraPose = cameraPose
         self.liveTransforms = liveTransforms
         self.materialOverrides = materialOverrides
@@ -210,6 +241,13 @@ public struct ViewportPane: View {
                                   onRotateGizmoDrag: onRotateGizmoDrag,
                                   scaleGizmo: scaleGizmo,
                                   onScaleGizmoDrag: onScaleGizmoDrag,
+                                  modalTransform: modalTransform,
+                                  onModalUpdate: onModalUpdate,
+                                  onModalConfirm: onModalConfirm,
+                                  onModalCancel: onModalCancel,
+                                  bodySelection: bodySelection,
+                                  onBodyGrab: onBodyGrab,
+                                  onViewportKey: onViewportKey,
                                   cameraLink: cameraLink,
                                   cameraPose: cameraPose, liveTransforms: liveTransforms,
                                   materialOverrides: materialOverrides,
@@ -302,6 +340,13 @@ struct ViewportRepresentable: NSViewRepresentable {
     let onRotateGizmoDrag: ((RotateGizmoDragPhase) -> Void)?
     let scaleGizmo: ScaleGizmoDescriptor?
     let onScaleGizmoDrag: ((ScaleGizmoDragPhase) -> Void)?
+    let modalTransform: ModalTransform?
+    let onModalUpdate: ((ModalOp) -> Void)?
+    let onModalConfirm: (() -> Void)?
+    let onModalCancel: (() -> Void)?
+    let bodySelection: Set<PrimPath>
+    let onBodyGrab: (() -> Void)?
+    let onViewportKey: ((Character, Bool) -> Bool)?
     let cameraLink: ViewportCameraLink
     let cameraPose: ViewportCameraPose?
     let liveTransforms: [String: float4x4]?
@@ -331,6 +376,7 @@ struct ViewportRepresentable: NSViewRepresentable {
         // the SwiftUI key-equivalent fallback which AppKit's key-view loop
         // pre-empts. Re-set each update so it tracks the current host closure.
         view.onToggleEditMode = onToggleEditMode
+        view.onViewportKey = onViewportKey
         context.coordinator.load(url: modelURL)
         context.coordinator.applyScene(scene)
         if let livePrimPaths {
@@ -342,6 +388,9 @@ struct ViewportRepresentable: NSViewRepresentable {
         context.coordinator.applyTranslateGizmo(translateGizmo, onDrag: onTranslateGizmoDrag)
         context.coordinator.applyRotateGizmo(rotateGizmo, onDrag: onRotateGizmoDrag)
         context.coordinator.applyScaleGizmo(scaleGizmo, onDrag: onScaleGizmoDrag)
+        context.coordinator.applyModalSession(modalTransform, onUpdate: onModalUpdate,
+                                              onConfirm: onModalConfirm, onCancel: onModalCancel,
+                                              bodySelection: bodySelection, onBodyGrab: onBodyGrab)
         context.coordinator.applyCameraPose(cameraPose)
         context.coordinator.applyLiveTransforms(liveTransforms)
         context.coordinator.applyMaterialOverrides(materialOverrides)
@@ -765,9 +814,12 @@ final class ViewportCoordinator {
             }
         }
 
-        // Exposure (EV) + intensity fold into RealityKit's intensity exponent.
+        // Exposure (EV) + intensity fold into RealityKit's intensity exponent,
+        // scaled by the rig's IBL-intensity multiplier (#126).
         view.environment.lighting.intensityExponent =
-            Float(settings.exposureEV) + log2(max(settings.intensity, 1e-4))
+            Float(settings.exposureEV)
+            + log2(max(settings.intensity, 1e-4))
+            + log2(max(settings.lighting.iblIntensity, 1e-4))
 
         // Non-environment backgrounds.
         switch settings.background {
@@ -777,8 +829,103 @@ final class ViewportCoordinator {
             view.environment.background = .color(Self.nsColor(color))
         case .transparent:
             view.environment.background = .color(.clear)
+        case .arPreview:
+            // Neutral studio backdrop the grounded model sits against — the
+            // QuickLook "AR preview" look. The floor + contact shadow are
+            // installed by applyGrounding; here we just set the backdrop.
+            view.environment.background = .color(
+                NSColor(srgbRed: 0.86, green: 0.86, blue: 0.88, alpha: 1))
+        }
+
+        applyQuickLookLighting(settings)
+        applyGrounding(settings)
+    }
+
+    // MARK: QuickLook render-parity glue (#126: key/fill rig + contact shadow)
+    // coverage:disable — RealityKit lighting/grounding glue: DirectionalLight,
+    // GroundingShadowComponent and the shadow-receiver plane can't be
+    // instantiated without an ARView. The pure decisions (GroundingSettings /
+    // LightingRig / ToneMapping in QuickLookLighting.swift) are unit-tested;
+    // this application is verified by the golden-image harness (testing layer 6).
+
+    /// The key/fill directional lights, parented under the camera anchor so
+    /// they light the model consistently as the camera orbits.
+    private let keyLightEntity = DirectionalLight()
+    private let fillLightEntity = DirectionalLight()
+    private let quickLookLightAnchor = AnchorEntity(world: .zero)
+    private var quickLookLightsInstalled = false
+
+    /// Installs / updates the QuickLook key+fill rig. Removing it when the rig
+    /// is disabled falls the viewport back to IBL-only lighting.
+    private func applyQuickLookLighting(_ settings: EnvironmentSettings) {
+        guard let view else { return }
+        let rig = settings.lighting
+        if !rig.isEnabled {
+            if quickLookLightsInstalled {
+                quickLookLightAnchor.removeFromParent()
+                quickLookLightsInstalled = false
+            }
+            return
+        }
+        if !quickLookLightsInstalled {
+            quickLookLightAnchor.addChild(keyLightEntity)
+            quickLookLightAnchor.addChild(fillLightEntity)
+            view.scene.addAnchor(quickLookLightAnchor)
+            quickLookLightsInstalled = true
+        }
+        configure(keyLightEntity, from: rig.keyLight)
+        configure(fillLightEntity, from: rig.fillLight)
+    }
+
+    /// Points a `DirectionalLight` along a spec's travel direction and applies
+    /// its intensity/colour/shadow. RealityKit lights shine down their entity's
+    /// -Z, so we orient -Z onto the desired travel direction.
+    private func configure(_ light: DirectionalLight, from spec: DirectionalLightSpec) {
+        light.light.intensity = spec.intensity
+        light.light.color = Self.nsColor(spec.color)
+        light.shadow = spec.castsShadow ? DirectionalLightComponent.Shadow() : nil
+        let dir = spec.normalizedDirection
+        let forward = SIMD3<Float>(0, 0, -1)
+        light.orientation = simd_quatf(from: forward, to: dir)
+    }
+
+    /// Root of the loaded model, used as the grounding-shadow caster and to
+    /// size the shadow-receiver floor.
+    private let groundReceiver = ModelEntity()
+    private var groundingInstalled = false
+
+    /// Installs the grounding contact shadow + receiver floor when the settings
+    /// say it is active for the current background, and tears it down otherwise.
+    private func applyGrounding(_ settings: EnvironmentSettings) {
+        guard let view else { return }
+        let active = settings.grounding.isActive(for: settings.background)
+        guard active else {
+            if groundingInstalled {
+                modelAnchor.components.remove(GroundingShadowComponent.self)
+                groundReceiver.removeFromParent()
+                groundingInstalled = false
+            }
+            return
+        }
+        // Caster: the model root casts a grounding shadow.
+        modelAnchor.components.set(GroundingShadowComponent(castsShadow: true))
+        // Receiver: a large, shadow-catching floor sized to the model bounds,
+        // placed at the model's base so the shadow lands where the model sits.
+        let radius = modelBounds?.radius ?? 1
+        let center = modelBounds?.center ?? .zero
+        let half = settings.grounding.groundHalfExtent(modelRadius: radius)
+        let plane = MeshResource.generatePlane(width: half * 2, depth: half * 2)
+        var material = PhysicallyBasedMaterial()
+        material.baseColor = .init(tint: NSColor(srgbRed: 0.86, green: 0.86, blue: 0.88, alpha: 1))
+        material.roughness = 1.0
+        groundReceiver.model = ModelComponent(mesh: plane, materials: [material])
+        groundReceiver.position = SIMD3(center.x, center.y - radius, center.z)
+        if !groundingInstalled {
+            gridAnchor.addChild(groundReceiver)
+            groundingInstalled = true
         }
     }
+    // coverage:enable
 
     // MARK: Debug view modes (wireframe / normals / UV checker / matcap)
 
@@ -1695,6 +1842,138 @@ final class ViewportCoordinator {
     }
     // coverage:enable
 
+    // MARK: Modal transform (Blender-style G/R/S) — cursor follow + body-drag
+
+    // coverage:disable — modal-transform mouse-capture / projection glue; the
+    // state machine is unit-tested in ViewportKit (ModalTransformTests) and the
+    // document flow in EditorUI (ModalTransformDocumentTests)
+    private var modalSession: ModalTransform?
+    private var onModalUpdate: ((ModalOp) -> Void)?
+    private var onModalConfirmCallback: (() -> Void)?
+    private var onModalCancelCallback: (() -> Void)?
+    private var onBodyGrabCallback: (() -> Void)?
+    private var modalBodySelection: Set<PrimPath> = []
+    /// Screen point the current modal gesture is measured from (top-left coords).
+    private var modalStartPoint: CGPoint?
+    /// The most recent cursor point, so a keyboard-driven constraint/numeric
+    /// change re-previews without waiting for the next mouse move.
+    private var modalLastPoint: CGPoint?
+    private var bodyGrabbing = false
+
+    /// Installs / tears down the active modal session and its viewport hooks.
+    func applyModalSession(_ modal: ModalTransform?,
+                           onUpdate: ((ModalOp) -> Void)?,
+                           onConfirm: (() -> Void)?,
+                           onCancel: (() -> Void)?,
+                           bodySelection: Set<PrimPath>,
+                           onBodyGrab: (() -> Void)?) {
+        onModalUpdate = onUpdate
+        onModalConfirmCallback = onConfirm
+        onModalCancelCallback = onCancel
+        onBodyGrabCallback = onBodyGrab
+        modalBodySelection = bodySelection
+
+        view?.isModalActive = { [weak self] in self?.modalSession != nil }
+        view?.onModalMouseMoved = { [weak self] p in self?.modalPointerMoved(to: p) }
+        view?.onModalConfirm = { [weak self] in self?.onModalConfirmCallback?() }
+        view?.onModalCancel = { [weak self] in self?.onModalCancelCallback?() }
+        view?.onBodyGrabProbe = { [weak self] p in self?.probeBodyGrab(at: p) ?? false }
+
+        let wasActive = modalSession != nil
+        modalSession = modal
+        if modal == nil {
+            modalStartPoint = nil
+            bodyGrabbing = false
+        } else if !wasActive {
+            // Keyboard-initiated: anchor the gesture at the current cursor.
+            modalStartPoint = modalLastPoint ?? currentCursorPoint()
+        }
+        view?.setModalTracking(modal != nil)
+        // Re-preview so a keyboard constraint/numeric change updates live.
+        if modal != nil, let p = modalLastPoint ?? modalStartPoint { modalPointerMoved(to: p) }
+    }
+
+    /// The cursor position in top-left view coordinates, or the view centre.
+    private func currentCursorPoint() -> CGPoint {
+        guard let view, let window = view.window else { return .zero }
+        let inWindow = window.mouseLocationOutsideOfEventStream
+        let p = view.convert(inWindow, from: nil)
+        return CGPoint(x: p.x, y: view.bounds.height - p.y)
+    }
+
+    /// Feeds a pointer sample to the modal state machine and forwards the
+    /// proposed op to the host for a live preview.
+    private func modalPointerMoved(to point: CGPoint) {
+        modalLastPoint = point
+        guard let modal = modalSession else { return }
+        if modalStartPoint == nil { modalStartPoint = point }
+        guard let start = modalStartPoint,
+              let startRay = worldRay(at: start),
+              let curRay = worldRay(at: point) else { return }
+        let pivotScreen = projectToScreen(modal.pivot) ?? start
+        let op = modal.proposedOp(pointer: point, start: start, pivotScreen: pivotScreen,
+                                  startRay: startRay, currentRay: curRay)
+        onModalUpdate?(op)
+    }
+
+    /// Left-mouse-down probe: starts a `.free` body grab when the press lands on
+    /// the currently-selected prim's body (router priority 2). Returns whether a
+    /// grab was started (so the camera doesn't also take the gesture).
+    private func probeBodyGrab(at point: CGPoint) -> Bool {
+        guard modalSession == nil, onBodyGrabCallback != nil, !modalBodySelection.isEmpty,
+              let view else { return false }
+        let hit = bodyHit(at: point, in: view)
+        let intent = ViewportDragRouter.resolve(hit: hit, selection: modalBodySelection,
+                                                modifiers: .none, boxSelectEnabled: false)
+        guard intent == .bodyGrab else { return false }
+        modalStartPoint = point
+        modalLastPoint = point
+        bodyGrabbing = true
+        onBodyGrabCallback?()          // host begins a .free grab; session flows back in
+        return true
+    }
+
+    /// Ray-picks the entity under `point` and maps it to a `ViewportHit`.
+    private func bodyHit(at point: CGPoint, in view: InteractiveARView) -> ViewportHit {
+        // AppKit (bottom-left) → RealityKit hit-test point.
+        let hitPoint = CGPoint(x: point.x, y: view.bounds.height - point.y)
+        guard let entity = view.entity(at: hitPoint) else { return .empty }
+        guard let path = Self.primPath(of: entity), let prim = PrimPath(path) else { return .empty }
+        return .prim(prim)
+    }
+
+    /// The absolute prim path an entity corresponds to (named-ancestor chain),
+    /// or `nil` for loader wrapper nodes.
+    private static func primPath(of entity: Entity) -> String? {
+        var names: [String] = []
+        var cursor: Entity? = entity
+        while let e = cursor {
+            if !e.name.isEmpty { names.append(e.name) }
+            cursor = e.parent
+        }
+        guard !names.isEmpty else { return nil }
+        return "/" + names.reversed().joined(separator: "/")
+    }
+
+    /// Projects a world point to top-left view coordinates, or `nil` when it is
+    /// behind the camera. Inverse of `CameraRay.make`.
+    private func projectToScreen(_ world: SIMD3<Double>) -> CGPoint? {
+        guard let view else { return nil }
+        let size = view.bounds.size
+        guard size.width > 0, size.height > 0 else { return nil }
+        let v = world - camera.position
+        let f = simd_dot(v, camera.forwardVector)
+        guard f > 1e-6 else { return nil }               // behind the camera
+        let aspect = Double(size.width / size.height)
+        let halfV = tan(OrbitCamera.verticalFOV / 2)
+        let ndcX = (simd_dot(v, camera.rightVector) / f) / (aspect * halfV)
+        let ndcY = (simd_dot(v, camera.upVector) / f) / halfV
+        let x = (ndcX + 1) / 2 * Double(size.width)
+        let y = (1 - ndcY) / 2 * Double(size.height)
+        return CGPoint(x: x, y: y)
+    }
+    // coverage:enable
+
     private func frameModel() {
         // A scripted pose owns the camera; auto-framing would fight it.
         guard appliedPose == nil, let modelBounds else { return }
@@ -1839,10 +2118,47 @@ final class InteractiveARView: ARView {
     var onGizmoDragMove: ((CGPoint) -> Void)?
     var onGizmoDragEnd: (() -> Void)?
 
+    // MARK: Modal transform (Blender-style G/R/S) hooks
+    /// Whether a keyboard-initiated modal transform is currently running.
+    var isModalActive: (() -> Bool)?
+    /// Cursor moved (top-left coords) while a modal session is active.
+    var onModalMouseMoved: ((CGPoint) -> Void)?
+    /// A left-click during a modal session confirms it.
+    var onModalConfirm: (() -> Void)?
+    /// A right-click (or the host's Esc) during a modal session cancels it.
+    var onModalCancel: (() -> Void)?
+    /// Left-mouse-down probe: returns `true` when a body-drag grab was started
+    /// on the selected body (the camera then never sees the gesture).
+    var onBodyGrabProbe: ((CGPoint) -> Bool)?
+    /// A raw viewport key (character, shift-held); returns `true` when consumed.
+    /// Modal hotkeys ride keyDown because the viewport holds first responder —
+    /// the same reason Tab/F are handled here rather than via SwiftUI focus.
+    var onViewportKey: ((Character, Bool) -> Bool)?
+
     private var mouseDownPoint: CGPoint?
     private var dragged = false
     private var gizmoCapturing = false
+    /// A body-drag grab is in flight (left-drag started on the selected body).
+    private var bodyGrabbing = false
+    /// A left-press during a modal session (confirms on release).
+    private var modalClickPending = false
     private var hoverTrackingArea: NSTrackingArea?
+    private var modalTrackingArea: NSTrackingArea?
+
+    /// Enables cursor tracking while a modal session runs so the transform
+    /// follows the pointer with no button held (Blender's grab).
+    func setModalTracking(_ on: Bool) {
+        if on == (modalTrackingArea != nil) { return }
+        if let modalTrackingArea { removeTrackingArea(modalTrackingArea) }
+        modalTrackingArea = nil
+        guard on else { return }
+        let area = NSTrackingArea(
+            rect: .zero,
+            options: [.mouseMoved, .activeInKeyWindow, .inVisibleRect],
+            owner: self)
+        addTrackingArea(area)
+        modalTrackingArea = area
+    }
 
     override func updateTrackingAreas() {
         super.updateTrackingAreas()
@@ -1858,9 +2174,15 @@ final class InteractiveARView: ARView {
     }
 
     override func mouseMoved(with event: NSEvent) {
-        guard let onHoverMove else { return }
         let p = convert(event.locationInWindow, from: nil)
-        onHoverMove(CGPoint(x: p.x, y: bounds.height - p.y))
+        let topLeft = CGPoint(x: p.x, y: bounds.height - p.y)
+        // A running modal transform follows the bare cursor (no button).
+        if isModalActive?() == true {
+            onModalMouseMoved?(topLeft)
+            return
+        }
+        guard let onHoverMove else { return }
+        onHoverMove(topLeft)
     }
 
     override func mouseExited(with event: NSEvent) {
@@ -1879,12 +2201,40 @@ final class InteractiveARView: ARView {
         let p = convert(event.locationInWindow, from: nil)
         mouseDownPoint = p
         dragged = false
+        let topLeft = CGPoint(x: p.x, y: bounds.height - p.y)
+        // A running modal transform: the click confirms it on release.
+        if isModalActive?() == true {
+            modalClickPending = true
+            return
+        }
         // Handle grab wins over camera and picking for the whole gesture.
-        gizmoCapturing = onGizmoMouseDown?(CGPoint(x: p.x, y: bounds.height - p.y)) ?? false
+        gizmoCapturing = onGizmoMouseDown?(topLeft) ?? false
+        guard !gizmoCapturing else { return }
+        // Body-drag: a left-press on the selected body starts a `.free` grab
+        // (unless the camera-modifier escape hatch is held → orbit).
+        if !event.modifierFlags.contains(.shift), onBodyGrabProbe?(topLeft) == true {
+            bodyGrabbing = true
+        }
+    }
+
+    override func rightMouseDown(with event: NSEvent) {
+        // Right-click cancels a running modal transform (Blender idiom).
+        if isModalActive?() == true { onModalCancel?(); return }
+        super.rightMouseDown(with: event)
     }
 
     override func mouseUp(with event: NSEvent) {
         defer { mouseDownPoint = nil }
+        if modalClickPending {
+            modalClickPending = false
+            onModalConfirm?()
+            return
+        }
+        if bodyGrabbing {
+            bodyGrabbing = false
+            onModalConfirm?()          // a body-drag ends the same as a modal grab
+            return
+        }
         if gizmoCapturing {
             gizmoCapturing = false
             onGizmoDragEnd?()
@@ -1900,6 +2250,11 @@ final class InteractiveARView: ARView {
 
     override func mouseDragged(with event: NSEvent) {
         dragged = true
+        if bodyGrabbing {
+            let p = convert(event.locationInWindow, from: nil)
+            onModalMouseMoved?(CGPoint(x: p.x, y: bounds.height - p.y))
+            return
+        }
         if gizmoCapturing {
             let p = convert(event.locationInWindow, from: nil)
             onGizmoDragMove?(CGPoint(x: p.x, y: bounds.height - p.y))
@@ -1937,6 +2292,15 @@ final class InteractiveARView: ARView {
         if event.keyCode == 48, let onToggleEditMode {
             onToggleEditMode()
             return
+        }
+        // Modal transform + discoverability keys ride keyDown (the viewport
+        // holds first responder, so SwiftUI `.onKeyPress` never sees them).
+        if let onViewportKey, let chars = event.charactersIgnoringModifiers, let c = chars.first {
+            let key: Character = event.keyCode == 51 ? "\u{8}"      // delete/backspace
+                : event.keyCode == 36 ? "\r"                        // return
+                : event.keyCode == 53 ? "\u{1b}"                    // escape
+                : c
+            if onViewportKey(key, event.modifierFlags.contains(.shift)) { return }
         }
         switch event.charactersIgnoringModifiers?.lowercased() {
         case "f": onFrame?()

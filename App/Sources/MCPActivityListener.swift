@@ -76,7 +76,7 @@ final class MCPActivityListener: ObservableObject {
             .urls(for: .applicationSupportDirectory, in: .userDomainMask).first
             ?? FileManager.default.temporaryDirectory
         return base
-            .appendingPathComponent("OpenUSDZEditor", isDirectory: true)
+            .appendingPathComponent("USDZStudio", isDirectory: true)
             .appendingPathComponent("mcp", isDirectory: true)
     }
 
@@ -238,21 +238,56 @@ final class MCPActivityListener: ObservableObject {
     private var hostServer: MCPServer?
     private weak var boundDocument: EditorDocument?
 
+    /// Installs a new front document seeded from the given stage and returns it
+    /// (or nil if the app declines). Set by the app so an agent editing into a
+    /// document-less window — the common "launch the app and start sculpting"
+    /// entry point — still renders, instead of mutating a host copy that mirrors
+    /// nowhere (specs/agent-live-editing.md).
+    var documentFactory: ((StageSnapshot) -> EditorDocument?)?
+
     /// Bind (or rebind) the hosted editing session to the front document. The
     /// session runs on its own stage seeded from the document; after each agent
     /// request its result is mirrored into the live document (which refreshes
-    /// the viewport). Rebinding starts a fresh agent session.
+    /// the viewport). Rebinding normally starts a fresh agent session.
     ///
     /// A host is created **even when no document is open** (`document == nil`),
     /// seeded from an empty stage. Otherwise the relay had nothing to answer
     /// with: `initialize`/`tools/list` — which need no document — failed, and
     /// `handleRpc` returned an empty line that the pump read as a dropped
     /// connection, so `openusdz mcp` reported "Failed to connect" whenever the
-    /// app was open on an empty window. Edits made against a document-less host
-    /// simply don't mirror anywhere until a document opens (then we rebind).
+    /// app was open on an empty window.
+    ///
+    /// When we just *materialized* this document from the live host stage (an
+    /// agent edit into a document-less window — see `mirrorHostEdits`), the new
+    /// document's snapshot already equals the host's current stage. Rebuilding
+    /// the host would tear down the in-flight agent session (losing sculpt
+    /// scratch, reference-image state, etc.) for no benefit, so we adopt the
+    /// document without re-seeding.
     func bindDocument(_ document: EditorDocument?) {
+        if let document, hostSession?.stage.currentSnapshot == document.snapshot {
+            boundDocument = document
+            return
+        }
         boundDocument = document
         makeHost(seededFrom: document?.snapshot)
+    }
+
+    /// Push the host session's current stage into the rendered document so the
+    /// viewport reflects the agent's edit. If the window has no document yet,
+    /// materialize one seeded from the host stage — otherwise the edit lands on
+    /// the host copy and never renders (the long-standing "MCP messages arrive
+    /// but the viewport stays empty" bug). Empty host stages are skipped so
+    /// `initialize`/`tools/list` don't spawn a blank scratch document.
+    private func mirrorHostEdits(from session: EditSession) {
+        let current = session.stage.currentSnapshot
+        if let document = boundDocument {
+            _ = document.applyConsoleEdit(after: current, label: "Agent Edit")
+        } else if current != StageSnapshot() {
+            // The factory installs `current` as the app's front document; the
+            // document-change observer then calls `bindDocument`, which adopts
+            // it without tearing down this live agent session (snapshots match).
+            boundDocument = documentFactory?(current)
+        }
     }
 
     /// Ensure a host exists before answering a request, so a relay call that
@@ -313,9 +348,9 @@ final class MCPActivityListener: ObservableObject {
         }
         Task { @MainActor in
             let response = await hostServer.handle(data: Data(frame.line.utf8))
-            // Mirror agent edits into the open document → viewport refresh.
-            boundDocument?.applyConsoleEdit(
-                after: session.stage.currentSnapshot, label: "Agent Edit")
+            // Mirror agent edits into the open document (materializing one if the
+            // window is empty) → viewport refresh.
+            mirrorHostEdits(from: session)
             send(RpcResponseFrame(id: frame.id, line: response?.serializedString ?? ""), on: fd)
         }
     }

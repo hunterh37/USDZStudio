@@ -7,10 +7,10 @@
 # registration, no place to carry the Python runtime).
 #
 # Regenerate with:  xcodegen generate   (or: bash scripts/generate-xcodeproj.sh)
-# The generated OpenUSDZEditor.xcodeproj is git-ignored — the spec is the
+# The generated USDZStudio.xcodeproj is git-ignored — the spec is the
 # checked-in source of truth, per the repo's specs-as-contract ethos.
 
-name: OpenUSDZEditor
+name: USDZStudio
 
 options:
   bundleIdPrefix: com.dicyanin
@@ -44,7 +44,7 @@ packages:
     path: Packages/RenderKit
 
 targets:
-  OpenUSDZEditor:
+  USDZStudio:
     type: application
     platform: macOS
     sources:
@@ -79,8 +79,8 @@ targets:
         embed: true
     settings:
       base:
-        PRODUCT_NAME: OpenUSDZEditor
-        PRODUCT_BUNDLE_IDENTIFIER: com.dicyanin.usdzedit
+        PRODUCT_NAME: USDZStudio
+        PRODUCT_BUNDLE_IDENTIFIER: com.dicyanin.usdzstudio
         INFOPLIST_FILE: App/Info.plist
         GENERATE_INFOPLIST_FILE: NO
         COMBINE_HIDPI_IMAGES: YES
@@ -104,7 +104,7 @@ targets:
     settings:
       base:
         PRODUCT_NAME: USDAThumbnailExtension
-        PRODUCT_BUNDLE_IDENTIFIER: com.dicyanin.usdzedit.quicklook-thumbnail
+        PRODUCT_BUNDLE_IDENTIFIER: com.dicyanin.usdzstudio.quicklook-thumbnail
         INFOPLIST_FILE: App/QuickLookThumbnail/Info.plist
         GENERATE_INFOPLIST_FILE: NO
         LD_RUNPATH_SEARCH_PATHS:
@@ -124,7 +124,7 @@ targets:
     settings:
       base:
         PRODUCT_NAME: USDAPreviewExtension
-        PRODUCT_BUNDLE_IDENTIFIER: com.dicyanin.usdzedit.quicklook-preview
+        PRODUCT_BUNDLE_IDENTIFIER: com.dicyanin.usdzstudio.quicklook-preview
         INFOPLIST_FILE: App/QuickLookPreview/Info.plist
         GENERATE_INFOPLIST_FILE: NO
         LD_RUNPATH_SEARCH_PATHS:
@@ -132,10 +132,10 @@ targets:
           - "@executable_path/../../../../Frameworks"
 
 schemes:
-  OpenUSDZEditor:
+  USDZStudio:
     build:
       targets:
-        OpenUSDZEditor: all
+        USDZStudio: all
     run:
       config: Debug
     archive:
