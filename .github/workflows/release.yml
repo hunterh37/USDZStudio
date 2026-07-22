@@ -48,5 +48,5 @@ jobs:
             Unsigned macOS build of OpenUSDZEditor ${{ github.ref_name }}.
 
             This build is **not code-signed or notarized**. To run it, see
-            [docs/BUILD.md](https://github.com/hunterh37/OpenUSDZEditor/blob/main/docs/BUILD.md)
+            [docs/BUILD.md](https://github.com/hunterh37/USDZStudio/blob/main/docs/BUILD.md)
             § Running an unsigned build.
