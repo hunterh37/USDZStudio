@@ -212,6 +212,8 @@ struct OpenUSDZEditorApp: App {
                 Divider()
                 Button("Convert File…") { postMenu(.convert) }
                     .keyboardShortcut("k", modifiers: [.command, .shift])
+                Button("Capture from Photos…") { postMenu(.capture) }
+                    .keyboardShortcut("c", modifiers: [.command, .shift])
                 Button("Batch Convert…") { postMenu(.batch) }
                     .keyboardShortcut("b", modifiers: [.command, .shift])
                 Divider()

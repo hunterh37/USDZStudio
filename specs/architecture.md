@@ -49,6 +49,7 @@ QuickLookKit — leaf, zero internal deps (pure render-plan logic; App QuickLook
 CLI ─▶ kits (never EditorUI)
 SculptKit ─▶ {USDCore, MeshKit}   (pure pipeline logic — spec model, validation, pass state machine; no UI/GPU/Python, authors no stage itself)
 EditorUI ─▶ SculptKit             (in-app staged-sculpt runner: applies BuildSteps as live document commands)
+EditorUI ─▶ CaptureKit            (capture-import sheet: the detail/profile model + pre-flight gate for photos→USDZ; the reconstruction seam itself comes via ConversionKit, specs/capture-import.md)
 App ─▶ AgentMCP                    (composition root hosts the in-app MCP editing session on the open document; specs/agent-live-editing.md. EditorUI still must NOT import AgentMCP)
 AgentMCP ─▶ {USDBridge, EditingKit, ValidationKit, ConversionKit, ScriptingKit, MeshKit, SculptKit} ─▶ USDCore   (thin MCP adapter, docs/AGENT_MCP_PLAN.md; never EditorUI)
 ```
