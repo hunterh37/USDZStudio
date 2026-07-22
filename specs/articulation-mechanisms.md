@@ -199,6 +199,14 @@ The existing `sculpt-from-image` prompt's step 2 is extended: when the object ha
 
 > Phase B was built first (not a prerequisite "Phase A") precisely because representation A carries the whole capability with no dependency on the variant-content bridge gap — the enterprise-grade, PRD-aligned default. The variant/animation/physics enhancements layer on without blocking it.
 
+## Console & UI — the inspector state switcher
+
+The editor surfaces articulations directly, so a user (not just a coding agent) can discover and drive the states baked into a loaded USDZ:
+
+- **`EditingKit.JointDiscovery.joints(in:)`** — a pure read over the stage snapshot that finds every `mechanism:joint` pivot, decodes it, and computes its *current* pose via the new **`PivotMath.value(fromPivotLocal:joint:)`** inverse (angle for a hinge, distance for a slider). It projects each hit into `DiscoveredJoint` — a UI-facing value type exposing only pivot path, labels, state names, active state, current value, and limits, and deliberately *not* a `MechanismKit.Joint`. This keeps `EditorUI` free of a `MechanismKit` dependency (the module layering forbids it) while still letting the panel render and drive mechanisms.
+- **Inspector "States" tab** (specs/editor-ui.md) — stage-wide (an asset's articulations belong to the whole asset, not the current selection). Each mechanism shows a segmented state switcher (closed/open/…) plus a range-bounded `ScrubField` for arbitrary in-limit poses; the active state is highlighted, an in-between pose reads "custom". Discrete variant sets appear in the same panel. Every toggle/scrub is one undoable `SetJointStateCommand` via `EditorDocument.setJointState`/`setJointValue`, selecting the pivot so the viewport follows.
+- **Harness:** `PivotMath` value-inverse round-trip fuzz (value→matrix→value, both kinds) in the MechanismKit 100% tier; `JointDiscoveryTests` (empty/single/nested/malformed-skipped/active-state match) in the EditingKit 100% tier; `StatesInspectorTests` drives the document ops and renders every branch of the panel.
+
 ## Console & CLI parity
 
 Per the Continuous/Platform roadmap: every articulation op is scriptable through the injected `app.*` API with single-undo script runs, reachable from the ⌘K command palette via `ActionRegistry`, and batchable as a CLI subcommand (consistent with `convert`/`validate`/`recolor`).

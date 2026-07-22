@@ -77,6 +77,16 @@ enum CLIRunner {
                                verdict as a machine-readable report; branch on
                                its `exportAllowed` field.
 
+      capture <images-dir> <out.usdz> [--detail medium] [--profile arkit]
+                     [--meters-per-unit N] [--json]
+                               Reconstruct a mesh from a folder of photos via
+                               PhotogrammetrySession, sharing the in-app
+                               pre-flight gate. --detail is one of preview,
+                               reduced, medium, full, raw (full/raw author a full
+                               PBR set; lower tiers are diffuse-only). Blocking
+                               pre-flight issues exit 1 before the session runs.
+                               Apple-silicon hardware required for the session.
+
       recolor <in-image> <out.png> --color '#RRGGBB' [--mode direct|calibrated]
                      [--source-space sRGB|linear|displayP3]
                      [--target-space sRGB|linear|displayP3]
@@ -152,6 +162,9 @@ enum CLIRunner {
         case "recolor":
             return RecolorCommand.run(arguments: Array(arguments.dropFirst()),
                                       print: output, printError: printError)
+        case "capture":
+            return await CaptureCommand.run(arguments: Array(arguments.dropFirst()),
+                                            print: output, printError: printError)
         default:
             printError("unknown subcommand: \(subcommand)\n" + usage)
             return 2

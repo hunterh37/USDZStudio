@@ -123,6 +123,50 @@ public enum PivotMath {
         return usdRowMajor(childReparentMatrix(joint, childLocal: childLocal))
     }
 
+    // MARK: - Inverse: recover a joint's value from its live pivot transform
+
+    /// Recover the joint value (degrees for `.revolute`, scene units for
+    /// `.prismatic`) realized by a pivot Xform's current local matrix — the
+    /// inverse of `pivotLocalMatrix`. This lets read-only tooling (the inspector
+    /// state switcher) show which state a loaded asset is *currently* in and seed
+    /// a scrub control, without re-deriving it from the authoring history.
+    ///
+    /// - revolute: strips the rest translation `T(pivot)`, then reads the signed
+    ///   rotation angle about `axis` from the residual rotation
+    ///   (`θ = atan2(sinθ, cosθ)`, with `sinθ` taken along the joint axis so the
+    ///   sign matches the authored convention).
+    /// - prismatic: projects the translation offset from `pivot` onto the unit axis.
+    ///
+    /// Deterministic and continuous in the interior of `(-180°, 180°)`; at the
+    /// ±180° wrap the recovered angle folds to the equivalent value, which the
+    /// caller clamps to the joint's declared limits.
+    public static func value(fromPivotLocal m: simd_double4x4, joint: Joint) -> Double {
+        let a = normalizedAxis(joint.axis)
+        let pivot = simd3(joint.pivot)
+        let translation = SIMD3<Double>(m.columns.3.x, m.columns.3.y, m.columns.3.z)
+        switch joint.kind {
+        case .prismatic:
+            return simd_dot(translation - pivot, a)
+        case .revolute:
+            // R = T(-pivot) · M leaves the pure rotation in the upper-left 3×3.
+            // For a rotation of θ about unit axis a: trace = 1 + 2cosθ, and
+            // (R₂₁−R₁₂, R₀₂−R₂₀, R₁₀−R₀₁) = 2·sinθ·a. Element Rᵣᵪ = m.columns[c][r].
+            let trace = m.columns.0.x + m.columns.1.y + m.columns.2.z
+            let cosθ = (trace - 1) / 2
+            let w = SIMD3<Double>(m.columns.1.z - m.columns.2.y,
+                                  m.columns.2.x - m.columns.0.z,
+                                  m.columns.0.y - m.columns.1.x)
+            let sinθ = simd_dot(w, a) / 2
+            return atan2(sinθ, cosθ) * 180 / .pi
+        }
+    }
+
+    /// Convenience over `value(fromPivotLocal:joint:)` reading a USD row-major
+    /// `xformOp:transform` value straight off the pivot prim.
+    public static func value(fromPivotRowMajor a: [Double], joint: Joint) -> Double {
+        value(fromPivotLocal: fromUsdRowMajor(a), joint: joint)
+    }
+
     // MARK: - Internal helpers
 
     static let epsilon = 1e-9

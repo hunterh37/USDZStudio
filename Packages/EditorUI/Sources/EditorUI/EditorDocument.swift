@@ -74,6 +74,15 @@ public final class EditorDocument {
     /// never be a silent no-op.
     public var meshEditRefusal: String?
 
+    /// Live lattice (FFD) deform state; `nil` when not in lattice mode
+    /// (specs/mesh-editing.md §Lattice deformer). Managed by
+    /// `EditorDocument+Lattice.swift`.
+    public var latticeEdit: LatticeEditState?
+
+    /// Why the last lattice-mode entry was refused (`nil` after success);
+    /// surfaced as a badge so a refusal is never a silent no-op.
+    public var latticeRefusal: String?
+
     /// The mesh prim most recently committed by an edit session — after
     /// commit, the stage (not the file) is the viewport's source of truth for
     /// this prim's geometry, including across undo/redo.
@@ -770,6 +779,42 @@ public final class EditorDocument {
         run(SetVariantSelectionCommand(
             path: path, setName: setName,
             newSelection: selection, oldSelection: variantSet.selection))
+    }
+
+    // MARK: Mechanism (rigid articulation) state switching
+
+    /// Every rigid articulation (hinge/slider) authored on the open stage, in
+    /// stable path order — the model behind the inspector's States panel. Pure
+    /// read of the live snapshot; empty for assets with no mechanisms.
+    public var articulations: [DiscoveredJoint] { JointDiscovery.joints(in: snapshot) }
+
+    /// Every discrete variant set on the stage, paired with the prim it lives on,
+    /// so the States panel can drive colorway/size/state switches stage-wide (the
+    /// per-prim variant picker in the Prim tab stays scoped to the selection).
+    public var stageVariantSets: [(path: PrimPath, set: VariantSet)] {
+        snapshot.allPrims()
+            .sorted { $0.path.description < $1.path.description }
+            .flatMap { prim in prim.variantSets.map { (prim.path, $0) } }
+    }
+
+    /// Drive a joint to a named state ("open"/"closed"/…) as one undoable command,
+    /// and select the pivot so the viewport gizmo/outliner follow. No-op when the
+    /// pivot carries no joint or the state is undeclared.
+    public func setJointState(_ pivotPath: PrimPath, state: String) {
+        guard let command = SetJointStateCommand.make(pivotPath: pivotPath, state: state, in: snapshot)
+        else { return }
+        guard run(command) != nil else { return }
+        selection = selection.selecting(pivotPath)
+    }
+
+    /// Drive a joint to an explicit in-limit value (degrees for a hinge, scene
+    /// units for a slider) as one undoable command. No-op for an out-of-limit
+    /// value or a pivot with no joint; the selection is left untouched so a live
+    /// scrub doesn't thrash the outliner.
+    public func setJointValue(_ pivotPath: PrimPath, value: Double) {
+        guard let command = SetJointStateCommand.make(pivotPath: pivotPath, value: value, in: snapshot)
+        else { return }
+        run(command)
     }
 
     // MARK: Material edits

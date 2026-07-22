@@ -1,0 +1,20 @@
+#usda 1.0
+(
+    defaultPrim = "Captured"
+    metersPerUnit = 1
+    upAxis = "Y"
+)
+
+# A stand-in for a PhotogrammetrySession capture result: a plain Y-up mesh under
+# a single Xform, matching the editor's modelled subset so open→save→open is a
+# fixed point (specs/capture-import.md — round-trip corpus). Kept geometry-only
+# and mesh-shaped like cube.usda so it shares that fixture's proven idempotence.
+def Xform "Captured"
+{
+    def Mesh "Geom"
+    {
+        int[] faceVertexCounts = [4, 4, 4, 4, 4, 4]
+        int[] faceVertexIndices = [0, 1, 3, 2, 2, 3, 5, 4, 4, 5, 7, 6, 6, 7, 1, 0, 1, 7, 5, 3, 6, 0, 2, 4]
+        point3f[] points = [(-1, -1, 1), (1, -1, 1), (-1, 1, 1), (1, 1, 1), (-1, 1, -1), (1, 1, -1), (-1, -1, -1), (1, -1, -1)]
+    }
+}
