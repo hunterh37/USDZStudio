@@ -56,6 +56,7 @@ MODULES=(
   "SessionKit|Packages/SessionKit|Sources/SessionKit|100"
   "DicyaninDesignSystem|Packages/DicyaninDesignSystem|Sources/DicyaninDesignSystem|95"
   "QuickLookKit|Packages/QuickLookKit|Sources/QuickLookKit|100"
+  "RenderKit|Packages/RenderKit|Sources/RenderKit|100"        # pure parse + selection are 100; GPU/usdrecord render bodies are coverage:disable
   "CLI|CLI|Sources|95"
   "USDBridge|Packages/USDBridge|Sources/USDBridge|95"          # spec floor; measures 100 today
   # Ratchet floors — pinned below spec target (noted), gap tracked in ROADMAP Phase T.

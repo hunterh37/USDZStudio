@@ -40,6 +40,8 @@ packages:
     path: Packages/QuickLookKit
   AgentMCP:
     path: Packages/AgentMCP
+  RenderKit:
+    path: Packages/RenderKit
 
 targets:
   OpenUSDZEditor:
@@ -66,6 +68,10 @@ targets:
       # document so agent edits render live (specs/agent-live-editing.md).
       - package: AgentMCP
         product: AgentMCP
+      # Native render backend for the in-app MCP server's render_views /
+      # sculpt review loop (issue #109) — no usdrecord required.
+      - package: RenderKit
+        product: RenderKit
       # Finder-level QuickLook extensions, embedded in Contents/PlugIns.
       - target: USDAThumbnailExtension
         embed: true

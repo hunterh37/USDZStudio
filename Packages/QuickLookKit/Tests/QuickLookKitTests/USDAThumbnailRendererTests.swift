@@ -72,6 +72,42 @@ final class USDAThumbnailRendererTests: XCTestCase {
         XCTAssertNil(path)
     }
 
+    func testLocateUsdrecordFoundOnPath() {
+        // Issue #110: a working /usr/bin/usdrecord must be discovered via PATH
+        // when there is no override and no venv-adjacent binary.
+        let path = USDAThumbnailRenderer.locateUsdrecord(
+            environment: ["PATH": "/opt/bin:/usr/bin:/usr/local/bin"],
+            locatePython: { nil },
+            fileExists: { $0 == "/usr/bin/usdrecord" })
+        XCTAssertEqual(path, "/usr/bin/usdrecord")
+    }
+
+    func testLocateUsdrecordPathSkipsRelativeEntries() {
+        // Non-absolute PATH entries are ignored; only the absolute one resolves.
+        let path = USDAThumbnailRenderer.locateUsdrecord(
+            environment: ["PATH": "relbin:/usr/bin"],
+            locatePython: { nil },
+            fileExists: { $0 == "/usr/bin/usdrecord" })
+        XCTAssertEqual(path, "/usr/bin/usdrecord")
+    }
+
+    func testLocateUsdrecordVenvWinsOverPath() {
+        // The venv-adjacent binary takes priority over a PATH hit.
+        let path = USDAThumbnailRenderer.locateUsdrecord(
+            environment: ["PATH": "/usr/bin"],
+            locatePython: { "/py/bin/python3" },
+            fileExists: { $0 == "/py/bin/usdrecord" || $0 == "/usr/bin/usdrecord" })
+        XCTAssertEqual(path, "/py/bin/usdrecord")
+    }
+
+    func testLocateUsdrecordNotOnPathReturnsNil() {
+        let path = USDAThumbnailRenderer.locateUsdrecord(
+            environment: ["PATH": "/usr/bin:/bin"],
+            locatePython: { nil },
+            fileExists: { _ in false })
+        XCTAssertNil(path)
+    }
+
     // MARK: renderPlan
 
     func testRenderPlanProducesUsdrecordInvocation() throws {
