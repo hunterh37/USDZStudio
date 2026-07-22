@@ -41,21 +41,37 @@ public enum USDAThumbnailRenderer {
         supportedExtensions.contains(url.pathExtension.lowercased())
     }
 
-    /// Locate `usdrecord`: the `DICYANIN_USDRECORD` override if set, else the
-    /// binary beside the located Python interpreter (the venv layout that
-    /// `scripts/fetch-python-runtime.sh` creates). Returns `nil` if not found.
+    /// Locate `usdrecord`, in priority order:
+    /// 1. the `DICYANIN_USDRECORD` override if set,
+    /// 2. the binary beside the located Python interpreter (the venv layout that
+    ///    `scripts/fetch-python-runtime.sh` creates),
+    /// 3. a `usdrecord` on the system `PATH` (e.g. a system/Homebrew install at
+    ///    `/usr/bin/usdrecord`), which the venv-only search previously ignored.
+    /// Returns `nil` if not found.
     public static func locateUsdrecord(
         environment: [String: String],
         locatePython: () -> String?,
         fileExists: (String) -> Bool
     ) -> String? {
+        // 1. Explicit override wins; if set but missing, do not silently fall back.
         if let override = environment["DICYANIN_USDRECORD"], !override.isEmpty {
             return fileExists(override) ? override : nil
         }
-        guard let python = locatePython() else { return nil }
-        let candidate = URL(fileURLWithPath: python).deletingLastPathComponent()
-            .appendingPathComponent("usdrecord").path
-        return fileExists(candidate) ? candidate : nil
+        // 2. Beside the bundled Python interpreter (fetch-python-runtime venv).
+        if let python = locatePython() {
+            let candidate = URL(fileURLWithPath: python).deletingLastPathComponent()
+                .appendingPathComponent("usdrecord").path
+            if fileExists(candidate) { return candidate }
+        }
+        // 3. System PATH fallback — a plain `usdrecord` on PATH (e.g. /usr/bin).
+        if let path = environment["PATH"], !path.isEmpty {
+            for directory in path.split(separator: ":", omittingEmptySubsequences: true) {
+                let candidate = URL(fileURLWithPath: String(directory))
+                    .appendingPathComponent("usdrecord").path
+                if fileExists(candidate) { return candidate }
+            }
+        }
+        return nil
     }
 
     /// Build the `usdrecord` invocation that renders `source` to `outputPath` at
