@@ -257,6 +257,10 @@ struct OpenUSDZEditorApp: App {
                 Button("Welcome Tour") { startTutorial() }
                     .keyboardShortcut("/", modifiers: [.command, .shift]) // ⌘?
                     .disabled(tutorial != nil)
+                // The full hotkey reference card (also toggled by `?` in the
+                // viewport); reads from EditorUI's ShortcutRegistry.
+                Button("Keyboard Shortcuts") { postMenu(.keyboardShortcuts) }
+                    .keyboardShortcut("/", modifiers: [.command])
             }
             CommandGroup(after: .toolbar) {
                 // ⌘K opens the command palette — the single entry point that

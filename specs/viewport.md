@@ -37,6 +37,8 @@ The center viewport: rendering, camera, selection, gizmos, environments, debug m
 - Hidden/deactivated prims render ghosted when "show disabled" is on in View menu, so users can find and re-enable parts visually.
 - Selection highlight: outline post-process (Metal overlay) — enterprise subtle, not glow-spam.
 - Gizmos: translate/rotate/scale (W/E/R), local/world toggle, snapping (grid, angle) with ⇧ modifier. Gizmo drags emit `SetTransformCommand` continuously with a single undo group per drag.
+- **Modal transform (Blender idiom, coexists with the handle gizmos):** `G`/`R`/`S` start a live grab/rotate/scale that follows the cursor with no handle click; `X`/`Y`/`Z` lock an axis (repeat toggles world↔local, ⇧+axis locks the plane); typed digits enter an exact delta (`G Z 2.4 ⏎`); `⏎`/left-click confirm as one coalesced undo entry, `⎋`/right-click cancel back to the original transform. A left-drag beginning on the *selected* body starts an unconstrained grab (body-drag); the left-drag priority is a pure, exhaustively tested router (`ViewportDragRouter`: handle → body-grab → marquee/orbit). The state machine (`ModalTransform`/`ModalConstraint`/`NumericEntry`, ViewportKit) is pure and reuses the handle gizmos' axis/angle math; a HUD line shows the running delta + constraint.
+- **Hotkey discoverability:** one `ShortcutRegistry` (EditorUI) is the single source of truth for all viewport hotkeys; `?` (and Help ▸ Keyboard Shortcuts / the viewport corner affordance) toggles a translucent reference card grouping the whole registry, and a transient hint toast (pure `ShortcutHintController`, injected clock; once per session, suppressible via the persisted `showHotkeyHints` preference) fades in on scene appear.
 
 ## Animation Playback
 
