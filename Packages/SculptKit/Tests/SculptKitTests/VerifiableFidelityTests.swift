@@ -301,4 +301,35 @@ import Testing
         let op = try JSONDecoder().decode(MeshRefinement.self, from: Data(json.utf8))
         #expect(op == .inset(fraction: 0.3, depth: 0))
     }
+
+    @Test func subdivideRefinementRoundTrips() throws {
+        let op = MeshRefinement.subdivide(levels: 2)
+        let data = try JSONEncoder().encode(op)
+        #expect(try JSONDecoder().decode(MeshRefinement.self, from: data) == op)
+    }
+
+    @Test func subdivideLevelsDefaultsToOne() throws {
+        let json = #"{"kind":"subdivide"}"#
+        let op = try JSONDecoder().decode(MeshRefinement.self, from: Data(json.utf8))
+        #expect(op == .subdivide(levels: 1))
+    }
+
+    @Test func subdivideRefinementEmitsRealOp() {
+        let spec = Self.refinedSpec([.subdivide(levels: 1)])
+        let steps = BuildPlanner.plan(for: spec, pass: .formRefinement)
+        #expect(steps.count == 1)
+        guard case .refineMesh(_, let ops) = steps[0] else { Issue.record("expected refineMesh"); return }
+        #expect(ops == [.subdivide(levels: 1)])
+    }
+
+    @Test func validSubdivideRefinementPasses() {
+        #expect(SpecValidator.validate(Self.refinedSpec([.subdivide(levels: 1)])).isValid)
+    }
+
+    @Test func rejectsSubdivideLevelsBelowOne() {
+        for bad in [0, -1] {
+            let spec = Self.refinedSpec([.subdivide(levels: bad)])
+            #expect(!SpecValidator.validate(spec).isValid)
+        }
+    }
 }

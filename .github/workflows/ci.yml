@@ -53,6 +53,22 @@ jobs:
         # harnesses land — see ROADMAP Phase T). No override label, by design.
         run: bash scripts/coverage-gate.sh
 
+  sculpt-eval:
+    # Sculpt-accuracy regression (#93). Runs SculptEvalHarness over the frozen
+    # P0 labelled corpus and fails on any drift from the fixtures frozen in
+    # EvalRegressionTests.swift — the same metric the live continue-gate uses,
+    # so a gate-moving change is caught here first. SculptKit is pure Swift
+    # (no usd-core / GPU / imaging), so this needs neither the Python runtime
+    # nor the full test matrix and stays fast.
+    runs-on: macos-15
+    needs: lint
+    steps:
+      - uses: actions/checkout@v4
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode_16.4.app || true
+      - name: Sculpt-accuracy regression over the P0 corpus
+        run: bash scripts/sculpt-eval-gate.sh
+
   roundtrip:
     # T1 round-trip invariant layer (ROADMAP Milestone 4). Blocking and
     # red-on-failure: open→save→open must be a fixed point, open→edit→undo-all
@@ -78,3 +94,28 @@ jobs:
         run: |
           export PATH="$PWD/Resources/Python/runtime/bin:$PATH"
           bash scripts/roundtrip-gate.sh
+
+  e2e:
+    # T11 end-to-end feature-flow layer (specs/e2e-testing.md). Blocking and
+    # red-on-failure: whole user journeys driven through the real `openusdz mcp`
+    # server (--no-relay, headless) against the real usd-core bridge — author,
+    # edit/undo/redo, variants, validation — asserted against an expectations
+    # table that fails on regression *and* on undeclared progress.
+    runs-on: macos-15
+    needs: lint
+    steps:
+      - uses: actions/checkout@v4
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode_16.4.app || true
+      - name: Fetch Python runtime (usd-core)
+        run: bash scripts/fetch-python-runtime.sh
+      - name: E2E feature flows over the MCP seam
+        # Same PATH shim as roundtrip so the gate's `import pxr` probe resolves
+        # to the bundled runtime rather than skipping.
+        env:
+          # A missing usd-core is a local skip but a hard CI failure: a gate
+          # that passes when its dependency is absent isn't a gate.
+          E2E_REQUIRE_USD: "1"
+        run: |
+          export PATH="$PWD/Resources/Python/runtime/bin:$PATH"
+          bash scripts/e2e-gate.sh

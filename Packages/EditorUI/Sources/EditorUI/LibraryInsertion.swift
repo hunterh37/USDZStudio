@@ -50,17 +50,23 @@ public enum LibraryInsertion {
         points.reserveCapacity(flat.points.count * 3)
         for p in flat.points { points += [p.x, p.y, p.z] }
 
-        let geo = Prim(
-            path: meshPath,
-            typeName: "Mesh",
-            attributes: [
-                Attribute(name: "points", value: .float3Array(points)),
-                Attribute(name: "faceVertexCounts", value: .intArray(flat.faceVertexCounts)),
-                Attribute(name: "faceVertexIndices", value: .intArray(flat.faceVertexIndices)),
-                // Without this USD defaults to catmullClark and low-poly stock
-                // renders as a subdivided blob.
-                Attribute(name: "subdivisionScheme", value: .token("none"), isUniform: true),
-            ])
+        var attributes: [Attribute] = [
+            Attribute(name: "points", value: .float3Array(points)),
+            Attribute(name: "faceVertexCounts", value: .intArray(flat.faceVertexCounts)),
+            Attribute(name: "faceVertexIndices", value: .intArray(flat.faceVertexIndices)),
+            // Without this USD defaults to catmullClark and low-poly stock
+            // renders as a subdivided blob.
+            Attribute(name: "subdivisionScheme", value: .token("none"), isUniform: true),
+        ]
+        // Author real per-vertex normals so an inserted library shape shades
+        // smoothly in RealityKit/QuickLook and clears `mesh.normals` (issue #95).
+        let normals = VertexNormals.smoothFlat(for: flat)
+        if !normals.isEmpty {
+            attributes.append(Attribute(
+                name: "normals", value: .float3Array(normals),
+                metadata: ["interpolation": "\"vertex\""]))
+        }
+        let geo = Prim(path: meshPath, typeName: "Mesh", attributes: attributes)
 
         return Prim(
             path: xformPath,
