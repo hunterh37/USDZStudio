@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Photoreal orthographic sphere/globe render from an equirectangular texture.
 
-House style for OpenUSDZEditor promos: linear-light shading, wrap-Lambert
+House style for USDZ Studio promos: linear-light shading, wrap-Lambert
 terminator, blue atmosphere limb + outer glow ring, 2x supersample. See the
 promo-image SKILL.md for the full aesthetic contract.
 

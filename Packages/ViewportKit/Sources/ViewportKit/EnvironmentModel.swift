@@ -56,6 +56,19 @@ public enum EnvironmentModel {
         case solidColor(SIMD3<Float>)
         /// The transparent checkerboard (alpha preview).
         case transparent
+        /// The AR Quick Look preview look: the model sits on a neutral studio
+        /// floor that receives a contact shadow, over a soft graduated backdrop.
+        /// This is the background the grounding contact shadow is gated to —
+        /// a floating model on a skybox has no floor to catch a shadow, so
+        /// grounding only makes sense here (specs/viewport.md "Environment").
+        case arPreview
+
+        /// True when this background presents the model as *grounded* on a
+        /// floor — the precondition for drawing a contact shadow. Only the
+        /// AR-preview backdrop does; every other mode floats the model.
+        public var groundsModel: Bool {
+            self == .arPreview
+        }
     }
 
     /// The resolved lighting source the rendering layer should install.
@@ -93,7 +106,7 @@ public enum EnvironmentModel {
 }
 
 /// The full, serializable environment/lighting state for one viewport.
-public struct EnvironmentSettings: Equatable, Sendable, Codable {
+public struct EnvironmentSettings: Equatable, Sendable {
 
     /// Active bundled preset. Ignored while a valid ``customEnvironmentURL`` is
     /// set, but retained so clearing the custom file restores the last preset.
@@ -113,11 +126,26 @@ public struct EnvironmentSettings: Equatable, Sendable, Codable {
     /// What fills the viewport behind the model.
     public var background: EnvironmentModel.Background
 
+    /// Grounding contact-shadow state (#126). Viewer-only; gated to a grounded
+    /// background via ``GroundingSettings/isActive(for:)``.
+    public var grounding: GroundingSettings
+
+    /// QuickLook-matched key/fill directional rig (#126), composed on top of
+    /// the resolved IBL source.
+    public var lighting: LightingRig
+
+    /// Tone-mapping operator applied to the linear-light render (#126) so
+    /// authored exposure maps predictably.
+    public var toneMapping: ToneMapping
+
     public init(preset: EnvironmentModel.IBLPreset = .studio,
                 customEnvironmentURL: URL? = nil,
                 exposureEV: Double = 0,
                 intensity: Float = 1,
-                background: EnvironmentModel.Background = .environment) {
+                background: EnvironmentModel.Background = .environment,
+                grounding: GroundingSettings = GroundingSettings(),
+                lighting: LightingRig = .quickLook,
+                toneMapping: ToneMapping = .aces) {
         self.preset = preset
         self.customEnvironmentURL = customEnvironmentURL
         self.exposureEV = min(max(exposureEV, EnvironmentModel.exposureRange.lowerBound),
@@ -125,6 +153,9 @@ public struct EnvironmentSettings: Equatable, Sendable, Codable {
         self.intensity = min(max(intensity, EnvironmentModel.intensityRange.lowerBound),
                              EnvironmentModel.intensityRange.upperBound)
         self.background = background
+        self.grounding = grounding
+        self.lighting = lighting
+        self.toneMapping = toneMapping
     }
 
     /// The linear intensity multiplier the exposure stop resolves to.
@@ -181,5 +212,40 @@ public struct EnvironmentSettings: Equatable, Sendable, Codable {
     public mutating func setIntensity(_ value: Float) {
         intensity = min(max(value, EnvironmentModel.intensityRange.lowerBound),
                         EnvironmentModel.intensityRange.upperBound)
+    }
+}
+
+// Hand-written Codable so the #126 fields (grounding/lighting/toneMapping) are
+// optional on decode: settings persisted before this feature landed decode
+// cleanly onto their defaults rather than failing the whole value.
+extension EnvironmentSettings: Codable {
+    private enum CodingKeys: String, CodingKey {
+        case preset, customEnvironmentURL, exposureEV, intensity, background
+        case grounding, lighting, toneMapping
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            preset: try c.decodeIfPresent(EnvironmentModel.IBLPreset.self, forKey: .preset) ?? .studio,
+            customEnvironmentURL: try c.decodeIfPresent(URL.self, forKey: .customEnvironmentURL),
+            exposureEV: try c.decodeIfPresent(Double.self, forKey: .exposureEV) ?? 0,
+            intensity: try c.decodeIfPresent(Float.self, forKey: .intensity) ?? 1,
+            background: try c.decodeIfPresent(EnvironmentModel.Background.self, forKey: .background) ?? .environment,
+            grounding: try c.decodeIfPresent(GroundingSettings.self, forKey: .grounding) ?? GroundingSettings(),
+            lighting: try c.decodeIfPresent(LightingRig.self, forKey: .lighting) ?? .quickLook,
+            toneMapping: try c.decodeIfPresent(ToneMapping.self, forKey: .toneMapping) ?? .aces)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(preset, forKey: .preset)
+        try c.encodeIfPresent(customEnvironmentURL, forKey: .customEnvironmentURL)
+        try c.encode(exposureEV, forKey: .exposureEV)
+        try c.encode(intensity, forKey: .intensity)
+        try c.encode(background, forKey: .background)
+        try c.encode(grounding, forKey: .grounding)
+        try c.encode(lighting, forKey: .lighting)
+        try c.encode(toneMapping, forKey: .toneMapping)
     }
 }

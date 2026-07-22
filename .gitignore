@@ -8,7 +8,7 @@ Resources/Python/runtime/
 .DS_Store
 
 # Generated Xcode project (source of truth is project.yml)
-OpenUSDZEditor.xcodeproj/
+USDZStudio.xcodeproj/
 .build/xcode/
 
 # Local MCP dev artifacts (absolute paths / scratch scenes)

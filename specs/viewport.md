@@ -21,8 +21,11 @@ The center viewport: rendering, camera, selection, gizmos, environments, debug m
 ## Environment & Lighting
 
 - IBL presets bundled (studio, outdoor, neutral gray, pure white) + drag-in custom `.hdr`/`.exr`.
-- Exposure slider, environment intensity, background: environment / solid color / transparent checkerboard.
-- Optional key light with shadow for AR-preview realism; ground plane with contact shadow (matches QuickLook look).
+- Exposure slider, environment intensity, background: environment / **AR preview** / solid color / transparent checkerboard.
+- Tone-mapping operator (linear / Reinhard / ACES filmic) so authored exposure maps predictably rather than to RealityKit's uncontrolled default (#126). Pure `ToneMapping` operator in ViewportKit.
+- Key light + soft fill rig with shadow for AR-preview realism, composed on top of the resolved IBL (#126) — pure `LightingRig` value type; QuickLook-tuned `.quickLook` default.
+- Ground plane with contact shadow (matches QuickLook look), gated to the AR-preview background (#126). Pure `GroundingSettings` value type (`isActive(for:)` gating); RealityKit `GroundingShadowComponent` + shadow-receiver plane applied in the `ViewportPane` layer. Grounding/lighting/tone-mapping are viewer-only state — they author nothing to the stage, so they are export-profile-neutral.
+- **Render parity is gated by the T1 golden-image ΔE harness** (`GoldenImageComparator`, specs/testing.md layer 6): the perceptual-diff gate is pure/CI-green; offscreen frame production runs local/nightly.
 
 ## Debug View Modes (toolbar segmented control)
 

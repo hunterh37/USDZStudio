@@ -67,11 +67,40 @@ public enum RasterLoader {
     // coverage:enable
     #endif
 
+    /// Load a *reference* image for comparison, matting it first when it is
+    /// opaque (sculpt-accuracy P1/#82). Finding F1: a raw photo's busy opaque
+    /// background dominates the measured similarity (IoU 0.166 raw vs 0.420
+    /// matted on the same reference), so an opaque reference is segmented and
+    /// its background made transparent before the metric sees it. References
+    /// that already carry alpha (pre-matted, or synthetic renders) pass through
+    /// untouched, and a matte that finds no foreground at all falls back to the
+    /// raw pixels rather than erasing the reference.
+    public static func loadReference(path: String) -> RasterImage? {
+        guard let raw = load(path: path) else { return nil }
+        return mattedReference(raw)
+    }
+
+    /// The matting policy for `loadReference`, factored out so the pure
+    /// decision (alpha passthrough / matte / empty-matte fallback) is testable
+    /// without touching the filesystem.
+    static func mattedReference(_ raw: RasterImage) -> RasterImage {
+        guard !ReferenceMatte.hasMeaningfulAlpha(raw) else { return raw }
+        let mask = ReferenceMatte.segment(raw)
+        guard mask.alpha.contains(where: { $0 > 0 }) else { return raw }
+        var rgba = raw.rgba
+        for i in 0..<(raw.width * raw.height) {
+            rgba[i * 4 + 3] = mask.alpha[i]
+        }
+        // Safe: identical dimensions and buffer length to `raw`.
+        return RasterImage(width: raw.width, height: raw.height, rgba: rgba)!
+    }
+
     /// Decode a reference/render pair and compute their similarity. Returns nil
     /// when either image fails to decode, so callers can distinguish "measured
-    /// low" from "could not measure".
+    /// low" from "could not measure". The reference side goes through the
+    /// P1 matting policy (`loadReference`).
     public static func similarity(referencePath: String, renderPath: String) -> SimilarityReport? {
-        guard let reference = load(path: referencePath),
+        guard let reference = loadReference(path: referencePath),
               let render = load(path: renderPath) else { return nil }
         return ImageSimilarity.compare(reference: reference, render: render)
     }
@@ -84,7 +113,7 @@ public enum RasterLoader {
         guard !views.isEmpty else { return nil }
         var pairs: [(reference: RasterImage, render: RasterImage)] = []
         for view in views {
-            guard let reference = load(path: view.reference),
+            guard let reference = loadReference(path: view.reference),
                   let render = load(path: view.render) else { return nil }
             pairs.append((reference, render))
         }

@@ -814,9 +814,12 @@ final class ViewportCoordinator {
             }
         }
 
-        // Exposure (EV) + intensity fold into RealityKit's intensity exponent.
+        // Exposure (EV) + intensity fold into RealityKit's intensity exponent,
+        // scaled by the rig's IBL-intensity multiplier (#126).
         view.environment.lighting.intensityExponent =
-            Float(settings.exposureEV) + log2(max(settings.intensity, 1e-4))
+            Float(settings.exposureEV)
+            + log2(max(settings.intensity, 1e-4))
+            + log2(max(settings.lighting.iblIntensity, 1e-4))
 
         // Non-environment backgrounds.
         switch settings.background {
@@ -826,8 +829,103 @@ final class ViewportCoordinator {
             view.environment.background = .color(Self.nsColor(color))
         case .transparent:
             view.environment.background = .color(.clear)
+        case .arPreview:
+            // Neutral studio backdrop the grounded model sits against — the
+            // QuickLook "AR preview" look. The floor + contact shadow are
+            // installed by applyGrounding; here we just set the backdrop.
+            view.environment.background = .color(
+                NSColor(srgbRed: 0.86, green: 0.86, blue: 0.88, alpha: 1))
+        }
+
+        applyQuickLookLighting(settings)
+        applyGrounding(settings)
+    }
+
+    // MARK: QuickLook render-parity glue (#126: key/fill rig + contact shadow)
+    // coverage:disable — RealityKit lighting/grounding glue: DirectionalLight,
+    // GroundingShadowComponent and the shadow-receiver plane can't be
+    // instantiated without an ARView. The pure decisions (GroundingSettings /
+    // LightingRig / ToneMapping in QuickLookLighting.swift) are unit-tested;
+    // this application is verified by the golden-image harness (testing layer 6).
+
+    /// The key/fill directional lights, parented under the camera anchor so
+    /// they light the model consistently as the camera orbits.
+    private let keyLightEntity = DirectionalLight()
+    private let fillLightEntity = DirectionalLight()
+    private let quickLookLightAnchor = AnchorEntity(world: .zero)
+    private var quickLookLightsInstalled = false
+
+    /// Installs / updates the QuickLook key+fill rig. Removing it when the rig
+    /// is disabled falls the viewport back to IBL-only lighting.
+    private func applyQuickLookLighting(_ settings: EnvironmentSettings) {
+        guard let view else { return }
+        let rig = settings.lighting
+        if !rig.isEnabled {
+            if quickLookLightsInstalled {
+                quickLookLightAnchor.removeFromParent()
+                quickLookLightsInstalled = false
+            }
+            return
+        }
+        if !quickLookLightsInstalled {
+            quickLookLightAnchor.addChild(keyLightEntity)
+            quickLookLightAnchor.addChild(fillLightEntity)
+            view.scene.addAnchor(quickLookLightAnchor)
+            quickLookLightsInstalled = true
+        }
+        configure(keyLightEntity, from: rig.keyLight)
+        configure(fillLightEntity, from: rig.fillLight)
+    }
+
+    /// Points a `DirectionalLight` along a spec's travel direction and applies
+    /// its intensity/colour/shadow. RealityKit lights shine down their entity's
+    /// -Z, so we orient -Z onto the desired travel direction.
+    private func configure(_ light: DirectionalLight, from spec: DirectionalLightSpec) {
+        light.light.intensity = spec.intensity
+        light.light.color = Self.nsColor(spec.color)
+        light.shadow = spec.castsShadow ? DirectionalLightComponent.Shadow() : nil
+        let dir = spec.normalizedDirection
+        let forward = SIMD3<Float>(0, 0, -1)
+        light.orientation = simd_quatf(from: forward, to: dir)
+    }
+
+    /// Root of the loaded model, used as the grounding-shadow caster and to
+    /// size the shadow-receiver floor.
+    private let groundReceiver = ModelEntity()
+    private var groundingInstalled = false
+
+    /// Installs the grounding contact shadow + receiver floor when the settings
+    /// say it is active for the current background, and tears it down otherwise.
+    private func applyGrounding(_ settings: EnvironmentSettings) {
+        guard let view else { return }
+        let active = settings.grounding.isActive(for: settings.background)
+        guard active else {
+            if groundingInstalled {
+                modelAnchor.components.remove(GroundingShadowComponent.self)
+                groundReceiver.removeFromParent()
+                groundingInstalled = false
+            }
+            return
+        }
+        // Caster: the model root casts a grounding shadow.
+        modelAnchor.components.set(GroundingShadowComponent(castsShadow: true))
+        // Receiver: a large, shadow-catching floor sized to the model bounds,
+        // placed at the model's base so the shadow lands where the model sits.
+        let radius = modelBounds?.radius ?? 1
+        let center = modelBounds?.center ?? .zero
+        let half = settings.grounding.groundHalfExtent(modelRadius: radius)
+        let plane = MeshResource.generatePlane(width: half * 2, depth: half * 2)
+        var material = PhysicallyBasedMaterial()
+        material.baseColor = .init(tint: NSColor(srgbRed: 0.86, green: 0.86, blue: 0.88, alpha: 1))
+        material.roughness = 1.0
+        groundReceiver.model = ModelComponent(mesh: plane, materials: [material])
+        groundReceiver.position = SIMD3(center.x, center.y - radius, center.z)
+        if !groundingInstalled {
+            gridAnchor.addChild(groundReceiver)
+            groundingInstalled = true
         }
     }
+    // coverage:enable
 
     // MARK: Debug view modes (wireframe / normals / UV checker / matcap)
 

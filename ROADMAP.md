@@ -1,4 +1,4 @@
-# OpenUSDZEditor — Roadmap
+# USDZ Studio — Roadmap
 
 Everything below is scoped to what native Swift + RealityKit + embedded Python/usd-core can realistically deliver. Phases gate each other; a phase ships as a tagged release.
 
@@ -25,7 +25,7 @@ All four viewer features are built (see the Phase 1 `[x]` entries below), but th
 - ✅ QuickLook thumbnail + preview extension for `.usda` (Finder-level `.appex`, distinct from the existing CLI `usdrecord` thumbnail path).
 - **Remaining blockers (why this is not Done):**
   - Build-from-source docs + unsigned release builds on GitHub Releases (Phase 1, line 124 — still `[ ]`).
-  - The T1 golden-image ΔE harness itself (per-debug-mode + per-IBL-preset renders vs. reference PNGs; deterministic sampled-pose playback frames) — unbuilt (Phase T1).
+  - The T1 golden-image ΔE harness: the **pure ΔE comparator + PNG decode gate is built and CI-green** (`GoldenImage`/`GoldenImageComparator`, #126, per-PR); the remaining piece is wiring offscreen viewport *frame production* (per-debug-mode + per-IBL-preset + grounding on/off) and committing reference PNGs so the gate compares real frames rather than synthetic fixtures — the GPU capture runs local/nightly (Phase T1).
 - **Exit / harness:** golden-image renders per debug mode and IBL preset with a ΔE gate (this is the T1 golden-image harness — build it here); deterministic sampled-pose frames for playback; ship unsigned release builds + build-from-source docs.
 
 ### Milestone 3 — Part-level editing flagship (finishes Phase 3 differentiators) — ✅ **Done**
@@ -82,7 +82,7 @@ With the golden-image, round-trip, corpus, and XCUITest harnesses now built by e
   - [x] DicyaninDesignSystem **95%** (currently 100%)
   - [x] CLI **95%** (subcommand × exit-code matrix; real-subprocess launch excluded via annotation)
   - [x] USDBridge **95%** — met in Milestone 4 (measures 100%); StageSaver save path covered by real-usd-core round-trip + mini-corpus tests
-  - [ ] ViewportKit **90%** — ratchet at 37% today; needs golden-image harness (T1)
+  - [ ] ViewportKit **90%** — ratchet at 58% today (#126 landed the golden-image ΔE comparator + QuickLook parity models); climbing toward spec as offscreen-render frame production joins the gate
   - [ ] EditorUI **90%** — ratchet at 25% today; needs snapshot + XCUITest harnesses (T1)
 - [ ] Coverage-delta PR comment; no override label (per spec, on purpose).
 

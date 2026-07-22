@@ -1,4 +1,4 @@
-"""Shared runtime harness for OpenUSDZEditor bundled scripts.
+"""Shared runtime harness for USDZ Studio bundled scripts.
 
 Every bundled script targets *two* execution modes without changing its body:
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""End-to-end flow driver for OpenUSDZEditor (specs/testing.md §Test Layer 11).
+"""End-to-end flow driver for USDZ Studio (specs/testing.md §Test Layer 11).
 
 Drives a whole user journey through the *real* product seam — the `openusdz mcp`
 JSON-RPC server over stdio, the same transport an agent (or the live editor)

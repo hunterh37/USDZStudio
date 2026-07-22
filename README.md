@@ -1,8 +1,8 @@
 <div align="center">
 
-<img src="Resources/AppIcon/icon.png" alt="OpenUSDZEditor app icon" width="128" height="128" />
+<img src="Resources/AppIcon/icon.png" alt="USDZ Studio app icon" width="128" height="128" />
 
-# OpenUSDZEditor
+# USDZ Studio
 
 **The professional, open-source USDZ viewer and editor for macOS.**
 
@@ -10,22 +10,22 @@ A native Mac app — SwiftUI + RealityKit + an embedded Python/`usd-core` runtim
 
 <br/>
 
-[![CI](https://github.com/hunterh37/OpenUSDZEditor/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/hunterh37/OpenUSDZEditor/actions/workflows/ci.yml)
+[![CI](https://github.com/hunterh37/USDZStudio/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/hunterh37/USDZStudio/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Swift 6](https://img.shields.io/badge/Swift-6.0-F05138?logo=swift&logoColor=white)](https://swift.org)
 [![Platform](https://img.shields.io/badge/macOS-14%2B-000000?logo=apple&logoColor=white)](https://www.apple.com/macos/)
 [![SwiftPM](https://img.shields.io/badge/SwiftPM-compatible-brightgreen?logo=swift&logoColor=white)](https://www.swift.org/package-manager/)
 
-[![Last commit](https://img.shields.io/github/last-commit/hunterh37/OpenUSDZEditor/main?logo=git&logoColor=white)](https://github.com/hunterh37/OpenUSDZEditor/commits/main)
-[![Commit activity](https://img.shields.io/github/commit-activity/m/hunterh37/OpenUSDZEditor?logo=github)](https://github.com/hunterh37/OpenUSDZEditor/pulse)
-[![Open issues](https://img.shields.io/github/issues/hunterh37/OpenUSDZEditor?logo=github)](https://github.com/hunterh37/OpenUSDZEditor/issues)
-[![Open PRs](https://img.shields.io/github/issues-pr/hunterh37/OpenUSDZEditor?logo=github)](https://github.com/hunterh37/OpenUSDZEditor/pulls)
-[![Contributors](https://img.shields.io/github/contributors/hunterh37/OpenUSDZEditor?logo=github)](https://github.com/hunterh37/OpenUSDZEditor/graphs/contributors)
-[![Stars](https://img.shields.io/github/stars/hunterh37/OpenUSDZEditor?style=flat&logo=github)](https://github.com/hunterh37/OpenUSDZEditor/stargazers)
+[![Last commit](https://img.shields.io/github/last-commit/hunterh37/USDZStudio/main?logo=git&logoColor=white)](https://github.com/hunterh37/USDZStudio/commits/main)
+[![Commit activity](https://img.shields.io/github/commit-activity/m/hunterh37/USDZStudio?logo=github)](https://github.com/hunterh37/USDZStudio/pulse)
+[![Open issues](https://img.shields.io/github/issues/hunterh37/USDZStudio?logo=github)](https://github.com/hunterh37/USDZStudio/issues)
+[![Open PRs](https://img.shields.io/github/issues-pr/hunterh37/USDZStudio?logo=github)](https://github.com/hunterh37/USDZStudio/pulls)
+[![Contributors](https://img.shields.io/github/contributors/hunterh37/USDZStudio?logo=github)](https://github.com/hunterh37/USDZStudio/graphs/contributors)
+[![Stars](https://img.shields.io/github/stars/hunterh37/USDZStudio?style=flat&logo=github)](https://github.com/hunterh37/USDZStudio/stargazers)
 
-[![Code size](https://img.shields.io/github/languages/code-size/hunterh37/OpenUSDZEditor?logo=github)](https://github.com/hunterh37/OpenUSDZEditor)
-[![Top language](https://img.shields.io/github/languages/top/hunterh37/OpenUSDZEditor?logo=swift&logoColor=white)](https://github.com/hunterh37/OpenUSDZEditor)
-[![Repo size](https://img.shields.io/github/repo-size/hunterh37/OpenUSDZEditor?logo=github)](https://github.com/hunterh37/OpenUSDZEditor)
+[![Code size](https://img.shields.io/github/languages/code-size/hunterh37/USDZStudio?logo=github)](https://github.com/hunterh37/USDZStudio)
+[![Top language](https://img.shields.io/github/languages/top/hunterh37/USDZStudio?logo=swift&logoColor=white)](https://github.com/hunterh37/USDZStudio)
+[![Repo size](https://img.shields.io/github/repo-size/hunterh37/USDZStudio?logo=github)](https://github.com/hunterh37/USDZStudio)
 
 </div>
 
@@ -35,7 +35,7 @@ A native Mac app — SwiftUI + RealityKit + an embedded Python/`usd-core` runtim
 
 Apple bet the spatial ecosystem on USD, but the tooling around it is fragmented: Reality Composer Pro is closed-source and visionOS-centric, `usdview` is a developer utility with a dated Qt UI, and online converters are lossy black boxes. There is no open tool that lets you *edit* a USDZ — rename prims, swap materials, adjust transforms, fix metadata, recolor a model — without round-tripping through a full DCC like Blender.
 
-OpenUSDZEditor is the missing piece: a beautiful, enterprise-grade native editor for the format, in the spirit of what Sketch or Nova did for their domains. Built for AR/spatial developers prepping RealityKit and QuickLook assets, 3D artists converting GLB/FBX/OBJ deliverables, e-commerce teams producing AR product visuals at volume, and pipeline engineers who want scriptable USD tooling.
+USDZ Studio is the missing piece: a beautiful, enterprise-grade native editor for the format, in the spirit of what Sketch or Nova did for their domains. Built for AR/spatial developers prepping RealityKit and QuickLook assets, 3D artists converting GLB/FBX/OBJ deliverables, e-commerce teams producing AR product visuals at volume, and pipeline engineers who want scriptable USD tooling.
 
 ## What it does
 
@@ -58,7 +58,7 @@ See [`PRD.md`](PRD.md) for the full product spec, [`ROADMAP.md`](ROADMAP.md) for
 
 ## Architecture
 
-Modular SPM workspace under `Packages/`. Every package is built and tested on each push by the [unified CI pipeline](https://github.com/hunterh37/OpenUSDZEditor/actions/workflows/ci.yml) — a green [![CI](https://img.shields.io/github/actions/workflow/status/hunterh37/OpenUSDZEditor/ci.yml?branch=main&label=CI&logo=githubactions&logoColor=white)](https://github.com/hunterh37/OpenUSDZEditor/actions/workflows/ci.yml) badge means the whole matrix below passed its tests, coverage floors, dependency-lint, and module-governance gates.
+Modular SPM workspace under `Packages/`. Every package is built and tested on each push by the [unified CI pipeline](https://github.com/hunterh37/USDZStudio/actions/workflows/ci.yml) — a green [![CI](https://img.shields.io/github/actions/workflow/status/hunterh37/USDZStudio/ci.yml?branch=main&label=CI&logo=githubactions&logoColor=white)](https://github.com/hunterh37/USDZStudio/actions/workflows/ci.yml) badge means the whole matrix below passed its tests, coverage floors, dependency-lint, and module-governance gates.
 
 Line-coverage floors are CI-enforced per module by [`scripts/coverage-gate.sh`](scripts/coverage-gate.sh) (mirrors [`specs/testing.md`](specs/testing.md)). `†` marks a ratchet floor pinned below its 90% spec target until the golden-image/snapshot harnesses land (tracked in ROADMAP Phase T).
 
@@ -95,10 +95,10 @@ Requires Xcode 16+ / Swift 6 on macOS 14+ (Apple Silicon primary, Intel best-eff
 
 ### Install a build
 
-Prebuilt **unsigned** macOS builds are attached to every tagged [Release](https://github.com/hunterh37/OpenUSDZEditor/releases) (produced by [`.github/workflows/release.yml`](.github/workflows/release.yml) via `scripts/build-release.sh`). They aren't code-signed, so clear the quarantine flag once after unzipping:
+Prebuilt **unsigned** macOS builds are attached to every tagged [Release](https://github.com/hunterh37/USDZStudio/releases) (produced by [`.github/workflows/release.yml`](.github/workflows/release.yml) via `scripts/build-release.sh`). They aren't code-signed, so clear the quarantine flag once after unzipping:
 
 ```sh
-xattr -dr com.apple.quarantine OpenUSDZEditor.app
+xattr -dr com.apple.quarantine USDZStudio.app
 ```
 
 Prefer to build it yourself? See the full build-from-source guide in [`docs/BUILD.md`](docs/BUILD.md).
@@ -108,8 +108,8 @@ Prefer to build it yourself? See the full build-from-source guide in [`docs/BUIL
 The SPM packages under `Packages/` are the source of truth for all library code, tests, and the CLI — build them with `swift build` / `swift test`. The editor *shell* additionally needs a real `.app` bundle (Info.plist, bundle id, USD document-type registration, embedded Python scripts), which a bare `swift run` executable can't produce. That bundle is generated from [`project.yml`](project.yml) with [XcodeGen](https://github.com/yonaskolb/XcodeGen) (`brew install xcodegen`):
 
 ```sh
-bash scripts/generate-xcodeproj.sh     # project.yml -> OpenUSDZEditor.xcodeproj
-open OpenUSDZEditor.xcodeproj       # or work in Xcode directly
+bash scripts/generate-xcodeproj.sh     # project.yml -> USDZStudio.xcodeproj
+open USDZStudio.xcodeproj       # or work in Xcode directly
 bash scripts/run-app.sh [model.usdz]    # build + launch the bundle in one step
 ```
 

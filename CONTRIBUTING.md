@@ -1,4 +1,4 @@
-# Contributing to OpenUSDZEditor
+# Contributing to USDZ Studio
 
 Thanks for your interest in contributing! This document covers the workflow and expectations for changes.
 
