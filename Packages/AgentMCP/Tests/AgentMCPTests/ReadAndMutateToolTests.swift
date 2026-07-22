@@ -316,6 +316,28 @@ import USDCore
                             ["path": "/Root/Box", "ops": [["op": "inset_faces", "faces": [0], "fraction": 2]]])
         _ = await callError(server, "edit_mesh",
                             ["path": "/Root/Box", "ops": [["op": "delete_faces", "faces": [99]]]])
+
+        // #69: whole-mesh mirror + solidify ops over the MCP mutate path.
+        let mirrored = await callOK(server, "edit_mesh", [
+            "path": "/Root/Box",
+            "ops": [["op": "mirror", "axis": "y", "coordinate": 5]],  // plane clear of the mesh
+        ])
+        #expect(mirrored["topologyDeltas"].arrayValue?.count == 1)
+
+        let solidified = await callOK(server, "edit_mesh", [
+            "path": "/Root/Lid",
+            "ops": [["op": "solidify", "thickness": 0.05]],
+        ])
+        #expect(solidified["topologyDeltas"].arrayValue?.first?["faces"].intValue ?? 0 > 0)
+
+        // mirror defaults axis to x when omitted (plane clear of the mesh).
+        _ = await callOK(server, "edit_mesh",
+                         ["path": "/Root/Box", "ops": [["op": "mirror", "coordinate": 5]]])
+        // Error paths: bad axis, missing/zero thickness.
+        _ = await callError(server, "edit_mesh",
+                            ["path": "/Root/Box", "ops": [["op": "mirror", "axis": "w"]]])
+        _ = await callError(server, "edit_mesh",
+                            ["path": "/Root/Box", "ops": [["op": "solidify"]]])
     }
 
     @Test func batchIsOneUndoStep() async {

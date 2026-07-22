@@ -273,4 +273,52 @@ struct BevelToolTests {
         #expect(doc.meshEdit?.lastDiagnostic != nil)
         #expect(doc.meshEdit?.session.isDirty == false)
     }
+
+    // #69: Mirror + Solidify are whole-mesh ops surfaced in edit mode.
+    @Test func mirrorAppliesWholeMesh() {
+        let (doc, path) = makeDocument()
+        doc.enterMeshEditMode(at: path)
+        doc.meshEdit?.tool = .mirror
+        doc.meshEdit?.mirrorAxis = .x
+        doc.meshEdit?.mirrorCoordinate = 2   // plane clear of the quad (x∈[0,1])
+        // Selection is a single face, but the op acts on the whole mesh.
+        doc.meshEdit?.componentSelection = .faces([FaceID(0)])
+        let before = doc.meshEdit!.session.mesh.faceCount
+        doc.applyActiveMeshTool()
+        #expect(doc.meshEdit?.lastDiagnostic == nil)
+        #expect(doc.meshEdit!.session.mesh.faceCount == before * 2)  // mirrored copy
+    }
+
+    @Test func mirrorRefusalIsLoud() {
+        let (doc, path) = makeDocument()
+        doc.enterMeshEditMode(at: path)
+        doc.meshEdit?.tool = .mirror
+        doc.meshEdit?.mirrorCoordinate = 0.5   // plane cuts through the mesh
+        doc.applyActiveMeshTool()
+        #expect(doc.meshEdit?.lastDiagnostic != nil)
+        #expect(doc.meshEdit?.session.isDirty == false)
+    }
+
+    @Test func solidifyAppliesWholeMesh() {
+        let (doc, path) = makeDocument()
+        doc.enterMeshEditMode(at: path)
+        doc.meshEdit?.tool = .solidify
+        doc.meshEdit?.solidifyThickness = 0.1
+        let before = doc.meshEdit!.session.mesh.faceCount
+        doc.applyActiveMeshTool()
+        #expect(doc.meshEdit?.lastDiagnostic == nil)
+        #expect(doc.meshEdit!.session.mesh.faceCount > before)  // inner shell + walls
+    }
+
+    @Test func meshToolMetadataIsComplete() {
+        for tool in MeshTool.allCases {
+            #expect(!tool.label.isEmpty)
+            #expect(!tool.systemImage.isEmpty)
+        }
+        #expect(MeshTool.mirror.hotkey == "r")
+        #expect(MeshTool.solidify.hotkey == "s")
+        #expect(MeshTool.mirror.isWholeMesh)
+        #expect(MeshTool.solidify.isWholeMesh)
+        #expect(!MeshTool.extrude.isWholeMesh)
+    }
 }

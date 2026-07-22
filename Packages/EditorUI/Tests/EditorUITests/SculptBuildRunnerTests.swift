@@ -189,9 +189,10 @@ struct SculptBuildRunnerTests {
         let doc = EditorDocument(snapshot: StageSnapshot(rootPrims: []))
         let spec = house()
         SculptBuildRunner.apply(pass: .blockout, of: spec, to: doc)   // creates /House
-        // createLight + setTransform both resolve to the light prim path.
+        // createLight + setTransform both resolve to the light prim path; the
+        // runner now reports distinct authored prim paths, so it appears once.
         let authored = SculptBuildRunner.apply(pass: .lighting, of: spec, to: doc)
-        #expect(authored == ["/House/Sun", "/House/Sun"])
+        #expect(authored == ["/House/Sun"])
         let light = doc.snapshot.prim(at: PrimPath("/House/Sun")!)
         #expect(light?.typeName == "DistantLight")
         #expect(light?.attribute(named: "inputs:intensity") != nil)
