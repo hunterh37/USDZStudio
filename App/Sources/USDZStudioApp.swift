@@ -150,6 +150,16 @@ struct USDZStudioApp: App {
                     // Start the localhost activity listener + write the
                     // endpoint-discovery file so `openusdz mcp` can connect.
                     mcp.start()
+                    // Give the agent host a way to conjure a front document when
+                    // it edits into an empty window (the usual "launch and start
+                    // sculpting" flow). Without this the agent's edits mutate a
+                    // host-side copy that mirrors nowhere and the viewport stays
+                    // empty (specs/agent-live-editing.md).
+                    mcp.documentFactory = { snapshot in
+                        let doc = makeSessionedDocument(snapshot: snapshot, modelURL: nil)
+                        document = doc
+                        return doc
+                    }
                     // Offer to restore a previous session with unsaved work
                     // before anything else opens a document.
                     if document == nil { await offerSessionRestore() }
