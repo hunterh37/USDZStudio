@@ -1,5 +1,6 @@
 import AgentMCP
 import Foundation
+import RenderKit
 import ScriptingKit
 import USDBridge
 import USDCore
@@ -175,30 +176,6 @@ enum McpCommand {
         } catch {
             printError("error: \(error)")
             return 1
-        }
-    }
-    // coverage:enable
-}
-
-/// `usdrecord`-backed renderer for AgentMCP's `render_views`.
-struct UsdrecordRenderer: RenderExecuting {
-    var usdrecordPath: String
-
-    // coverage:disable — spawns the real usdrecord binary; the render tool's stage/camera authoring is unit-tested against a stub renderer.
-    func render(stageURL: URL, outputURL: URL, cameraPath: String, size: Int) async throws {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: usdrecordPath)
-        process.arguments = [
-            "--imageWidth", String(size),
-            "--camera", cameraPath,
-            stageURL.path, outputURL.path,
-        ]
-        process.standardOutput = FileHandle.nullDevice
-        process.standardError = FileHandle.nullDevice
-        try process.run()
-        process.waitUntilExit()
-        guard process.terminationStatus == 0 else {
-            throw BridgeError.pythonUnavailable(detail: "usdrecord exited \(process.terminationStatus)")
         }
     }
     // coverage:enable

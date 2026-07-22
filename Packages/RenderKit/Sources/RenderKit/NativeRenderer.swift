@@ -12,8 +12,8 @@ import SceneKit.ModelIO
 /// Storm (`usdrecord`) only when the operator opts in with `DICYANIN_USDRECORD`
 /// pointing at a real binary. Pure and injectable so the policy is unit-tested
 /// without a filesystem or GPU.
-enum NativeRendererSelection {
-    static func make(
+public enum NativeRendererSelection {
+    public static func make(
         environment: [String: String],
         fileExists: (String) -> Bool
     ) -> any RenderExecuting {
