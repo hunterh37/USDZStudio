@@ -17,8 +17,11 @@ struct SculptBuildRunnerTests {
         let doc = EditorDocument(snapshot: StageSnapshot(rootPrims: []))
         let authored = SculptBuildRunner.apply(pass: .blockout, of: house(), to: doc)
 
-        // Group House + walls/roof/door/2 windows/chimney = 7 prims.
-        #expect(authored.count == 7)
+        // Group House + walls/roof/door/2 windows/chimney = 7 distinct prims.
+        // The blockout pass now emits a create step *and* a place (setTransform)
+        // step per component (issue #115), so `apply` returns two paths per prim;
+        // the geometry tree still has exactly 7 unique prims.
+        #expect(Set(authored).count == 7)
         let houseRoot = doc.snapshot.rootPrims.first { $0.name == "House" }
         #expect(houseRoot?.typeName == "Xform")
         let walls = houseRoot?.children.first { $0.name == "Walls" }
