@@ -184,3 +184,21 @@ public struct MissingNormalsRule: ValidationRule {
             .map { Diagnostic(ruleID: id, severity: severity, message: "\($0.name): no normals authored; shading will be faceted.", primPath: $0.path) }
     }
 }
+
+/// Meshes without an authored `subdivisionScheme` inherit USD's default of
+/// `catmullClark`, so a polygonal cage meant to display as-authored is instead
+/// subdivided into a rounded blob (boxes → pills) by conformant renderers
+/// (Hydra/Storm, QuickLook). Authoring `subdivisionScheme = "none"` keeps crisp
+/// low-poly geometry. Informational — the geometry is valid either way. See #97.
+public struct MissingSubdivisionSchemeRule: ValidationRule {
+    public let id = "mesh.subdivision"
+    public let severity = DiagnosticSeverity.info
+
+    public init() {}
+
+    public func evaluate(stage: any USDStageProtocol) -> [Diagnostic] {
+        stage.allPrims()
+            .filter { $0.typeName == "Mesh" && MeshTopologyRule.pointCount($0) > 0 && $0.attribute(named: "subdivisionScheme") == nil }
+            .map { Diagnostic(ruleID: id, severity: severity, message: "\($0.name): no subdivisionScheme authored; defaults to catmullClark and will render rounded. Author \"none\" for crisp polygons.", primPath: $0.path) }
+    }
+}

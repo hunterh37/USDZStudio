@@ -9,7 +9,8 @@ private func mesh(
     points: [Double]? = [0, 0, 0, 1, 0, 0, 0, 1, 0],
     counts: [Int]? = [3],
     indices: [Int]? = [0, 1, 2],
-    normals: Bool = true
+    normals: Bool = true,
+    subdivision: Bool = true
 ) -> Prim {
     var attrs: [Attribute] = []
     if let points { attrs.append(Attribute(name: "points", value: .doubleArray(points))) }
@@ -17,6 +18,9 @@ private func mesh(
     if let indices { attrs.append(Attribute(name: "faceVertexIndices", value: .intArray(indices))) }
     if normals, points != nil {
         attrs.append(Attribute(name: "normals", value: .doubleArray(Array(repeating: 0, count: points!.count))))
+    }
+    if subdivision {
+        attrs.append(Attribute(name: "subdivisionScheme", value: .token("none"), isUniform: true))
     }
     return Prim(path: PrimPath("/\(name)")!, typeName: "Mesh", attributes: attrs)
 }
@@ -105,6 +109,16 @@ struct MeshPresenceRuleTests {
         #expect(diag.count == 1)
         #expect(diag[0].severity == .info)
         #expect(MissingNormalsRule().evaluate(stage: stage(prims: [mesh("N")])).isEmpty)
+    }
+
+    @Test func missingSubdivisionSchemeIsInfo() {
+        let m = mesh("M", subdivision: false)
+        let diag = MissingSubdivisionSchemeRule().evaluate(stage: stage(prims: [m]))
+        #expect(diag.count == 1)
+        #expect(diag[0].severity == .info)
+        #expect(diag[0].message.contains("catmullClark"))
+        // A mesh that authors subdivisionScheme does not fire.
+        #expect(MissingSubdivisionSchemeRule().evaluate(stage: stage(prims: [mesh("N")])).isEmpty)
     }
 }
 

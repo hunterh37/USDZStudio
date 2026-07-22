@@ -13,6 +13,23 @@ import Testing
         #expect(ShapeKind.Primitive.allCases.count == 5)
     }
 
+    @Test func shapeKindRoundTripsAllCases() throws {
+        let enc = JSONEncoder(); let dec = JSONDecoder()
+        for k in [ShapeKind.group, .primitive(.sphere), .library(entryID: "rock")] {
+            #expect(try dec.decode(ShapeKind.self, from: enc.encode(k)) == k)
+        }
+    }
+
+    @Test func shapeKindDecodesLegacySynthesizedForm() throws {
+        let dec = JSONDecoder()
+        func decode(_ s: String) throws -> ShapeKind {
+            try dec.decode(ShapeKind.self, from: Data(s.utf8))
+        }
+        #expect(try decode(#"{"group":{}}"#) == .group)
+        #expect(try decode(#"{"primitive":{"_0":"cone"}}"#) == .primitive(.cone))
+        #expect(try decode(#"{"library":{"entryID":"rock"}}"#) == .library(entryID: "rock"))
+    }
+
     // MARK: - ComponentNode / spec derivations
 
     static func sampleSpec() -> ObjectSculptSpec {

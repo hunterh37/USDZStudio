@@ -156,6 +156,8 @@ final class Driver {
                 case .inset: document.meshEdit?.insetFraction = number
                 case .merge: document.meshEdit?.mergeDistance = number
                 case .bevel: document.meshEdit?.bevelWidth = number
+                case .mirror: document.meshEdit?.mirrorCoordinate = number
+                case .solidify: document.meshEdit?.solidifyThickness = number
                 case .delete, .fill: break
                 }
             }

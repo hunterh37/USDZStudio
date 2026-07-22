@@ -74,6 +74,7 @@ An agent reconstructing a model from a reference image can push that image into 
 - `Packages/EditorUI/.../ReferenceImagePanel.swift` — `ReferenceImageModel` (plain path/caption state), `ReferenceImagePanel`, and `InspectorColumn` (panel above the inspector). Wired in `EditorShellView` via `inspectorColumn`.
 - `App/Sources/MCPActivityListener.swift` — `referenceModel`, `applyReference`, `referenceURL`, and the on-launch seed in `start()`.
 - Governance: `App` → `AgentMCP` (`scripts/dependency-lint.sh`, `project.yml`, `App/Package.swift`, `specs/architecture.md`). **`EditorUI` still must not import `AgentMCP`.**
+- `Packages/RenderKit/.../NativeRenderer.swift` — the concrete `RenderExecuting` backends (`NativeSceneKitRenderer`, `UsdrecordRenderer`, `NativeRendererSelection`, and the pure `RenderStageParse`). Both the CLI (`McpCommand`) and the App (`MCPActivityListener`) inject one via `NativeRendererSelection.make(...)`, so the app-hosted server can satisfy `render_views` and the sculpt review loop without `usdrecord` (#109). Previously the renderer lived in `CLI/` and the app built a Configuration with none, so in-app renders failed.
 
 ## Limitations
 

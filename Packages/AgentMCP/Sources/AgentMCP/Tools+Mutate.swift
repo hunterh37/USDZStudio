@@ -44,13 +44,16 @@ public enum MutateTools {
                 "depth": Schema.number("box/plane depth (default 1)"),
                 "radius": Schema.number("cylinder/cone/sphere radius (default 0.5)"),
                 "segments": Schema.integer("radial/ring segments (default 8)"),
+                "smooth": Schema.boolean("author as a Catmull-Clark subdivision surface instead of crisp polygons (default false)"),
             ], required: ["name", "shape"])
         ) { args in
             let mesh = try primitive(from: args)
             let flat = MeshIO.flat(from: mesh)
+            // Default to crisp polygons; only subdivide when explicitly requested (#97).
+            let scheme = (args["smooth"].boolValue ?? false) ? "catmullClark" : "none"
             let built = try makeInsert(
                 args: args, session: session,
-                extraAttributes: GeometryProbe.meshAttributes(from: flat),
+                extraAttributes: GeometryProbe.meshAttributes(from: flat, subdivisionScheme: scheme),
                 typeOverride: "Mesh")
             let outcome = try session.mutate(built.command)
             return outcome.asJSON(extra: ["path": .string(built.path.description)])
@@ -312,14 +315,17 @@ public enum MutateTools {
     private static func registerMesh(on server: MCPServer, session: EditSession) {
         server.register(MCPTool(
             name: "edit_mesh", group: .mutate,
-            description: "Apply a chain of topology ops to a Mesh prim in one undoable step. Ops: extrude_faces {faces, distance}, inset_faces {faces, fraction}, delete_faces {faces}. Omitted 'faces' reuses the previous op's result selection. Returns per-op topology deltas.",
+            description: "Apply a chain of topology ops to a Mesh prim in one undoable step. Ops: extrude_faces {faces, distance}, inset_faces {faces, fraction}, delete_faces {faces}, mirror {axis, coordinate}, solidify {thickness}. mirror/solidify are whole-mesh (they act on every face; 'faces' is ignored). Omitted 'faces' reuses the previous op's result selection. Returns per-op topology deltas.",
             inputSchema: Schema.object([
                 "path": Schema.primRef,
                 "ops": Schema.array(of: Schema.object([
-                    "op": Schema.string("extrude_faces | inset_faces | delete_faces"),
+                    "op": Schema.string("extrude_faces | inset_faces | delete_faces | mirror | solidify"),
                     "faces": Schema.array(of: .object(["type": "integer"]), "face ids"),
                     "distance": Schema.number("extrude distance"),
                     "fraction": Schema.number("inset fraction (0–1)"),
+                    "axis": Schema.string("mirror plane axis: x | y | z"),
+                    "coordinate": Schema.number("mirror plane coordinate along axis (default 0)"),
+                    "thickness": Schema.number("solidify shell thickness (> 0)"),
                 ], required: ["op"]), "ops applied in order"),
             ], required: ["path", "ops"])
         ) { args in
@@ -340,7 +346,11 @@ public enum MutateTools {
             var carrySelection: ComponentSelection?
             for (index, opJSON) in ops.enumerated() {
                 let selection: ComponentSelection
-                if let faceInts = opJSON["faces"].intArrayValue {
+                // mirror/solidify are whole-mesh (#69): they act on every face,
+                // so they never require a 'faces' arg or a carried selection.
+                if opJSON["op"].stringValue == "mirror" || opJSON["op"].stringValue == "solidify" {
+                    selection = .faces(Set(meshSession.mesh.faceOrder))
+                } else if let faceInts = opJSON["faces"].intArrayValue {
                     selection = .faces(Set(faceInts.map(FaceID.init)))
                 } else if let carry = carrySelection {
                     selection = carry
@@ -394,9 +404,31 @@ public enum MutateTools {
         case "delete_faces":
             return try DeleteComponents.apply(
                 mesh, selection: selection, params: DeleteComponents.Params())
+        case "mirror":
+            // Whole-mesh: mirror every face across the chosen plane.
+            let axis: Mirror.Axis
+            switch opJSON["axis"].stringValue {
+            case "x", nil: axis = .x
+            case "y": axis = .y
+            case "z": axis = .z
+            default:
+                throw ToolError.invalidParams("op[\(index)] mirror 'axis' must be x, y, or z")
+            }
+            let coordinate = opJSON["coordinate"].doubleValue ?? 0
+            return try Mirror.apply(
+                mesh, selection: .faces(Set(mesh.faceOrder)),
+                params: Mirror.Params(axis: axis, coordinate: coordinate))
+        case "solidify":
+            // Whole-mesh: give the entire open surface thickness.
+            guard let thickness = opJSON["thickness"].doubleValue, thickness > 0 else {
+                throw ToolError.invalidParams("op[\(index)] solidify needs 'thickness' > 0")
+            }
+            return try Solidify.apply(
+                mesh, selection: .faces(Set(mesh.faceOrder)),
+                params: Solidify.Params(thickness: thickness))
         default:
             throw ToolError.invalidParams(
-                "op[\(index)] unknown op '\(opJSON["op"].stringValue ?? "?")' (extrude_faces, inset_faces, delete_faces)")
+                "op[\(index)] unknown op '\(opJSON["op"].stringValue ?? "?")' (extrude_faces, inset_faces, delete_faces, mirror, solidify)")
         }
     }
 

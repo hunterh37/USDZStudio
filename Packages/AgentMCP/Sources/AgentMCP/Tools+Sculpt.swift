@@ -232,7 +232,7 @@ public enum SculptTools {
                 Every geometry component except the root should declare `attachment` (root/weld/socket/pin) — a component without one is flagged here as a warning and rejected by strict validate. For parts that realistically open/swing (lid, door, cap, drawer) declare `joints` (revolute hinge / prismatic slider with an axis + pivot targeting a component) so the interaction pass authors real articulation.
                 """,
             inputSchema: Schema.object([
-                "spec": .object(["type": "object", "description": "the full ObjectSculptSpec JSON"]),
+                "spec": .object(["type": "object", "description": "the full ObjectSculptSpec JSON (see tool description for the schema + a minimal example)"]),
             ], required: ["spec"])
         ) { args in
             guard case .object = args["spec"] else {
@@ -265,6 +265,35 @@ public enum SculptTools {
                 "warnings": .array(warnings),
             ])
         })
+    }
+
+    /// Turn a raw `DecodingError` into an actionable message that names the
+    /// offending key/path, instead of the cryptic `keyNotFound(CodingKeys(...))`
+    /// dump agents saw before (#112).
+    static func decodeHint(for error: Error) -> String {
+        func pathString(_ path: [CodingKey]) -> String {
+            path.map { $0.intValue.map { "[\($0)]" } ?? $0.stringValue }.joined(separator: ".")
+        }
+        guard let decodingError = error as? DecodingError else {
+            return "could not decode spec: \(error)"
+        }
+        switch decodingError {
+        case .keyNotFound(let key, let ctx):
+            let loc = pathString(ctx.codingPath)
+            let at = loc.isEmpty ? "at the top level" : "under '\(loc)'"
+            return "spec is missing required key '\(key.stringValue)' \(at). Required top-level keys: name, objectClass, root. See the tool description for the full schema + example."
+        case .typeMismatch(let type, let ctx):
+            return "spec has the wrong type for '\(pathString(ctx.codingPath))' (expected \(type)). \(ctx.debugDescription)"
+        case .valueNotFound(_, let ctx):
+            return "spec has a null where a value is required at '\(pathString(ctx.codingPath))'. \(ctx.debugDescription)"
+        case .dataCorrupted(let ctx):
+            let loc = pathString(ctx.codingPath)
+            return "spec is malformed\(loc.isEmpty ? "" : " at '\(loc)'"): \(ctx.debugDescription)"
+        // coverage:disable — @unknown default guards future DecodingError cases; unreachable with today's enum.
+        @unknown default:
+            return "could not decode spec: \(decodingError)"
+        // coverage:enable
+        }
     }
 
     // MARK: - Validate

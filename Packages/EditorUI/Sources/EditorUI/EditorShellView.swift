@@ -448,6 +448,20 @@ public struct EditorShellView: View {
             action("edit.lattice", "Lattice / FFD Deform", "Edit", shortcut: "⇧⌘L",
                    keywords: ["lattice", "ffd", "cage", "deform", "bulge", "taper", "bend", "free form"],
                    enabled: hasDocument) { document?.toggleLatticeMode() },
+            // Whole-mesh edit-mode ops surfaced to ⌘K (#69). Enabled only while
+            // in mesh edit mode; each arms its tool and applies it in one step.
+            action("mesh.mirror", "Mirror Mesh", "Mesh",
+                   keywords: ["symmetry", "flip", "reflect"],
+                   enabled: document?.meshEdit != nil) {
+                document?.meshEdit?.tool = .mirror
+                document?.applyActiveMeshTool()
+            },
+            action("mesh.solidify", "Solidify Mesh", "Mesh",
+                   keywords: ["thickness", "shell", "offset", "wall"],
+                   enabled: document?.meshEdit != nil) {
+                document?.meshEdit?.tool = .solidify
+                document?.applyActiveMeshTool()
+            },
         ]
     }
 
