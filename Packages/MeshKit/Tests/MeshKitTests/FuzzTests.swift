@@ -50,7 +50,7 @@ struct FuzzTests {
         for opIndex in 0..<3 {
             let result: MeshOpResult?
             do {
-                switch (Int(seed % 10) + opIndex) % 10 {
+                switch (Int(seed % 11) + opIndex) % 11 {
                 case 0:
                     result = try ExtrudeFaces.apply(mesh, selection: .faces(randomFaces(mesh, &rng)),
                                                     params: .init(distance: Double.random(in: 0.1...2, using: &rng)))
@@ -96,6 +96,31 @@ struct FuzzTests {
                     result = try SubdivideCatmullClark.apply(
                         mesh, selection: .faces(Set(mesh.faceOrder)),
                         params: .init(levels: Int.random(in: 1...2, using: &rng)))
+                case 9:
+                    // Lattice/FFD bake: fit a cage to the mesh bounds, jitter every
+                    // control point, deform all vertices. A jitter that folds a face
+                    // to zero area is a valid loud refusal (caught below).
+                    var lo = SIMD3(Double.infinity, .infinity, .infinity)
+                    var hi = SIMD3(-Double.infinity, -.infinity, -.infinity)
+                    for p in mesh.positions.values {
+                        lo = SIMD3(min(lo.x, p.x), min(lo.y, p.y), min(lo.z, p.z))
+                        hi = SIMD3(max(hi.x, p.x), max(hi.y, p.y), max(hi.z, p.z))
+                    }
+                    // Pad so the whole mesh sits strictly inside the cage.
+                    lo -= SIMD3(0.5, 0.5, 0.5); hi += SIMD3(0.5, 0.5, 0.5)
+                    let interp = LatticeCage.Interpolation.allCases.randomElement(using: &rng)!
+                    let res = LatticeCage.Resolution(l: Int.random(in: 2...4, using: &rng),
+                                                     m: Int.random(in: 2...4, using: &rng),
+                                                     n: Int.random(in: 2...4, using: &rng))
+                    var cage = LatticeCage.fitted(min: lo, max: hi, resolution: res,
+                                                  interpolation: interp, affectOutside: true)
+                    cage.controlPoints = cage.controlPoints.map {
+                        $0 + SIMD3(Double.random(in: -0.15...0.15, using: &rng),
+                                   Double.random(in: -0.15...0.15, using: &rng),
+                                   Double.random(in: -0.15...0.15, using: &rng))
+                    }
+                    result = try LatticeDeform.apply(mesh, selection: .faces(Set(mesh.faceOrder)),
+                                                     params: .init(cage: cage))
                 default:
                     // Live-vertex-edit path: proportional-falloff-weighted nudge
                     // of a random seed's neighborhood, exactly as the drag layer

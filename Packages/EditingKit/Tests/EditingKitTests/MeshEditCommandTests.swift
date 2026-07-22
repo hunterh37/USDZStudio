@@ -222,4 +222,36 @@ struct MeshEditCommandTests {
         }
         #expect(restoredCounts == [4])
     }
+
+    /// A committed edit re-authors real per-vertex normals for the new topology
+    /// (issue #95) so an edited mesh never falls back to faceted shading, and
+    /// undo re-authors normals for the restored surface too.
+    @Test func executeAndUndoAuthorSmoothNormals() throws {
+        let stage = meshStage()
+        let path = PrimPath("/Root/Panel")!
+        var session = try MeshEditSession(path: path, flat: cubeFlat())
+        let result = try ExtrudeFaces.apply(session.mesh, selection: .faces([FaceID(0)]),
+                                            params: .init(distance: 1))
+        session.record(result, journalEntry: "Extrude")
+        let command = try #require(session.commitCommand())
+
+        try command.execute(on: stage)
+        let afterPrim = try #require(stage.prim(at: path))
+        guard case .float3Array(let normals)? = afterPrim.attribute(named: "normals")?.value,
+              case .float3Array(let points)? = afterPrim.attribute(named: "points")?.value else {
+            Issue.record("normals/points not authored after edit"); return
+        }
+        #expect(!normals.isEmpty)
+        #expect(normals.count == points.count)
+        #expect(afterPrim.attribute(named: "normals")?.metadata["interpolation"] == "\"vertex\"")
+
+        try command.undo(on: stage)
+        let restored = try #require(stage.prim(at: path))
+        // Undo restores the original cube's surface, with matching normals.
+        guard case .float3Array(let restoredNormals)? = restored.attribute(named: "normals")?.value,
+              case .float3Array(let restoredPoints)? = restored.attribute(named: "points")?.value else {
+            Issue.record("normals/points missing after undo"); return
+        }
+        #expect(restoredNormals.count == restoredPoints.count)
+    }
 }

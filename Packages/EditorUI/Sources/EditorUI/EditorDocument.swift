@@ -74,6 +74,15 @@ public final class EditorDocument {
     /// never be a silent no-op.
     public var meshEditRefusal: String?
 
+    /// Live lattice (FFD) deform state; `nil` when not in lattice mode
+    /// (specs/mesh-editing.md §Lattice deformer). Managed by
+    /// `EditorDocument+Lattice.swift`.
+    public var latticeEdit: LatticeEditState?
+
+    /// Why the last lattice-mode entry was refused (`nil` after success);
+    /// surfaced as a badge so a refusal is never a silent no-op.
+    public var latticeRefusal: String?
+
     /// The mesh prim most recently committed by an edit session — after
     /// commit, the stage (not the file) is the viewport's source of truth for
     /// this prim's geometry, including across undo/redo.

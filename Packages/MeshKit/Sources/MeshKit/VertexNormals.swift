@@ -8,10 +8,13 @@ import Foundation
 /// per-vertex normals at build time removes that defect at the source rather
 /// than leaving every mesh to a downstream quick-fix.
 ///
-/// The math is deliberately identical in spirit to the editor's quick-fix path:
-/// each face contributes its Newell normal — whose magnitude is twice the
-/// projected face area — to every vertex it touches, so larger faces dominate
-/// the blend the way they visually should. The result is then unit-length.
+/// This is the single source of truth for smooth-normal math across the repo:
+/// the sculpt build path, library insertion, the tutorial scene, the
+/// import/convert author stage, mesh-edit re-authoring, and the editor's
+/// `mesh.normals` quick-fix all route through it. Each face contributes its
+/// Newell normal — whose magnitude is twice the projected face area — to every
+/// vertex it touches, so larger faces dominate the blend the way they visually
+/// should. The result is then unit-length.
 public enum VertexNormals {
 
     /// Smooth (area-weighted) per-vertex normals, parallel to `mesh.points`.

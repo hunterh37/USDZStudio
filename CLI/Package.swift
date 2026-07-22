@@ -13,6 +13,7 @@ let package = Package(
         .package(path: "../Packages/USDBridge"),
         .package(path: "../Packages/ValidationKit"),
         .package(path: "../Packages/ConversionKit"),
+        .package(path: "../Packages/CaptureKit"),
         .package(path: "../Packages/MeshKit"),
         .package(path: "../Packages/EditingKit"),
         .package(path: "../Packages/ScriptingKit"),
@@ -21,7 +22,7 @@ let package = Package(
     targets: [
         .executableTarget(
             name: "openusdz",
-            dependencies: ["USDCore", "USDBridge", "ValidationKit", "ConversionKit", "MeshKit",
+            dependencies: ["USDCore", "USDBridge", "ValidationKit", "ConversionKit", "CaptureKit", "MeshKit",
                            "EditingKit", "ScriptingKit", "AgentMCP"],
             path: "Sources"),
         .testTarget(name: "CLITests", dependencies: ["openusdz"], path: "Tests"),

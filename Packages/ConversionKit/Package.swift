@@ -8,10 +8,12 @@ let package = Package(
         .library(name: "ConversionKit", targets: ["ConversionKit"])
     ],
     dependencies: [
-        .package(path: "../USDCore")
+        .package(path: "../USDCore"),
+        .package(path: "../MeshKit"),
+        .package(path: "../CaptureKit")
     ],
     targets: [
-        .target(name: "ConversionKit", dependencies: ["USDCore"], path: "Sources/ConversionKit"),
+        .target(name: "ConversionKit", dependencies: ["USDCore", "MeshKit", "CaptureKit"], path: "Sources/ConversionKit"),
         .testTarget(name: "ConversionKitTests", dependencies: ["ConversionKit"], path: "Tests/ConversionKitTests"),
     ]
 )

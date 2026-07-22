@@ -431,6 +431,9 @@ public struct EditorShellView: View {
             action("edit.recolor", "Recolor…", "Edit", shortcut: "⇧⌘R",
                    keywords: ["color", "colour", "material", "paint", "rebrand"],
                    enabled: hasDocument) { if document != nil { activeSheet = .recolor } },
+            action("edit.lattice", "Lattice / FFD Deform", "Edit", shortcut: "⇧⌘L",
+                   keywords: ["lattice", "ffd", "cage", "deform", "bulge", "taper", "bend", "free form"],
+                   enabled: hasDocument) { document?.toggleLatticeMode() },
         ]
     }
 
@@ -933,6 +936,11 @@ public struct EditorShellView: View {
                     // Mesh edit mode: tool strip + active-tool indicator over
                     // the viewport (Phase 6; specs/mesh-editing.md).
                     if let document { MeshEditOverlay(document: document) }
+                }
+                .overlay {
+                    // Lattice/FFD deform mode: cage parameter HUD over the
+                    // viewport (specs/mesh-editing.md §Lattice deformer).
+                    if let document { LatticeOverlay(document: document) }
                 }
                 .overlay(alignment: .top) {
                     // Drill-down breadcrumb + isolate indicator (Milestone 3).
