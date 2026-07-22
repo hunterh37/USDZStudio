@@ -678,6 +678,90 @@ public final class EditorDocument {
         return true
     }
 
+    // MARK: Modal transform (Blender-style G/R/S)
+
+    /// The live modal transform session (grab/rotate/scale), or `nil` when none
+    /// is active. The viewport reads `hudText` from it and drives its
+    /// constraint/numeric inputs through the `modal*` methods below; the actual
+    /// mutation reuses the same coalesced-undo path as the handle gizmos.
+    public private(set) var modalTransform: ModalTransform?
+
+    /// Starts a modal transform of `kind`, seeded from the selection's pivot and
+    /// basis. No-op (and returns `false`) when nothing eligible is selected or a
+    /// modal session is already in flight. On success the same per-prim drag
+    /// sessions the handle gizmos use are opened, so confirm coalesces to one
+    /// undoable command and cancel restores the pre-transform pose exactly.
+    @discardableResult
+    public func beginModalTransform(kind: ModalTransformKind) -> Bool {
+        guard modalTransform == nil, meshEdit == nil, let pivot = gizmoPivot else { return false }
+        modalTransform = ModalTransform(kind: kind, pivot: pivot, basis: gizmoBasis)
+        beginGizmoTransformDrag()
+        return true
+    }
+
+    /// Previews a proposed op (from `ModalTransform.proposedOp`) live, exactly
+    /// like a handle drag frame. No-op when no modal session is active.
+    public func updateModalTransform(_ op: ModalOp) {
+        guard modalTransform != nil else { return }
+        applyWorldOp(Self.matrix(for: op))
+    }
+
+    /// Sets the axis/plane constraint on the active modal session (X/Y/Z, Shift
+    /// for a plane, a repeat toggles local). The caller re-previews from the
+    /// latest pointer afterwards.
+    public func modalSetConstraint(axis: GizmoAxis, shift: Bool) {
+        modalTransform?.setConstraint(axis: axis, shift: shift)
+    }
+
+    public func modalTypeDigit(_ c: Character) { modalTransform?.typeDigit(c) }
+    public func modalBackspaceNumeric() { modalTransform?.backspaceNumeric() }
+
+    /// Confirms the modal transform: emits exactly one coalesced undoable
+    /// command ("Move"/"Rotate"/"Scale") for the whole gesture.
+    public func confirmModalTransform() {
+        guard let modal = modalTransform else { return }
+        modalTransform = nil
+        endGizmoTransformDrag(verb: modal.kind.undoVerb)
+    }
+
+    /// Cancels the modal transform: restores every dragged prim to its
+    /// pre-transform pose and emits nothing (the stage ends byte-identical).
+    public func cancelModalTransform() {
+        guard modalTransform != nil else { return }
+        modalTransform = nil
+        for drag in gizmoTransformDrags { try? drag.session.cancel() }
+        gizmoTransformDrags = []
+        refresh(geometryChanged: false)
+    }
+
+    /// The world-space op matrix for a proposed `ModalOp`, applied about the
+    /// pivot by `applyWorldOp` (which cancels the pivot for a pure translation).
+    static func matrix(for op: ModalOp) -> [Double] {
+        switch op {
+        case let .translate(delta):
+            translationMatrix(delta)
+        case let .rotate(axis, degrees):
+            axisRotationMatrix(axis: axis, degrees: degrees)
+        case let .scale(basis, factors):
+            basisScaleMatrix(basis: basis, factors: [factors.x, factors.y, factors.z])
+        }
+    }
+
+    /// A row-vector world matrix that scales by `factors` along `basis`'s axes:
+    /// `L = Bᵀ · diag(f) · B`, where `B`'s rows are the (orthonormal) basis
+    /// axes. Reduces to a plain diagonal scale for the world basis.
+    static func basisScaleMatrix(basis: GizmoBasis, factors: [Double]) -> [Double] {
+        let b: [Double] = [
+            basis.x.x, basis.x.y, basis.x.z, 0,
+            basis.y.x, basis.y.y, basis.y.z, 0,
+            basis.z.x, basis.z.y, basis.z.z, 0,
+            0, 0, 0, 1,
+        ]
+        var bt = [Double](repeating: 0, count: 16)
+        for r in 0..<4 { for c in 0..<4 { bt[r * 4 + c] = b[c * 4 + r] } }
+        return Matrix4.multiply(Matrix4.multiply(bt, diagonalScaleMatrix(factors)), b)
+    }
+
     // MARK: Gizmo math helpers (pure)
 
     private static func namedAxis(_ name: String) -> GizmoAxis? {
