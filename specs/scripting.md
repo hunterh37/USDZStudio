@@ -23,7 +23,7 @@ The embedded Python runtime that powers USDBridge is exposed to users, turning t
 
 ## Script Library (panel)
 
-- Two sources: bundled scripts (`Resources/Python/scripts/`) and user folder (`~/Library/Application Support/OpenUSDZEditor/Scripts/`, revealed via menu).
+- Two sources: bundled scripts (`Resources/Python/scripts/`) and user folder (`~/Library/Application Support/USDZStudio/Scripts/`, revealed via menu).
 - Script metadata in a docstring header (name, description, args schema) → auto-generated parameter sheet UI when run.
 
 ### Bundled script starters

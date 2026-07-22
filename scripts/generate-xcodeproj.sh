@@ -1,5 +1,5 @@
 #!/bin/bash
-# Generates OpenUSDZEditor.xcodeproj from project.yml via XcodeGen.
+# Generates USDZStudio.xcodeproj from project.yml via XcodeGen.
 # The .xcodeproj is git-ignored; project.yml is the checked-in source of truth.
 # Usage: scripts/generate-xcodeproj.sh
 set -euo pipefail
@@ -11,4 +11,4 @@ if ! command -v xcodegen >/dev/null 2>&1; then
 fi
 
 xcodegen generate --spec project.yml
-echo "Generated OpenUSDZEditor.xcodeproj — open it with:  open OpenUSDZEditor.xcodeproj"
+echo "Generated USDZStudio.xcodeproj — open it with:  open USDZStudio.xcodeproj"

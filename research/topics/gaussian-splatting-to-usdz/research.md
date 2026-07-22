@@ -40,7 +40,7 @@ Splats and USDZ are **different render paths**: a Gaussian splat cannot be rende
 
 **Standards/interop.** Raw layer is fragmented (INRIA `.ply` de-facto). Compressed delivery is converging on **`.spz`** (Niantic, MIT, multi-engine) and PlayCanvas **SOGS**. Emerging (`[VERIFY]`): glTF `KHR_gaussian_splatting` (+ SPZ compression companion) so splats coexist with meshes in one file, and OpenUSD `UsdVolParticleField` schema. `playcanvas/supersplat` (MIT) is the widest-importer open editor; `SplatTransform` is the conversion glue.
 
-## Recommended approach for OpenUSDZEditor
+## Recommended approach for USDZ Studio
 
 Sequenced by (value to target users) × (verifiability today):
 
