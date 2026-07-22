@@ -61,7 +61,7 @@ MechanismKit (pure Swift, zero internal deps, 100% coverage tier)
 
 - `SculptKit ─▶ MechanismKit` — articulation is part of the sculpt runtime layer (authored in the `interaction` pass; carried in `RuntimeManifest`).
 - `EditingKit ─▶ MechanismKit` — undoable authoring commands (create-joint, set-state, variant-set authoring).
-- `ViewportKit ─▶ MechanismKit` — hinge-axis gizmo overlay + drag-to-open handle (later; reuses the existing gizmo hit-test seam).
+- `ViewportKit ─▶ MechanismKit` — hinge-axis gizmo overlay + drag-to-open handle. ✅ Shipped: `HingeGizmo` (`HingeGizmoDescriptor` + pure `HingeGizmoMath` — knob placement, ray grab, and drag→clamped-value for revolute *and* prismatic), reusing the existing `CameraRay`/`RotateGizmoMath` hit-test seam. The reported value drives the `SetJointStateCommand(pivotPath:value:)` document seam, so the handle can never exceed the joint's declared limits.
 
 `MechanismKit` never imports UI/GPU/Python (framework ban enforced by the lint script, same as USDCore/MeshKit/RigKit).
 

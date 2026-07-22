@@ -34,6 +34,14 @@ The workspace is modular SPM packages under `Packages/` with **strictly one-dire
 
 Adding a package requires a matching policy entry in `dependency-lint.sh` **and** an update to `specs/architecture.md` — an ungoverned module is itself a lint failure. Specs in `specs/` are the contract; keep them in sync with code.
 
+## Finish the whole feature
+
+When told to build something, build all of it in this session — every sub-part, end to end — until it's done or the human stops you. Do not defer, split out, or leave pieces "for a follow-up" and report partial completion; if something genuinely blocks you, say so and keep going on everything else. "Mostly done except X, Y, Z" is not done.
+
+## Rendering — ONE pipeline
+
+The RealityKit viewport (`ViewportKit`) is the only renderer; every pixel, on-screen and offscreen (thumbnails, `render_views`, review sheets, CI goldens), goes through it. Never add a second path (SceneKit, Model I/O, `usdrecord`, etc.) — extend the viewport with a headless snapshot instead, or ask. The existing SceneKit/`usdrecord` `render_views` backend is debt to delete, not a template.
+
 ## SwiftUI & UI code (EditorUI, DesignSystem)
 
 Write UI as an expert SwiftUI 6 + macOS architect would. These rules are mandatory for any SwiftUI/UI code:

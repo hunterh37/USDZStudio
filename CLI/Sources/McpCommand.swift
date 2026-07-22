@@ -1,5 +1,7 @@
 import AgentMCP
+import RenderKit
 import Foundation
+import RenderKit
 import ScriptingKit
 import USDBridge
 import USDCore
@@ -92,25 +94,51 @@ enum McpCommand {
             noRelay: noRelay)
     }
 
-    // coverage:disable — composition root: opens the real Python bridge, locates usdrecord, and blocks on the stdio loop; each seam (resolve, AgentMCP tools, transport line handling) is unit-tested in isolation.
+    // coverage:disable — composition root: opens the real Python bridge, locates usdrecord, and blocks on the stdio loop; each seam (resolve, routing via AdaptiveTransport.route, AgentMCP tools, transport line handling) is unit-tested in isolation.
     static func run(arguments: [String], printError: (String) -> Void) async -> Int32 {
         guard let resolution = resolve(arguments: arguments, printError: printError) else {
             return 2
         }
-        // If the editor app is running, it hosts the editing session against its
-        // OPEN document — become a thin stdin↔socket↔stdout pump so the agent
-        // edits (and the user watches) the live viewport (specs/agent-live-editing.md).
         let endpointURL = MCPActivityPaths.endpointURL()
-        if !resolution.noRelay, let pump = RelayPump.make(endpointURL: endpointURL) {
-            FileHandle.standardError.write(Data(
-                "openusdz mcp: editor is live — relaying to the open document\n".utf8))
-            return await pump.run()
+
+        // Deterministic headless path: `--no-relay` serves the file in-process
+        // for the whole lifetime and never attaches to a developer's open
+        // document — the contract the e2e flow gate and scripted automation rely
+        // on. A build failure here is a hard error (exit 1).
+        if resolution.noRelay {
+            guard let host = await makeInProcessHost(resolution, printError: printError) else {
+                return 1
+            }
+            await StdioTransport.run(server: host.server)
+            host.onEnd()
+            return 0
         }
+
+        // Interactive default: when the editor is running it hosts the editing
+        // session against its OPEN document. Route each request to it when it is
+        // reachable, else serve it in-process — re-decided PER REQUEST, so a
+        // long-lived server that predates or outlives the app starts relaying the
+        // moment the app is open instead of being frozen headless from launch
+        // (specs/agent-live-editing.md).
+        await AdaptiveTransport.run(
+            endpointURL: endpointURL,
+            makeInProcessServer: { await makeInProcessHost(resolution, printError: printError) })
+        return 0
+    }
+
+    /// Build the headless in-process server (resident Python bridge + AgentMCP
+    /// tool surface) and its teardown hook, or `nil` after printing why. Called
+    /// lazily by `AdaptiveTransport` (only if a request must be served locally,
+    /// so a relay-only session never opens the bridge) and eagerly by the
+    /// `--no-relay` path.
+    static func makeInProcessHost(
+        _ resolution: Resolution, printError: (String) -> Void
+    ) async -> AdaptiveTransport.InProcessHost? {
         do {
             let snapshotScript = try CLIRunner.snapshotScriptPath()
             guard let saveExecutor = ProcessBridgeExecutor(scriptPath: snapshotScript) else {
                 printError("error: no Python interpreter found — run scripts/fetch-python-runtime.sh")
-                return 1
+                return nil
             }
             // The MCP server is long-lived and opens many files (the initial
             // document plus every asset re-import), so it opens through one
@@ -129,11 +157,10 @@ enum McpCommand {
             session.saveExecutor = saveExecutor
             session.bridgeExecutor = openExecutor
 
-            // No editor is running (we didn't relay above), so persist the
-            // agent's reference image to the hand-off file: an editor launched
-            // after this session picks it up on start and shows it in the
-            // reference panel. Clear any stale record from a prior session so
-            // the panel reflects this one (specs/agent-live-editing.md).
+            // No editor hosts this request, so persist the agent's reference
+            // image to the hand-off file: an editor launched later picks it up on
+            // start and shows it in the reference panel. Clear any stale record
+            // so the panel reflects this session (specs/agent-live-editing.md).
             let referenceURL = MCPActivityPaths.referenceURL()
             ReferenceImage.remove(at: referenceURL)
             session.onReferenceImageChange = { image in
@@ -141,23 +168,18 @@ enum McpCommand {
                 else { ReferenceImage.remove(at: referenceURL) }
             }
 
-            let locator = PythonRuntimeLocator()
             // `render_views` renders natively by default (SceneKit/Model I/O — the
             // same Apple frameworks the app's viewport uses), so it returns real
-            // pixels out of the box without `usd-core`/`usdrecord`. Storm is strictly
-            // opt-in via `DICYANIN_USDRECORD`: auto-detecting a `usdrecord` beside the
-            // interpreter used to win silently and, when that binary was a stub
-            // without imaging support (e.g. the one shipped by the `usd-core` wheel
-            // or system Python), it failed every render instead of falling back.
+            // pixels without `usd-core`/`usdrecord`. Storm is opt-in via
+            // `DICYANIN_USDRECORD`.
             let renderer: (any RenderExecuting)? = NativeRendererSelection.make(
                 environment: ProcessInfo.processInfo.environment,
                 fileExists: { FileManager.default.fileExists(atPath: $0) })
-
-            let scriptExecutor: (any ScriptExecuting)? = locator.locate()
+            let scriptExecutor: (any ScriptExecuting)? = PythonRuntimeLocator().locate()
                 .map { PythonProcessExecutor(pythonPath: $0) }
 
             // Push live tool-call activity to the editor app (if it's running)
-            // over its localhost socket; a graceful no-op when it isn't.
+            // over its socket; a graceful no-op when it isn't.
             let activitySink = SocketEventSink()
             let server = AgentMCPServer.make(
                 session: session,
@@ -168,37 +190,12 @@ enum McpCommand {
                     libraryDirectories: resolution.libraryDirectories,
                     eventSink: activitySink))
             FileHandle.standardError.write(Data(
-                "openusdz mcp: serving \(resolution.fileURL.lastPathComponent) (\(server.toolNames.count) tools) over stdio\n".utf8))
-            await StdioTransport.run(server: server)
-            activitySink.sessionEnd()
-            return 0
+                "openusdz mcp: serving \(resolution.fileURL.lastPathComponent) (\(server.toolNames.count) tools) headless\n".utf8))
+            return AdaptiveTransport.InProcessHost(
+                server: server, onEnd: { activitySink.sessionEnd() })
         } catch {
             printError("error: \(error)")
-            return 1
-        }
-    }
-    // coverage:enable
-}
-
-/// `usdrecord`-backed renderer for AgentMCP's `render_views`.
-struct UsdrecordRenderer: RenderExecuting {
-    var usdrecordPath: String
-
-    // coverage:disable — spawns the real usdrecord binary; the render tool's stage/camera authoring is unit-tested against a stub renderer.
-    func render(stageURL: URL, outputURL: URL, cameraPath: String, size: Int) async throws {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: usdrecordPath)
-        process.arguments = [
-            "--imageWidth", String(size),
-            "--camera", cameraPath,
-            stageURL.path, outputURL.path,
-        ]
-        process.standardOutput = FileHandle.nullDevice
-        process.standardError = FileHandle.nullDevice
-        try process.run()
-        process.waitUntilExit()
-        guard process.terminationStatus == 0 else {
-            throw BridgeError.pythonUnavailable(detail: "usdrecord exited \(process.terminationStatus)")
+            return nil
         }
     }
     // coverage:enable

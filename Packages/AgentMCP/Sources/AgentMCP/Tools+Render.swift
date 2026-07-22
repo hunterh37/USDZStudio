@@ -64,8 +64,11 @@ public enum RenderTools {
                 return statsSummary(session: session, isolate: isolate)
             }
             guard let renderer else {
+                // The native SceneKit renderer needs no usdrecord and is the
+                // intended default; reaching here means the host wired no
+                // renderer at all (see RenderKit / the app-renderer wiring).
                 throw ToolError.unsupported(
-                    "no renderer available (usdrecord not found) — call again with statsOnly: true")
+                    "this server was configured without a renderer — reconfigure with a renderer (RenderKit's native SceneKit renderer needs no usdrecord), or call again with statsOnly: true")
             }
             return try await renderImages(
                 session: session, isolate: isolate, views: namedViews, angles: angles,

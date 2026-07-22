@@ -218,9 +218,21 @@ public enum SculptTools {
     private static func registerAuthor(on server: MCPServer, store: SculptStore) {
         server.register(MCPTool(
             name: "sculpt_author_spec", group: .sculpt,
-            description: "Author (or replace) the ObjectSculptSpec: the component tree, materials, sockets, detail inventory, and — for objects that realistically open/swing (case or chest lid, door, cap, drawer) — `joints` (revolute hinge / prismatic slider, each with an axis + a pivot point on the hinge line, targeting a component) so the interaction pass authors real articulation. Pass the full spec as JSON (SculptKit.ObjectSculptSpec shape). Resets the pass orchestrator to blockout and persists the spec to the work directory.",
+            description: """
+                Author (or replace) the ObjectSculptSpec and reset the pass orchestrator to blockout. Pass the full spec as JSON under `spec`.
+
+                Shape (SculptKit.ObjectSculptSpec): {
+                  "name": String, "objectClass": "character"|"object"|"hybrid",
+                  "root": ComponentNode, "materials": [MaterialSpec], "sockets": [Socket],
+                  "joints": [Joint], "detailInventory": {...}, … (all but name/objectClass/root optional)
+                }
+                ComponentNode: { "name": String, "shape": ShapeKind, "translation":[x,y,z], "rotationEulerDegrees":[x,y,z], "scale":[x,y,z], "width"/"height"/"depth"/"radius"/"segments": Number, "materialID": String?, "attachment": "root"|"weld"|"socket"|"pin"|"free", "children":[ComponentNode] }
+                ShapeKind is a tagged object — one of: {"kind":"group"}, {"kind":"primitive","primitive":"box"|"plane"|"cylinder"|"cone"|"sphere"}, {"kind":"library","entryID":"…"}.
+
+                Every geometry component except the root should declare `attachment` (root/weld/socket/pin) — a component without one is flagged here as a warning and rejected by strict validate. For parts that realistically open/swing (lid, door, cap, drawer) declare `joints` (revolute hinge / prismatic slider with an axis + pivot targeting a component) so the interaction pass authors real articulation.
+                """,
             inputSchema: Schema.object([
-                "spec": .object(["type": "object", "description": "the full ObjectSculptSpec JSON"]),
+                "spec": .object(["type": "object", "description": "the full ObjectSculptSpec JSON (see tool description for the schema + a minimal example)"]),
             ], required: ["spec"])
         ) { args in
             guard case .object = args["spec"] else {
@@ -231,17 +243,57 @@ public enum SculptTools {
                 let data = Data(args["spec"].serializedString.utf8)
                 spec = try ObjectSculptSpec.decoded(from: data)
             } catch {
-                throw ToolError.invalidParams("could not decode spec: \(error)")
+                throw ToolError.invalidParams("could not decode spec: \(decodeHint(error))")
             }
             await store.setSpec(spec)
+            // Surface the attachment requirement now (issue #113): a geometry
+            // component with no `attachment` still decodes, but strict validate
+            // rejects it — warn here so it isn't a surprise later, all at once.
+            let floating = SpecValidator.componentsMissingAttachment(spec)
+            var warnings: [JSONValue] = []
+            if !floating.isEmpty {
+                warnings.append(.string(
+                    "components missing an attachment (declare root/weld/socket/pin, else strict validate rejects them): "
+                    + floating.joined(separator: ", ")))
+            }
             return .object([
                 "name": .string(spec.name),
                 "componentCount": .number(Double(spec.componentCount)),
                 "materialCount": .number(Double(spec.materials.count)),
                 "detailItems": .number(Double(spec.detailInventory.items.count)),
                 "currentPass": .string(SculptPass.blockout.rawValue),
+                "warnings": .array(warnings),
             ])
         })
+    }
+
+    /// Turn a raw `DecodingError` into an actionable message that names the
+    /// offending key/path, instead of the cryptic `keyNotFound(CodingKeys(...))`
+    /// dump agents saw before (#112).
+    static func decodeHint(for error: Error) -> String {
+        func pathString(_ path: [CodingKey]) -> String {
+            path.map { $0.intValue.map { "[\($0)]" } ?? $0.stringValue }.joined(separator: ".")
+        }
+        guard let decodingError = error as? DecodingError else {
+            return "could not decode spec: \(error)"
+        }
+        switch decodingError {
+        case .keyNotFound(let key, let ctx):
+            let loc = pathString(ctx.codingPath)
+            let at = loc.isEmpty ? "at the top level" : "under '\(loc)'"
+            return "spec is missing required key '\(key.stringValue)' \(at). Required top-level keys: name, objectClass, root. See the tool description for the full schema + example."
+        case .typeMismatch(let type, let ctx):
+            return "spec has the wrong type for '\(pathString(ctx.codingPath))' (expected \(type)). \(ctx.debugDescription)"
+        case .valueNotFound(_, let ctx):
+            return "spec has a null where a value is required at '\(pathString(ctx.codingPath))'. \(ctx.debugDescription)"
+        case .dataCorrupted(let ctx):
+            let loc = pathString(ctx.codingPath)
+            return "spec is malformed\(loc.isEmpty ? "" : " at '\(loc)'"): \(ctx.debugDescription)"
+        // coverage:disable — @unknown default guards future DecodingError cases; unreachable with today's enum.
+        @unknown default:
+            return "could not decode spec: \(decodingError)"
+        // coverage:enable
+        }
     }
 
     // MARK: - Validate
@@ -290,6 +342,21 @@ public enum SculptTools {
                     throw ToolError.rejectedByValidation(ready.errors.map(\.message))
                 }
             }
+            // Contamination warning (issue #114): when blockout authors into a
+            // stage that already holds prims outside the sculpt subtree, that
+            // foreign geometry skews scene_stats / render bounds / silhouette
+            // similarity. Warn (don't block — the operator may want it there).
+            var warnings: [JSONValue] = []
+            if pass == .blockout {
+                let foreign = session.stage.rootPrims
+                    .map(\.name)
+                    .filter { $0 != spec.root.name }
+                if !foreign.isEmpty {
+                    warnings.append(.string(
+                        "target stage is not empty — unrelated prims will skew bounds/similarity: "
+                        + foreign.joined(separator: ", ")))
+                }
+            }
             let steps = BuildPlanner.plan(for: spec, pass: pass)
             var authored: [String] = []
             for step in steps {
@@ -302,6 +369,7 @@ public enum SculptTools {
                 "stepCount": .number(Double(steps.count)),
                 "authored": .array(authored.map { .string($0) }),
                 "reviewOnly": .bool(steps.isEmpty),
+                "warnings": .array(warnings),
             ])
         })
     }
@@ -492,17 +560,30 @@ public enum SculptTools {
     static func execute(step: BuildStep, session: EditSession) async throws -> String? {
         switch step {
         case .createGroup(let name, let parentPath):
+            // Idempotent re-run: a blockout replayed after a partial build (or
+            // a review that didn't advance) must not error with "'X' already
+            // exists under /" — skip creation and return the existing path so
+            // the pass can complete (issue #111).
+            if let existing = existingPath(name: name, parentPath: parentPath, session: session) {
+                return existing
+            }
             let args = insertArgs(name: name, parent: parentPath)
             let built = try MutateTools.makeInsert(args: args, session: session, extraAttributes: [])
             _ = try session.mutate(built.command)
             return built.path.description
 
         case let .createMesh(name, parentPath, primitive, width, height, depth, radius, segments):
+            if let existing = existingPath(name: name, parentPath: parentPath, session: session) {
+                return existing
+            }
             let mesh = try buildPrimitive(primitive, width: width, height: height, depth: depth,
                                           radius: radius, segments: segments)
             return try insertMesh(mesh, name: name, parentPath: parentPath, session: session)
 
         case .createLibraryMesh(let name, let parentPath, let entryID):
+            if let existing = existingPath(name: name, parentPath: parentPath, session: session) {
+                return existing
+            }
             guard let entry = ShapeLibrary.entry(id: entryID) else {
                 throw ToolError.invalidParams("unknown library entry '\(entryID)'")
             }
@@ -698,6 +779,16 @@ public enum SculptTools {
         try session.resolve(.object(["path": .string(raw)]))
     }
 
+    /// The description of the prim already present at `parentPath`/`name`, or
+    /// nil when nothing is there. Lets the create steps be idempotent on a
+    /// blockout replay (issue #111).
+    static func existingPath(name: String, parentPath: String?, session: EditSession) -> String? {
+        let full = (parentPath ?? "") + "/" + name
+        guard let path = try? resolvePath(full, session: session),
+              session.stage.prim(at: path) != nil else { return nil }
+        return path.description
+    }
+
     static func insertArgs(name: String, parent: String?) -> JSONValue {
         var dict: [String: JSONValue] = ["name": .string(name)]
         if let parent { dict["parent"] = .string(parent) }
@@ -711,6 +802,30 @@ public enum SculptTools {
     static func featureScores(from value: JSONValue) -> [String: Double] {
         guard let object = value.objectValue else { return [:] }
         return object.compactMapValues { $0.doubleValue }
+    }
+
+    /// Turn a `DecodingError` into a message that names the offending key/path,
+    /// so a spec author isn't left with a cryptic `keyNotFound(CodingKeys(...))`
+    /// (issue #112). Non-decoding errors pass through unchanged.
+    static func decodeHint(_ error: Error) -> String {
+        guard let decoding = error as? DecodingError else { return "\(error)" }
+        func joinPath(_ path: [CodingKey]) -> String {
+            path.map(\.stringValue).joined(separator: ".")
+        }
+        switch decoding {
+        case let .keyNotFound(key, context):
+            let at = context.codingPath.isEmpty ? "top level" : joinPath(context.codingPath)
+            return "missing required key '\(key.stringValue)' at \(at)"
+        case let .typeMismatch(_, context):
+            return "type mismatch at \(joinPath(context.codingPath)): \(context.debugDescription)"
+        case let .valueNotFound(_, context):
+            return "missing value at \(joinPath(context.codingPath)): \(context.debugDescription)"
+        case let .dataCorrupted(context):
+            let at = context.codingPath.isEmpty ? "top level" : joinPath(context.codingPath)
+            return "invalid data at \(at): \(context.debugDescription)"
+        @unknown default:
+            return "\(decoding)"
+        }
     }
 
     static func probeReportJSON(_ report: ProbeReport) -> JSONValue {

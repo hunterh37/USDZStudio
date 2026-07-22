@@ -56,11 +56,12 @@ MODULES=(
   "SessionKit|Packages/SessionKit|Sources/SessionKit|100"
   "DicyaninDesignSystem|Packages/DicyaninDesignSystem|Sources/DicyaninDesignSystem|95"
   "QuickLookKit|Packages/QuickLookKit|Sources/QuickLookKit|100"
+  "RenderKit|Packages/RenderKit|Sources/RenderKit|100"        # pure parse + selection are 100; GPU/usdrecord render bodies are coverage:disable
   "CLI|CLI|Sources|95"
   "USDBridge|Packages/USDBridge|Sources/USDBridge|95"          # spec floor; measures 100 today
   # Ratchet floors — pinned below spec target (noted), gap tracked in ROADMAP Phase T.
-  "ViewportKit|Packages/ViewportKit|Sources/ViewportKit|50"    # ratchet 46→50; spec target 90
-  "EditorUI|Packages/EditorUI|Sources/EditorUI|64"             # ratchet 34→64; spec target 90
+  "ViewportKit|Packages/ViewportKit|Sources/ViewportKit|58"    # ratchet 46→50→58 (#126 golden-image harness + parity models); spec target 90
+  "EditorUI|Packages/EditorUI|Sources/EditorUI|65"             # ratchet 34→64→65 (#126 grounding/tone-mapping controls); spec target 90
 )
 
 REPORT=0

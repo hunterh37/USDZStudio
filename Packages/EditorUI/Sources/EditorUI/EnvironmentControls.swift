@@ -25,6 +25,8 @@ public struct EnvironmentControls: View {
             exposureSection
             Divider()
             backgroundSection
+            Divider()
+            groundingSection
         }
         .padding(12)
     }
@@ -93,8 +95,19 @@ public struct EnvironmentControls: View {
                     .foregroundStyle(.secondary)
             }
             Slider(value: intensityBinding, in: Self.intensitySliderRange)
+
+            Picker("Tone Mapping", selection: toneMappingBinding) {
+                ForEach(ToneMapping.allCases) { op in
+                    Text(op.displayName).tag(op)
+                }
+            }
+            .pickerStyle(.menu)
         }
         .font(.callout)
+    }
+
+    var toneMappingBinding: Binding<ToneMapping> {
+        Binding(get: { settings.toneMapping }, set: { settings.toneMapping = $0 })
     }
 
     static let intensitySliderRange: ClosedRange<Double> =
@@ -130,14 +143,16 @@ public struct EnvironmentControls: View {
         }
     }
 
-    /// The three background modes as a plain selectable kind (colour payload is
-    /// edited separately via the ColorPicker below).
+    /// The background modes as a plain selectable kind (colour payload is
+    /// edited separately via the ColorPicker below). "AR Preview" is the
+    /// grounded QuickLook look the contact shadow is gated to (#126).
     enum BackgroundKind: String, CaseIterable, Identifiable {
-        case environment, color, transparent
+        case environment, arPreview, color, transparent
         var id: String { rawValue }
         var label: String {
             switch self {
             case .environment: "Environment"
+            case .arPreview: "AR Preview"
             case .color: "Color"
             case .transparent: "Transparent"
             }
@@ -149,6 +164,7 @@ public struct EnvironmentControls: View {
             get: {
                 switch settings.background {
                 case .environment: .environment
+                case .arPreview: .arPreview
                 case .solidColor: .color
                 case .transparent: .transparent
                 }
@@ -156,12 +172,62 @@ public struct EnvironmentControls: View {
             set: { kind in
                 switch kind {
                 case .environment: settings.background = .environment
+                case .arPreview: settings.background = .arPreview
                 case .transparent: settings.background = .transparent
                 case .color:
                     if case .solidColor = settings.background { return }
                     settings.background = .solidColor(SIMD3(0.11, 0.11, 0.13))
                 }
             })
+    }
+
+    // MARK: Grounding contact shadow (#126)
+
+    private var groundingSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text("Grounding")
+                    .font(.headline)
+                Spacer()
+                Toggle("", isOn: groundingEnabledBinding)
+                    .labelsHidden()
+            }
+            Text(groundingActive
+                 ? "Contact shadow matches AR Quick Look."
+                 : "Select the AR Preview background to ground the model.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            HStack {
+                Text("Shadow Softness")
+                Spacer()
+                Text(String(format: "%.0f%%", settings.grounding.softness * 100))
+                    .monospacedDigit()
+                    .foregroundStyle(.secondary)
+            }
+            Slider(value: softnessBinding, in: Self.softnessSliderRange)
+                .disabled(!settings.grounding.isEnabled)
+        }
+        .font(.callout)
+    }
+
+    /// Whether a contact shadow is actually being drawn right now (enabled AND
+    /// on a grounded background).
+    var groundingActive: Bool {
+        settings.grounding.isActive(for: settings.background)
+    }
+
+    var groundingEnabledBinding: Binding<Bool> {
+        Binding(get: { settings.grounding.isEnabled },
+                set: { settings.grounding.isEnabled = $0 })
+    }
+
+    static let softnessSliderRange: ClosedRange<Double> =
+        Double(GroundingSettings.softnessRange.lowerBound)...Double(GroundingSettings.softnessRange.upperBound)
+
+    var softnessBinding: Binding<Double> {
+        Binding(get: { Double(settings.grounding.softness) },
+                set: { settings.grounding.setSoftness(Float($0)) })
     }
 
     var solidColorBinding: Binding<Color> {

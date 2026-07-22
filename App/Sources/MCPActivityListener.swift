@@ -1,6 +1,7 @@
 import AgentMCP
 import EditorUI
 import Foundation
+import RenderKit
 import USDCore
 
 /// App-side mirror of the NDJSON activity protocol pushed by `openusdz mcp`.
@@ -277,9 +278,15 @@ final class MCPActivityListener: ObservableObject {
             Task { @MainActor in self?.applyReference(image) }
         }
         hostSession = session
+        // Wire a renderer the same way the CLI-hosted server does (issue #109):
+        // without one, `render_views` (and the whole sculpt review loop) is dead
+        // in-app. The native SceneKit renderer needs no usd-core/usdrecord.
+        let renderer = NativeRendererSelection.make(
+            environment: ProcessInfo.processInfo.environment,
+            fileExists: { FileManager.default.fileExists(atPath: $0) })
         hostServer = AgentMCPServer.make(
             session: session,
-            configuration: AgentMCPServer.Configuration(eventSink: sink))
+            configuration: AgentMCPServer.Configuration(renderer: renderer, eventSink: sink))
     }
 
     /// Fold a reference-image change into the panel model and the hand-off file.

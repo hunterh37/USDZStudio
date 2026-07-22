@@ -108,10 +108,14 @@ struct USDAuthorStageTests {
 
         let mesh = try #require(stage.prim(at: PrimPath("/Car/Body/BodyMesh")!))
         #expect(mesh.typeName == "Mesh")
-        #expect(mesh.attribute(named: "points")?.value == .doubleArray([0, 0, 0, 1, 0, 0, 0, 1, 0]))
+        // Positions/normals are authored as canonical `point3f[]`/`normal3f[]`
+        // (`.float3Array`), the type every geometry reader and RealityKit expect.
+        // UVs stay `.doubleArray` (arity-2; the serializer maps them to
+        // `texCoord2f[]`).
+        #expect(mesh.attribute(named: "points")?.value == .float3Array([0, 0, 0, 1, 0, 0, 0, 1, 0]))
         #expect(mesh.attribute(named: "faceVertexIndices")?.value == .intArray([0, 1, 2]))
         #expect(mesh.attribute(named: "faceVertexCounts")?.value == .intArray([3]))
-        #expect(mesh.attribute(named: "normals")?.value == .doubleArray([0, 0, 1, 0, 0, 1, 0, 0, 1]))
+        #expect(mesh.attribute(named: "normals")?.value == .float3Array([0, 0, 1, 0, 0, 1, 0, 0, 1]))
         #expect(mesh.attribute(named: "primvars:st")?.value == .doubleArray([0, 0, 1, 0, 0, 1]))
         #expect(mesh.metadata["material:binding"] == "Paint")
 
@@ -141,7 +145,7 @@ struct USDAuthorStageTests {
         let stage = try await author(scene)
         let mesh = try #require(stage.prim(at: PrimPath("/Tri/N/M")!))
         // A CCW triangle in the z=0 plane → unit +Z normal at every vertex.
-        #expect(mesh.attribute(named: "normals")?.value == .doubleArray([0, 0, 1, 0, 0, 1, 0, 0, 1]))
+        #expect(mesh.attribute(named: "normals")?.value == .float3Array([0, 0, 1, 0, 0, 1, 0, 0, 1]))
     }
 
     /// Degenerate topology (indices out of range) can't yield honest normals,

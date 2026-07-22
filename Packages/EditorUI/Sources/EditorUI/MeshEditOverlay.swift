@@ -349,6 +349,24 @@ public struct MeshEditOverlay: View {
                     .buttonStyle(.plain)
                     .foregroundStyle(Palette.textSecondary.color)
                     .accessibilityIdentifier("meshEdit.edge.next")
+                case .mirror:
+                    Picker("Axis", selection: Binding(
+                        get: { document.meshEdit?.mirrorAxis ?? .x },
+                        set: { document.meshEdit?.mirrorAxis = $0 })) {
+                        Text("X").tag(MeshKit.Mirror.Axis.x)
+                        Text("Y").tag(MeshKit.Mirror.Axis.y)
+                        Text("Z").tag(MeshKit.Mirror.Axis.z)
+                    }
+                    .pickerStyle(.segmented)
+                    .frame(width: 120)
+                    .accessibilityIdentifier("meshEdit.mirror.axis")
+                    paramField("Plane", value: Binding(
+                        get: { document.meshEdit?.mirrorCoordinate ?? 0 },
+                        set: { document.meshEdit?.mirrorCoordinate = $0 }))
+                case .solidify:
+                    paramField("Thickness", value: Binding(
+                        get: { document.meshEdit?.solidifyThickness ?? 0.05 },
+                        set: { document.meshEdit?.solidifyThickness = $0 }))
                 case .delete, .fill:
                     Text("No parameters")
                         .font(.system(size: TypeScale.caption))

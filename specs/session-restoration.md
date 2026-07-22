@@ -52,12 +52,13 @@ Implementation revealed that `EditingKit` **already owns** the write-ahead-log h
 
 - **`CommandStack.checkpointSaved(sourceURL:)`** — on save, flatten the WAL to a fresh checkpoint at the saved file *without* clearing in-session undo history, so recovery replays against the just-saved baseline instead of double-applying pre-save commands. Wired into `EditorDocument.save`.
 - **`SessionStore.journal(for:)`** — reopen a recovered plan's WAL so a restored document keeps appending to the same session.
+- **`SessionStore.reset()`** — total sweep of every session directory under `root` (active, recoverable, and bare/partial alike); best-effort, never throws, returns the count removed. Backs File ▸ "Reset Session".
 
 ### EditorUI — mapping + the session service
 
 - **`EditorDocument`** — journaling initializer (`journal:`), a `restored(baseline:modelURL:journal:records:)` WAL-replay factory with dirty-state reconciliation, and `restoreIsolation`.
 - **`SessionMapping`** — `ViewState.capture` / `DocumentSession.capture` and `EditorDocument.applySessionViewState` (selection primary-first, gizmo modes, isolate roots; stale paths + unknown enum values degrade gracefully) + `EditorDocument.restore`.
-- **`SessionController`** (`@Observable @MainActor`) — the app-session service composing `EditingKit.SessionStore` + `EnvelopeStore`: `begin(for:)` → `attach` → `capture` → (relaunch) `findRecoverable` → `restore` (adopts the session) → `discard`/`endActive`. The scratch-scene baseline is fixed at `attach` time so replay never double-applies.
+- **`SessionController`** (`@Observable @MainActor`) — the app-session service composing `EditingKit.SessionStore` + `EnvelopeStore`: `begin(for:)` → `attach` → `capture` → (relaunch) `findRecoverable` → `restore` (adopts the session) → `discard`/`endActive`. It also exposes `reset()` (end the active session + `SessionStore.reset()`) for File ▸ "Reset Session". The scratch-scene baseline is fixed at `attach` time so replay never double-applies.
 
 ## Persistence layout
 
@@ -86,6 +87,10 @@ Per-`sessionID` directories mean multi-window is additive later (one dir per win
 3. Resolve the baseline: reopen `source` via `BridgedStage.open` (bridge), or the `embeddedSnapshot` for a scratch scene. Failure → discard, clean launch.
 4. `session.restore(...)` replays the WAL (`CommandStack.recovered`) and applies the view state, building the document up-front (recovery is cheap).
 5. Present the restore-or-start-fresh prompt; the message warns when `sourceChangedOnDisk`. Restore → show the rebuilt document; Start Fresh → `discard` + clean launch.
+
+### Reset (File ▸ "Reset Session…", `resetSession`)
+
+A confirmed, destructive command that clears all session-restoration state: `session.reset()` ends the active WAL and sweeps every recoverable leftover so the next launch offers no restore. Any open document stays open and its saved file is untouched; crash-safety is re-armed for it by rebuilding it over a fresh journaled session (undo history resets — the accepted trade-off of an explicit reset). No document open → the sweep alone is the whole effect.
 
 ## Enterprise-grade concerns
 

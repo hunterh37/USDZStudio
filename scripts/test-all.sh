@@ -13,6 +13,7 @@ PACKAGES=(
   Packages/USDCore
   Packages/DicyaninDesignSystem
   Packages/QuickLookKit
+  Packages/RenderKit
   Packages/USDBridge
   Packages/MeshKit
   Packages/CaptureKit
@@ -25,6 +26,7 @@ PACKAGES=(
   Packages/SculptKit
   Packages/SessionKit
   Packages/AgentMCP
+  Packages/RenderKit
   Packages/ViewportKit
   Packages/EditorUI
   CLI

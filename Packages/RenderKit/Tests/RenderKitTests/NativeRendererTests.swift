@@ -1,6 +1,7 @@
+import AgentMCP
 import Foundation
 import Testing
-@testable import openusdz
+@testable import RenderKit
 
 /// The render stage the tool hands the renderer is always `USDASerializer`
 /// output: `UsdPreviewSurface` materials, `material:binding` on the meshes, and
@@ -80,6 +81,84 @@ struct RenderStageParseTests {
         #expect(bindings["Screen"] == "Glass")
     }
 
+    // #90: a textured stage — one prim with a UsdUVTexture diffuse, one with a
+    // constant colour.
+    static let texturedStage = """
+    def Mesh "Earth" { rel material:binding = </Looks/Globe> }
+    def Mesh "Stand" { rel material:binding = </Looks/Wood> }
+    def Scope "Looks"
+    {
+        def Material "Globe"
+        {
+            def Shader "Surface"
+            {
+                token info:id = "UsdPreviewSurface"
+                color3f inputs:diffuseColor.connect = </Looks/Globe/Tex.outputs:rgb>
+            }
+            def Shader "Tex"
+            {
+                token info:id = "UsdUVTexture"
+                asset inputs:file = @0/earth_atmos_2048.jpg@
+            }
+        }
+        def Material "Wood"
+        {
+            def Shader "Surface"
+            {
+                token info:id = "UsdPreviewSurface"
+                color3f inputs:diffuseColor = (0.4, 0.2, 0.1)
+            }
+        }
+    }
+    """
+
+    @Test func resolvesTextureFilePerBoundPrim() {
+        let textures = RenderStageParse.textureFilesByPrimName(usda: Self.texturedStage)
+        #expect(textures["Earth"] == "0/earth_atmos_2048.jpg")
+        #expect(textures["Stand"] == nil)   // constant-colour material has no texture
+        #expect(textures.count == 1)
+    }
+
+    @Test func materialTextureFilesIndexedByMaterialName() {
+        let files = RenderStageParse.materialTextureFiles(usda: Self.texturedStage)
+        #expect(files["Globe"] == "0/earth_atmos_2048.jpg")
+        #expect(files["Wood"] == nil)
+    }
+
+    @Test func mixedStageParsesBothColorAndTexture() {
+        // A stage with both a constant-colour and a textured prim resolves each.
+        #expect(RenderStageParse.diffuseColorsByPrimName(usda: Self.texturedStage)["Stand"] == [0.4, 0.2, 0.1])
+        #expect(RenderStageParse.textureFilesByPrimName(usda: Self.texturedStage)["Earth"] == "0/earth_atmos_2048.jpg")
+    }
+
+    @Test func assetTokenExtraction() {
+        #expect(RenderStageParse.assetToken(in: "asset inputs:file = @tex/a.png@") == "tex/a.png")
+        #expect(RenderStageParse.assetToken(in: "no asset here") == nil)
+        #expect(RenderStageParse.assetToken(in: "empty = @@") == nil)
+    }
+
+    @Test func onlyFirstTextureFileIsTakenPerMaterial() {
+        // Later normal/roughness maps don't override the diffuse (first) file.
+        let stage = """
+        def Material "M"
+        {
+            def Shader "Diffuse" { asset inputs:file = @albedo.png@ }
+            def Shader "Normal" { asset inputs:file = @normal.png@ }
+        }
+        """
+        #expect(RenderStageParse.materialTextureFiles(usda: stage)["M"] == "albedo.png")
+    }
+
+    @Test func resolveTexturePathHandlesRelativeAndAbsolute() {
+        let stage = URL(fileURLWithPath: "/tmp/renders/earth.usda")
+        #expect(RenderStageParse.resolveTexturePath(assetPath: "tex/a.png", stageURL: stage)
+            == "/tmp/renders/tex/a.png")
+        #expect(RenderStageParse.resolveTexturePath(assetPath: "./tex/a.png", stageURL: stage)
+            == "/tmp/renders/tex/a.png")
+        #expect(RenderStageParse.resolveTexturePath(assetPath: "/abs/a.png", stageURL: stage)
+            == "/abs/a.png")
+    }
+
     @Test func unboundPrimHasNoColor() {
         let stage = """
         def Mesh "Lonely"
@@ -157,6 +236,42 @@ struct RenderStageParseTests {
     @Test func scalarParsesNegativeAndDecimal() {
         #expect(RenderStageParse.scalar(after: "v", in: "double v = -1.5") == -1.5)
         #expect(RenderStageParse.scalar(after: "v", in: "no value") == nil)
+    }
+
+    @Test func scalarStopsAtTrailingNonNumeric() {
+        // A numeric token followed by a non-numeric char ends the token.
+        #expect(RenderStageParse.scalar(after: "v", in: "v = 35 (mm)") == 35)
+        #expect(RenderStageParse.scalar(after: "v", in: "v = 42abc") == 42)
+        // A non-numeric value right after '=' yields no number (token stays empty).
+        #expect(RenderStageParse.scalar(after: "v", in: "v = none") == nil)
+    }
+
+    @Test func cameraReturnsNilForMalformedTransform() {
+        // A Camera whose transform has the wrong arity → no pose parsed.
+        let stage = """
+        def Camera "Cam"
+        {
+            matrix4d xformOp:transform = ( (1, 0, 0), (0, 1, 0) )
+        }
+        """
+        #expect(RenderStageParse.camera(named: "Cam", usda: stage) == nil)
+    }
+
+    @Test func scalarRejectsNonNumericValue() {
+        // A non-numeric token right after '=' yields nil (exercises the empty
+        // token break path).
+        #expect(RenderStageParse.scalar(after: "v", in: "token v = abc") == nil)
+    }
+
+    @Test func cameraWithMalformedMatrixReturnsNil() {
+        // A transform with fewer than 16 values is rejected.
+        let stage = """
+        def Camera "AgentCam_bad"
+        {
+            matrix4d xformOp:transform = ( (1, 0, 0, 0), (0, 1, 0, 0) )
+        }
+        """
+        #expect(RenderStageParse.camera(named: "AgentCam_bad", usda: stage) == nil)
     }
 }
 

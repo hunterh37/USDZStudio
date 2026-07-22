@@ -59,8 +59,13 @@ def rounded(img, radius, border):
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--before", required=True)
-    ap.add_argument("--after", required=True)
+    ap.add_argument("--mode", choices=("beforeafter", "reference"), default="beforeafter",
+                    help="beforeafter: grey→textured (default). reference: a real "
+                         "reference photo (left) vs the reconstructed 3D render (right).")
+    ap.add_argument("--before", help="left panel in beforeafter mode (required there)")
+    ap.add_argument("--reference", help="left panel in reference mode: the REAL "
+                    "reference photo the model was reconstructed from (required there)")
+    ap.add_argument("--after", required=True, help="right panel: the final render")
     ap.add_argument("--out", required=True)
     ap.add_argument("--kicker", default="OPENUSDZ  EDITOR")
     ap.add_argument("--title", default="Texture anything. Natively.")
@@ -76,6 +81,26 @@ def main():
     ap.add_argument("--accent", default="#5696FF")
     args = ap.parse_args()
 
+    # Resolve the two panels per mode. reference mode reframes the card as a
+    # HONEST reconstruction proof: a real reference photo vs our render — never
+    # two renders of our own output (#99).
+    if args.mode == "reference":
+        if not args.reference:
+            ap.error("--mode reference requires --reference <photo> (a REAL reference image)")
+        left_path = args.reference
+        left_label = "REFERENCE" if args.before_label == "BEFORE" else args.before_label
+        left_caption = ("user-supplied reference"
+                        if args.before_caption == "Untextured primitive" else args.before_caption)
+        right_label = "RECONSTRUCTED" if args.after_label == "AFTER" else args.after_label
+        right_caption = ("Reconstructed 3D render"
+                         if args.after_caption == "Photoreal, textured render" else args.after_caption)
+    else:
+        if not args.before:
+            ap.error("--mode beforeafter requires --before <image>")
+        left_path = args.before
+        left_label, left_caption = args.before_label, args.before_caption
+        right_label, right_caption = args.after_label, args.after_caption
+
     W, H, PANEL, PAD = 2400, 1500, 980, 90
     accent = hex_rgb(args.accent)
     canvas = vgrad(W, H, (13, 15, 22), (6, 7, 11)).convert("RGB")
@@ -86,14 +111,16 @@ def main():
     d.text((PAD, 224), args.subtitle, font=font(38), fill=(150, 162, 182))
 
     py, lx, rx = 330, PAD, W - PAD - PANEL
-    canvas.paste(rounded(fit_square(args.before, PANEL), 28, (54, 60, 76)), (lx, py))
+    # fit_square center-crops (cover-fit), so an arbitrary-aspect reference is
+    # framed without distortion.
+    canvas.paste(rounded(fit_square(left_path, PANEL), 28, (54, 60, 76)), (lx, py))
     canvas.paste(rounded(fit_square(args.after, PANEL), 28, accent), (rx, py))
 
     f_lab, f_cap = font(40), font(30)
-    d.text((lx + 6, py + PANEL + 22), args.before_label, font=f_lab, fill=(150, 158, 174))
-    d.text((lx + 6, py + PANEL + 72), args.before_caption, font=f_cap, fill=(110, 118, 134))
-    d.text((rx + 6, py + PANEL + 22), args.after_label, font=f_lab, fill=accent)
-    d.text((rx + 6, py + PANEL + 72), args.after_caption, font=f_cap, fill=(150, 162, 182))
+    d.text((lx + 6, py + PANEL + 22), left_label, font=f_lab, fill=(150, 158, 174))
+    d.text((lx + 6, py + PANEL + 72), left_caption, font=f_cap, fill=(110, 118, 134))
+    d.text((rx + 6, py + PANEL + 22), right_label, font=f_lab, fill=accent)
+    d.text((rx + 6, py + PANEL + 72), right_caption, font=f_cap, fill=(150, 162, 182))
 
     cx, cy, r = W // 2, py + PANEL // 2, 66
     d.ellipse([cx - r, cy - r, cx + r, cy + r], fill=accent)

@@ -69,6 +69,45 @@ import USDCore
         _ = await callError(server, "sculpt_author_spec", ["spec": ["bogus": "shape"]])
     }
 
+    /// A decode failure inside a nested node names the offending key AND its
+    /// path, not a cryptic `keyNotFound(CodingKeys(...))` (issue #112).
+    @Test func authorDecodeErrorNamesNestedKey() async {
+        let session = Fixtures.session()
+        let server = Fixtures.server(session: session)
+        // `root` is present but its `shape` is missing → keyNotFound at "root".
+        let bad: JSONValue = .object([
+            "name": .string("X"), "objectClass": .string("object"),
+            "root": .object(["name": .string("Root")]),
+        ])
+        let message = await callError(server, "sculpt_author_spec", ["spec": bad])
+        #expect(message.contains("shape"))
+        #expect(message.contains("root"))
+
+        // An unrecognized `shape` form is a data-corrupted error (the ShapeKind
+        // decoder) — still reported with its path, not a raw dump.
+        let corrupt: JSONValue = .object([
+            "name": .string("X"), "objectClass": .string("object"),
+            "root": .object(["name": .string("Root"), "shape": .object(["mystery": .bool(true)])]),
+        ])
+        let corruptMessage = await callError(server, "sculpt_author_spec", ["spec": corrupt])
+        #expect(corruptMessage.contains("invalid data"))
+        #expect(corruptMessage.contains("shape"))
+    }
+
+    /// Re-running `sculpt_build_pass` on blockout must not error with "'X'
+    /// already exists" — the create steps are idempotent (issue #111).
+    @Test func rebuildBlockoutIsIdempotent() async {
+        let session = Fixtures.session()
+        let server = Fixtures.server(session: session)
+        _ = await callOK(server, "sculpt_author_spec", ["spec": Self.specArg(Self.richSpec())])
+        let first = await callOK(server, "sculpt_build_pass")
+        #expect(first["pass"].stringValue == "blockout")
+        // Second run over the already-authored subtree succeeds (no throw), with
+        // the same step count — every create resolves to the existing prim.
+        let second = await callOK(server, "sculpt_build_pass")
+        #expect(second["stepCount"].doubleValue == first["stepCount"].doubleValue)
+    }
+
     @Test func strictQualityGateRejectsShallowSpec() async {
         let session = Fixtures.session()
         let server = Fixtures.server(session: session)
@@ -93,10 +132,12 @@ import USDCore
         let status0 = await callOK(server, "sculpt_status")
         #expect(status0["currentPass"].stringValue == "blockout")
 
-        // Blockout authors geometry (group + 5 primitives + 1 repetition copy + library = 8).
+        // Blockout authors geometry AND places each component at its transform
+        // (issue #115): 8 prims (group + 5 primitives + 1 repetition copy +
+        // library) × (create + setTransform) = 16 steps.
         let blockout = await callOK(server, "sculpt_build_pass")
         #expect(blockout["pass"].stringValue == "blockout")
-        #expect(blockout["stepCount"].doubleValue == 8)
+        #expect(blockout["stepCount"].doubleValue == 16)
         #expect(blockout["reviewOnly"].boolValue == false)
         #expect(session.stage.prim(at: PrimPath("/Sculpt/Cy_r1")!) != nil)
 
@@ -382,6 +423,85 @@ import USDCore
 
         // Missing required paths → error.
         _ = await callError(server, "sculpt_comparison_sheet", ["referencePath": "/tmp/ref.png"])
+    }
+
+    // #113: authoring a spec whose components lack `attachment` returns a
+    // warning immediately, instead of only failing later at strict validate.
+    @Test func authorWarnsOnMissingAttachment() async {
+        let server = Fixtures.server(session: Fixtures.session())
+        let out = await callOK(server, "sculpt_author_spec", ["spec": Self.specArg(Self.richSpec())])
+        let warnings = out["warnings"].arrayValue?.compactMap { $0.stringValue } ?? []
+        #expect(warnings.contains { $0.contains("attachment") })
+
+        // A spec whose geometry declares attachments produces no such warning.
+        let attached = ComponentNode(name: "Body", shape: .primitive(.box), attachment: .weld)
+        let root = ComponentNode(name: "Obj", shape: .group, attachment: .root, children: [attached])
+        let clean = ObjectSculptSpec(name: "Obj", objectClass: .object, root: root)
+        let ok = await callOK(server, "sculpt_author_spec", ["spec": Self.specArg(clean)])
+        #expect(ok["warnings"].arrayValue?.isEmpty == true)
+    }
+
+    // #112: decode failures name the offending key/path instead of dumping
+    // `keyNotFound(CodingKeys(...))`.
+    @Test func authorGivesFriendlyDecodeError() async {
+        let server = Fixtures.server(session: Fixtures.session())
+        // Missing required top-level `root`.
+        let bad: JSONValue = ["spec": ["name": "X", "objectClass": "object"]]
+        let err = await callError(server, "sculpt_author_spec", bad)
+        #expect(err.contains("root") || err.contains("missing required key"))
+    }
+
+    @Test func decodeHintNamesEachErrorKind() {
+        enum K: String, CodingKey { case a }
+        let ctxTop = DecodingError.Context(codingPath: [], debugDescription: "d")
+        #expect(SculptTools.decodeHint(for: DecodingError.keyNotFound(K.a, ctxTop))
+            .contains("top level"))
+        let ctxNested = DecodingError.Context(codingPath: [K.a], debugDescription: "d")
+        #expect(SculptTools.decodeHint(for: DecodingError.keyNotFound(K.a, ctxNested))
+            .contains("under 'a'"))
+        #expect(SculptTools.decodeHint(for: DecodingError.typeMismatch(Int.self, ctxNested))
+            .contains("wrong type"))
+        #expect(SculptTools.decodeHint(for: DecodingError.valueNotFound(Int.self, ctxNested))
+            .contains("null"))
+        #expect(SculptTools.decodeHint(for: DecodingError.dataCorrupted(ctxNested))
+            .contains("malformed"))
+        #expect(SculptTools.decodeHint(for: DecodingError.dataCorrupted(ctxTop))
+            .contains("malformed"))
+        // Array-index path exercises the intValue key branch.
+        struct I: CodingKey { var stringValue = "0"; var intValue: Int? = 0
+            init() {}; init?(stringValue: String) { nil }; init?(intValue: Int) { self.intValue = intValue } }
+        #expect(SculptTools.decodeHint(for: DecodingError.typeMismatch(Int.self,
+            .init(codingPath: [I()], debugDescription: "d"))).contains("[0]"))
+        // Non-DecodingError falls through to the generic message.
+        struct Other: Error {}
+        #expect(SculptTools.decodeHint(for: Other()).contains("could not decode spec"))
+    }
+
+    // #114: building into a stage that already holds foreign prims warns; a
+    // clean stage does not.
+    @Test func buildWarnsOnNonEmptyStage() async {
+        let dirty = Fixtures.server(session: Fixtures.session())   // has /Root
+        _ = await callOK(dirty, "sculpt_author_spec", ["spec": Self.specArg(Self.richSpec())])
+        let built = await callOK(dirty, "sculpt_build_pass")
+        #expect(built["warnings"].arrayValue?.contains { $0.stringValue?.contains("not empty") == true } == true)
+
+        let clean = Fixtures.server(session: Fixtures.emptySession())
+        _ = await callOK(clean, "sculpt_author_spec", ["spec": Self.specArg(Self.richSpec())])
+        let ok = await callOK(clean, "sculpt_build_pass")
+        #expect(ok["warnings"].arrayValue?.isEmpty == true)
+    }
+
+    // #111: re-running the same build pass must not error with "already exists";
+    // create steps are idempotent, so a refine→rebuild loop can progress.
+    @Test func rebuildingBlockoutIsIdempotent() async {
+        let server = Fixtures.server(session: Fixtures.emptySession())
+        _ = await callOK(server, "sculpt_author_spec", ["spec": Self.specArg(Self.richSpec())])
+        let first = await callOK(server, "sculpt_build_pass")
+        #expect(first["reviewOnly"].boolValue == false)
+        // Second call over the same (now-populated) stage succeeds rather than
+        // throwing on the existing /Sculpt group.
+        let second = await callOK(server, "sculpt_build_pass")
+        #expect(second["pass"].stringValue == "blockout")
     }
 
     @Test func specPersistedToWorkDirectory() async {

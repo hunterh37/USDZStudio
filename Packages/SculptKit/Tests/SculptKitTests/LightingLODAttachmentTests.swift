@@ -158,6 +158,23 @@ import Testing
         #expect(errors.contains { $0.contains("component 'Body' is attachment '.free'") })
     }
 
+    // #113: the author-time advisory lists exactly the geometry components that
+    // declare no attachment (root and groups excluded).
+    @Test func componentsMissingAttachmentListsFloaters() {
+        let bare = ComponentNode(name: "Body", shape: .primitive(.box))          // floats
+        let welded = ComponentNode(name: "Lid", shape: .primitive(.cylinder), attachment: .weld)
+        let group = ComponentNode(name: "Grp", shape: .group, children: [bare, welded])
+        let root = ComponentNode(name: "Obj", shape: .group, children: [group])
+        let spec = ObjectSculptSpec(name: "Obj", objectClass: .object, root: root)
+        #expect(SpecValidator.componentsMissingAttachment(spec) == ["Body"])
+
+        // A fully-attached spec reports none.
+        let grounded = ComponentNode(name: "Obj", shape: .group,
+            children: [ComponentNode(name: "Body", shape: .primitive(.box), attachment: .weld)])
+        #expect(SpecValidator.componentsMissingAttachment(
+            ObjectSculptSpec(name: "Obj", objectClass: .object, root: grounded)).isEmpty)
+    }
+
     @Test func attachmentGateExemptsGeometryRoot() {
         // A geometry root with no attachment must not be flagged (it grounds).
         let root = ComponentNode(name: "Obj", shape: .primitive(.box))

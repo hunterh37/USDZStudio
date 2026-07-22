@@ -52,6 +52,32 @@ Before/after card (`promo_card.py`):
 - Footer: left = tech tagline ("Open source · SwiftUI + RealityKit + OpenUSD · macOS"), right = a call to action.
 - Prefer system fonts (`SFNS.ttf` / Helvetica). Avoid emoji in `ImageDraw.text` — Pillow renders most as tofu; use a plain `★` glyph if you want a star.
 
+## Two card modes (`promo_card.py --mode`)
+
+- **`beforeafter`** (default): grey primitive (left, `--before`) → textured render
+  (right, `--after`). The classic capability card.
+- **`reference`**: a **real reference photo** (left, `--reference`, labelled
+  `REFERENCE`) → the **reconstructed 3D render** (right, `--after`, labelled
+  `RECONSTRUCTED`). Use this whenever the task is "build/reconstruct X **from a
+  reference image**" — it is the honest, compelling framing for a photo→3D agent.
+
+**If the task is "reconstruct/build X from a reference photo", you MUST:**
+1. Actually **obtain the reference file** (fetch/download the real image the model
+   is reconstructed from), and
+2. Compose with `--mode reference --reference <that file> --after <your render>`.
+
+Non-square references are cover-fit (center-cropped) automatically, so any aspect
+ratio frames cleanly without distortion.
+
+### Honesty guardrails (non-negotiable)
+
+- **Never fabricate a "reference."** Do not pass one of our own renders (or a
+  model-imagined image) as `--reference`. The left panel must be a genuine
+  external reference the reconstruction was actually based on.
+- **Never claim a reference photo was used unless a real image file was fetched
+  and passed to the card.** If a web/stock fetch fails, say so plainly and fall
+  back to `--mode beforeafter` (grey→textured) — do not imply a reference existed.
+
 ## Standard workflow
 
 1. **Fetch a reference texture.** Equirectangular maps live on allowed domains, e.g. the three.js planet textures on `raw.githubusercontent.com`. Read it with the Read tool to confirm it's a clean equirect map before rendering.
@@ -71,11 +97,15 @@ SK=.claude/skills/promo-image/scripts
 "$PY" "$SK/render_sphere.py" --texture earth_8k.jpg --out after.png \
       --size 1600 --tilt 23.4 --center-lon -30
 
-# Before/after card
+# Before/after card (default mode)
 "$PY" "$SK/promo_card.py" --before before.png --after after.png --out promo.png \
       --title "Texture anything. Natively." \
       --subtitle "Import a reference photo and wrap real geometry with a full PBR material — right in the editor." \
       --after-caption "Photoreal, equirectangular-mapped globe"
+
+# Reference → reconstructed card (photo→3D reconstruction promos)
+"$PY" "$SK/promo_card.py" --mode reference --reference photo.jpg --after render.png \
+      --out promo.png --title "From one photo to a 3D asset."
 ```
 
 Both scripts have `--help`. `render_sphere.py` also takes `--light x,y,z`,

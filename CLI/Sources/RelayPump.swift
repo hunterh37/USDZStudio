@@ -116,12 +116,10 @@ final class RelayPump: @unchecked Sendable {
     private var nextID = 0
 
     // Tunables (conservative, enterprise-safe defaults).
-    private let connectAttempts = 25          // ~2.5s bounded wait for the app
-    private let connectTickMS: UInt64 = 100
     private let requestTimeoutMS: UInt64 = 15_000
     private let reconnectTriesPerRequest = 2
 
-    private init(endpointURL: URL) {
+    init(endpointURL: URL) {
         self.endpointURL = endpointURL
     }
 
@@ -135,42 +133,27 @@ final class RelayPump: @unchecked Sendable {
         return info
     }
 
-    /// Decide up front whether an editor is reachable, waiting briefly so a
-    /// reconnect issued *during* app launch still finds the endpoint. Returns a
-    /// pump only when the editor is present; otherwise the caller runs the
-    /// in-process file-backed server.
-    static func make(endpointURL: URL) -> RelayPump? {
-        let pump = RelayPump(endpointURL: endpointURL)
-        let found = RelayCodec.awaitEndpoint(
-            attempts: pump.connectAttempts,
-            resolve: { liveEndpoint(at: endpointURL) },
-            tick: { usleep(useconds_t(pump.connectTickMS * 1000)) })
-        return found != nil ? pump : nil
+    /// Relay one JSON-RPC line to the live editor and return the response line
+    /// to print — `nil` for a notification (no response owed). Each call
+    /// reconnects on demand (re-resolving the endpoint), so a pump created
+    /// before the app was up connects the moment it appears. A lost/hung editor
+    /// yields a spec-shaped JSON-RPC error addressed to the request id (never a
+    /// hang), so the agent sees a correctable failure rather than silence.
+    func relayLine(_ line: String) async -> String? {
+        switch await relayOne(line) {
+        case .ok(let response):
+            return response.isEmpty ? nil : response
+        case .failed:
+            if RelayCodec.isNotification(line) { return nil }
+            return RelayCodec.errorResponse(
+                idFragment: RelayCodec.jsonrpcIDFragment(line),
+                code: -32001,
+                message: "editor connection lost; reopen the document or reconnect")
+        }
     }
 
-    /// Pump stdin → editor → stdout until stdin closes. Each request reconnects
-    /// on demand; a lost/hung editor yields a JSON-RPC error, never a hang.
-    func run() async -> Int32 {
-        while let line = readLine(strippingNewline: true) {
-            if line.isEmpty { continue }
-            let reply = await relayOne(line)
-            switch reply {
-            case .ok(let response):
-                if !response.isEmpty { print(response); fflush(stdout) }
-            case .failed:
-                // Notifications owe no response; a real call gets a clean error.
-                if !RelayCodec.isNotification(line) {
-                    print(RelayCodec.errorResponse(
-                        idFragment: RelayCodec.jsonrpcIDFragment(line),
-                        code: -32001,
-                        message: "editor connection lost; reopen the document or reconnect"))
-                    fflush(stdout)
-                }
-            }
-        }
-        teardown()
-        return 0
-    }
+    /// Close the live connection and fail any in-flight waiters (idempotent).
+    func shutdown() { teardown() }
 
     private func relayOne(_ line: String) async -> RelayReply {
         for attempt in 0...reconnectTriesPerRequest {

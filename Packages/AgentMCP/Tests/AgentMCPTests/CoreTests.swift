@@ -105,6 +105,39 @@ import USDCore
         #expect(throws: ToolError.self) { _ = try GeometryProbe.flatMesh(of: bare) }
     }
 
+    /// A mesh whose `points`/topology are authored as a flat `double[]`
+    /// (`.doubleArray`) — the encoding a reopened externally authored USDZ can
+    /// carry — must still be visible to the probe: bounds compute and
+    /// `flatMesh` extraction succeed exactly as for canonical `point3f[]`.
+    /// Regression guard for imported/double-precision meshes reading as empty.
+    @Test func doublePrecisionPointsRemainVisible() throws {
+        // Unit tetrahedron with double[]-typed points and normals.
+        let tetra = Prim(
+            path: PrimPath("/Root/Tetra")!,
+            typeName: "Mesh",
+            attributes: [
+                Attribute(name: "points", value: .doubleArray([
+                    0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1,
+                ])),
+                Attribute(name: "faceVertexCounts", value: .intArray([3, 3, 3, 3])),
+                Attribute(name: "faceVertexIndices", value: .intArray([
+                    0, 1, 2, 0, 1, 3, 1, 2, 3, 2, 0, 3,
+                ])),
+            ])
+        let snapshot = StageSnapshot(
+            metadata: StageMetadata(upAxis: .y, metersPerUnit: 1.0, defaultPrim: "Root"),
+            rootPrims: [
+                Prim(path: PrimPath("/Root")!, typeName: "Xform", children: [tetra])
+            ])
+        let session = EditSession(snapshot: snapshot, strictness: .warn)
+        // Bounds see the geometry (previously nil for double[]).
+        let box = GeometryProbe.worldBBox(of: PrimPath("/Root/Tetra")!, in: session.stage)!
+        #expect(abs(box.maxExtent - 1.0) < 1e-9)
+        // And it extracts as a real mesh rather than throwing "no topology".
+        let flat = try GeometryProbe.flatMesh(of: tetra)
+        #expect(flat.points.count == 4)
+    }
+
     @Test func raycastHitsNearestMesh() {
         let session = Fixtures.session()
         // Shoot straight down from above: should hit the Lid (at y≈3.5) first.

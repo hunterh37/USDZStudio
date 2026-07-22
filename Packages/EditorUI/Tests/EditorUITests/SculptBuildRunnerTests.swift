@@ -17,8 +17,11 @@ struct SculptBuildRunnerTests {
         let doc = EditorDocument(snapshot: StageSnapshot(rootPrims: []))
         let authored = SculptBuildRunner.apply(pass: .blockout, of: house(), to: doc)
 
-        // Group House + walls/roof/door/2 windows/chimney = 7 prims.
-        #expect(authored.count == 7)
+        // Group House + walls/roof/door/2 windows/chimney = 7 distinct prims.
+        // The blockout pass now emits a create step *and* a place (setTransform)
+        // step per component (issue #115), so `apply` returns two paths per prim;
+        // the geometry tree still has exactly 7 unique prims.
+        #expect(Set(authored).count == 7)
         let houseRoot = doc.snapshot.rootPrims.first { $0.name == "House" }
         #expect(houseRoot?.typeName == "Xform")
         let walls = houseRoot?.children.first { $0.name == "Walls" }
@@ -189,9 +192,10 @@ struct SculptBuildRunnerTests {
         let doc = EditorDocument(snapshot: StageSnapshot(rootPrims: []))
         let spec = house()
         SculptBuildRunner.apply(pass: .blockout, of: spec, to: doc)   // creates /House
-        // createLight + setTransform both resolve to the light prim path.
+        // createLight + setTransform both resolve to the light prim path; the
+        // runner now reports distinct authored prim paths, so it appears once.
         let authored = SculptBuildRunner.apply(pass: .lighting, of: spec, to: doc)
-        #expect(authored == ["/House/Sun", "/House/Sun"])
+        #expect(authored == ["/House/Sun"])
         let light = doc.snapshot.prim(at: PrimPath("/House/Sun")!)
         #expect(light?.typeName == "DistantLight")
         #expect(light?.attribute(named: "inputs:intensity") != nil)
