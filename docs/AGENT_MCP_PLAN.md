@@ -94,6 +94,7 @@ are additionally exposed as read-only **MCP resources** (`usd://scene`, `usd://s
 | `set_transform(path, trs)` | `SetTransformCommand` |
 | `set_variant(path, set, sel)` | `SetVariantSelectionCommand` |
 | `create_material(path, params)` | `CreateMaterialCommand` |
+| `bind_material(target, materialPath)` | `BindMaterialCommand` (share an existing material; also a `batch` op) |
 | `edit_mesh(path, ops)` | `MeshEditCommand` (via `MeshEditSession`) |
 | `batch(ops[])` | `CompositeCommand` (atomic multi-op, one undo step) |
 
@@ -113,7 +114,11 @@ sees exactly what changed (verts/edges/faces added/removed).
 Validation is invoked automatically after every mutate call and returned inline, with a
 configurable **strictness mode** (rhinomcp's off/warn/strict): `warn` returns diagnostics
 inline but commits; `strict` rejects the mutation if it introduces `.error` diagnostics;
-`off` for bulk phases the agent will validate at the end. `score` is the explicit
+`off` for bulk phases the agent will validate at the end. The inline report is a **delta**:
+stage-wide counts plus only the diagnostics the mutation introduced — new errors/warnings
+listed in full, new info collapsed to per-rule counts — so a mutation never re-dumps the
+whole stage's diagnostics on every call (#142). The full list stays behind an explicit
+`validate` call. `score` is the explicit
 closed-loop gate for autonomous multi-step building.
 
 ### 3.4 Render (visual judgment only)

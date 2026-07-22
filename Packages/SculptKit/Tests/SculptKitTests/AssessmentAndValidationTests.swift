@@ -39,6 +39,32 @@ import Testing
         #expect(a.complexity == 1)
     }
 
+    // MARK: - Similarity floor calibration (#145)
+
+    @Test func objectAndCharacterKeepStandardFloor() {
+        #expect(PreSpecAssessment.assess(hints: ["barrel"], width: 512, height: 512)
+            .policy.similarityFloor == 0.5)
+        #expect(PreSpecAssessment.assess(hints: ["character"], width: 512, height: 512)
+            .policy.similarityFloor == 0.55)
+    }
+
+    @Test func sceneKeywordRelaxesFloor() {
+        let a = PreSpecAssessment.assess(hints: ["nyc skyline"], width: 1024, height: 768)
+        #expect(a.policy.similarityFloor == 0.3)
+        #expect(a.notes.contains { $0.contains("similarity floor relaxed") })
+    }
+
+    @Test func absentAlphaRelaxesFloor() {
+        // A plain object hint, but no clean cutout → photographic → relaxed.
+        let a = PreSpecAssessment.assess(hints: ["barrel"], width: 512, height: 512, hasAlpha: false)
+        #expect(a.policy.similarityFloor == 0.3)
+    }
+
+    @Test func presentAlphaKeepsStandardFloor() {
+        let a = PreSpecAssessment.assess(hints: ["barrel"], width: 512, height: 512, hasAlpha: true)
+        #expect(a.policy.similarityFloor == 0.5)
+    }
+
     @Test func complexityCapsAtFive() {
         let a = PreSpecAssessment.assess(
             hints: ["creature", "a", "b", "c", "d", "e", "f", "g", "h", "i"],

@@ -1,3 +1,4 @@
+import EditingKit
 import Foundation
 import SculptKit
 import Testing
@@ -143,5 +144,33 @@ import USDCore
             try await SculptTools.execute(
                 step: .authorLOD(rootPath: "/Ghost", manifestJSON: "{}"), session: session)
         }
+    }
+
+    /// The bindMaterial build step shares one material across repetition copies
+    /// rather than minting a duplicate per copy (#140/#141).
+    @Test func executeBindMaterialSharesOneMaterial() async throws {
+        let session = Fixtures.session()
+        _ = try await SculptTools.execute(step: .createGroup(name: "Obj", parentPath: nil), session: session)
+        // Two sibling meshes standing in for a base + one repetition copy.
+        _ = try await SculptTools.execute(
+            step: .createMesh(name: "Base", parentPath: "/Obj", primitive: .box,
+                              width: 1, height: 1, depth: 1, radius: 0.5, segments: 8),
+            session: session)
+        _ = try await SculptTools.execute(
+            step: .createMesh(name: "Copy", parentPath: "/Obj", primitive: .box,
+                              width: 1, height: 1, depth: 1, radius: 0.5, segments: 8),
+            session: session)
+        let material = MaterialSpec(id: "m", baseColor: [0.3, 0.3, 0.3])
+        let created = try await SculptTools.execute(
+            step: .createMaterial(targetPath: "/Obj/Base", material: material), session: session)
+
+        let bound = try await SculptTools.execute(
+            step: .bindMaterial(targetPath: "/Obj/Copy", sourceTargetPath: "/Obj/Base"),
+            session: session)
+        #expect(bound == created)   // same material path, not a new one
+        #expect(MaterialBinding.materialPath(for: PrimPath("/Obj/Copy")!, in: session.stage)
+            == PrimPath(created!))
+        // Exactly one material exists under /Looks.
+        #expect(session.stage.rootPrims.first { $0.name == "Looks" }?.children.count == 1)
     }
 }

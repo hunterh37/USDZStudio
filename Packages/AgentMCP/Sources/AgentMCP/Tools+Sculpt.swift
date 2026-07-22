@@ -203,11 +203,13 @@ public enum SculptTools {
                 "imagePath": Schema.string("path to the reference image — decoded for true dimensions (preferred)"),
                 "width": Schema.integer("reference image width in pixels (used when imagePath is absent)"),
                 "height": Schema.integer("reference image height in pixels (used when imagePath is absent)"),
+                "hasAlpha": Schema.boolean("whether the reference has a clean alpha cutout (used when imagePath is absent); false relaxes the similarity floor for photographic references"),
             ], required: ["hints"])
         ) { args in
             let hints = args["hints"].stringArrayValue ?? []
-            let (width, height, _) = try resolveImageDimensions(args)
-            let assessment = PreSpecAssessment.assess(hints: hints, width: width, height: height)
+            let (width, height, hasAlpha) = try resolveImageDimensions(args)
+            let assessment = PreSpecAssessment.assess(
+                hints: hints, width: width, height: height, hasAlpha: hasAlpha)
             await store.setAssessment(assessment)
             return assessmentJSON(assessment)
         })
@@ -617,6 +619,24 @@ public enum SculptTools {
                 try authorAttribute(attribute, on: command.surfacePath, session: session)
             }
             return command.materialPath.description
+
+        case let .bindMaterial(targetPath, sourceTargetPath):
+            let primPath = try resolvePath(targetPath, session: session)
+            let sourcePath = try resolvePath(sourceTargetPath, session: session)
+            // Resolve the material the source component already binds, then share
+            // it — no new /Looks material is minted (#140/#141).
+            guard let materialPath = MaterialBinding.materialPath(for: sourcePath, in: session.stage) else {
+                // coverage:disable — the source's createMaterial step runs immediately before this, so a binding is always present.
+                throw ToolError.failed("no material bound to \(sourceTargetPath) to share with \(targetPath)")
+                // coverage:enable
+            }
+            guard let command = BindMaterialCommand.make(binding: primPath, to: materialPath, in: session.stage) else {
+                // coverage:disable — make() returns nil only for a missing/already-bound target; copies start unbound.
+                throw ToolError.failed("cannot bind \(materialPath) to \(targetPath)")
+                // coverage:enable
+            }
+            _ = try session.mutate(command)
+            return materialPath.description
 
         case let .createLight(name, parentPath, kind, intensity, color):
             let args = insertArgs(name: name, parent: parentPath)

@@ -193,7 +193,9 @@ public enum MutateTools {
 
         server.register(MCPTool(
             name: "create_material", group: .mutate,
-            description: "Create a UsdPreviewSurface material and bind it to a target prim.",
+            description: "Create a UsdPreviewSurface material and bind it to a target prim. "
+                + "To reuse one material across many prims, use bind_material instead of "
+                + "calling this per target (which mints a duplicate material each time).",
             inputSchema: Schema.object([
                 "target": Schema.primRef,
                 "baseColor": Schema.array(of: .object(["type": "number"]), "[r, g, b] in 0–1 (default 0.18 grey)"),
@@ -214,6 +216,34 @@ public enum MutateTools {
             let outcome = try session.mutate(command)
             return outcome.asJSON(extra: ["materialPath": .string(command.materialPath.description)])
         })
+
+        server.register(MCPTool(
+            name: "bind_material", group: .mutate,
+            description: "Bind an EXISTING material to a target prim (its subtree inherits it). "
+                + "Use this to share one material across many prims — e.g. every copy of a "
+                + "repetition system — instead of duplicating a material per target.",
+            inputSchema: Schema.object([
+                "target": Schema.primRef,
+                "materialPath": Schema.string("path/primId of an existing Material prim, e.g. /Looks/Material_3"),
+            ], required: ["target", "materialPath"])
+        ) { args in
+            let outcome = try bindMaterial(args, session: session)
+            return outcome.asJSON(extra: ["materialPath": args["materialPath"]])
+        })
+    }
+
+    /// Shared executor for the `bind_material` tool and its `batch` op.
+    static func bindMaterial(_ args: JSONValue, session: EditSession) throws -> MutationOutcome {
+        let target = try session.resolve(args, key: "target")
+        let material = try session.resolve(args, key: "materialPath")
+        guard let command = BindMaterialCommand.make(
+            binding: target, to: material, in: session.stage)
+        else {
+            throw ToolError.invalidParams(
+                "cannot bind \(material) to \(target): material must be an existing Material prim, "
+                + "and the binding must not already be in place")
+        }
+        return try session.mutate(command)
     }
 
     // MARK: - Attributes & transform
@@ -437,11 +467,11 @@ public enum MutateTools {
     private static func registerBatch(on server: MCPServer, session: EditSession) {
         server.register(MCPTool(
             name: "batch", group: .mutate,
-            description: "Run several simple mutations atomically as ONE undo step (CompositeCommand). Supported ops: set_attribute, set_active, remove_prim, rename_prim. Keeps individual calls small while transactions stay big.",
+            description: "Run several simple mutations atomically as ONE undo step (CompositeCommand). Supported ops: set_attribute, set_active, remove_prim, rename_prim, bind_material. Keeps individual calls small while transactions stay big.",
             inputSchema: Schema.object([
                 "label": Schema.string("undo label for the whole batch"),
                 "ops": Schema.array(of: Schema.object([
-                    "tool": Schema.string("set_attribute | set_active | remove_prim | rename_prim"),
+                    "tool": Schema.string("set_attribute | set_active | remove_prim | rename_prim | bind_material"),
                     "args": .object(["description": "that tool's arguments"]),
                 ], required: ["tool", "args"]), "mutations, applied in order"),
             ], required: ["ops"])
@@ -484,6 +514,17 @@ public enum MutateTools {
                     }
                     let command = RenamePrimCommand(path: path, newName: name)
                     moved.append((path, command.renamedPath))
+                    commands.append(command)
+                case "bind_material":
+                    let target = try session.resolve(sub, key: "target")
+                    let material = try session.resolve(sub, key: "materialPath")
+                    guard let command = BindMaterialCommand.make(
+                        binding: target, to: material, in: session.stage)
+                    else {
+                        throw ToolError.invalidParams(
+                            "ops[\(index)]: cannot bind \(material) to \(target) "
+                            + "(material must exist and binding must not already be in place)")
+                    }
                     commands.append(command)
                 default:
                     throw ToolError.invalidParams(

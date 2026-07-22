@@ -255,6 +255,23 @@ import Testing
 
     @Test func materialPassBindsOnlyPaintedNodes() {
         let steps = BuildPlanner.plan(for: Self.spec(), pass: .material)
+        // Body carries a count-3 repetition, so the material pass authors the
+        // base material once and BINDS the same material to both expanded copies
+        // (#140/#141) — never leaving them unbound and never duplicating it.
+        #expect(steps.count == 3)
+        #expect(steps[0] == .createMaterial(
+            targetPath: "/Barrel/Body",
+            material: MaterialSpec(id: "wood", baseColor: [0.4, 0.2, 0.1])))
+        #expect(steps[1] == .bindMaterial(
+            targetPath: "/Barrel/Body_hoop1", sourceTargetPath: "/Barrel/Body"))
+        #expect(steps[2] == .bindMaterial(
+            targetPath: "/Barrel/Body_hoop2", sourceTargetPath: "/Barrel/Body"))
+    }
+
+    @Test func materialPassBindsNoCopiesWithoutRepetition() {
+        var spec = Self.spec()
+        spec.root.children[0].repetition = nil
+        let steps = BuildPlanner.plan(for: spec, pass: .material)
         #expect(steps.count == 1)
         #expect(steps[0] == .createMaterial(
             targetPath: "/Barrel/Body",

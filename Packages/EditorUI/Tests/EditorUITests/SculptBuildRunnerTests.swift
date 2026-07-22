@@ -2,6 +2,7 @@ import Testing
 import USDCore
 import SculptKit
 import ValidationKit
+import EditingKit
 @testable import EditorUI
 
 /// `SculptBuildRunner` applies SculptKit `BuildStep`s to the open document as
@@ -85,6 +86,32 @@ struct SculptBuildRunnerTests {
 
         let materials = SculptBuildRunner.apply(pass: .material, of: house(), to: doc)
         #expect(!materials.isEmpty)   // painted leaves bound
+    }
+
+    /// A painted node with a repetition system binds ONE shared material to
+    /// every expanded copy — no unbound white blocks, no duplicated material
+    /// per copy (#140/#141).
+    @Test func materialPassSharesOneMaterialAcrossRepetitionCopies() {
+        let painted = ComponentNode(
+            name: "Block", shape: .primitive(.box), materialID: "dark",
+            repetition: RepetitionSystem(name: "grid", count: 3, step: [2, 0, 0]))
+        let root = ComponentNode(name: "Row", shape: .group, children: [painted])
+        let spec = ObjectSculptSpec(
+            name: "Row", objectClass: .object, root: root,
+            materials: [MaterialSpec(id: "dark", baseColor: [0.1, 0.1, 0.1])])
+
+        let doc = EditorDocument(snapshot: StageSnapshot(rootPrims: []))
+        SculptBuildRunner.apply(pass: .blockout, of: spec, to: doc)
+        SculptBuildRunner.apply(pass: .material, of: spec, to: doc)
+
+        // Every copy resolves to a bound material...
+        for name in ["Block", "Block_grid1", "Block_grid2"] {
+            let bound = MaterialBinding.materialPath(for: PrimPath("/Row/\(name)")!, in: doc.snapshot)
+            #expect(bound != nil)
+        }
+        // ...and there is exactly ONE material under /Looks.
+        let looks = doc.snapshot.rootPrims.first { $0.name == "Looks" }
+        #expect(looks?.children.count == 1)
     }
 
     @Test func playLiveRunsEveryPass() async {

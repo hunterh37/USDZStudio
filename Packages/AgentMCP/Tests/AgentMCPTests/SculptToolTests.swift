@@ -94,6 +94,36 @@ import USDCore
         #expect(corruptMessage.contains("shape"))
     }
 
+    /// The documented friendly ShapeKind wire form
+    /// (`{"shape":{"kind":"primitive","primitive":"box"}}`) must decode through
+    /// the actual MCP `sculpt_author_spec` entry point, not just SculptKit's own
+    /// decoder — the exact form #112 introduced and #143 found broken against a
+    /// stale MCP binary. This test fails loudly if the entry point ever regresses
+    /// to only accepting the legacy `{"primitive":{"_0":"box"}}` synthesized form.
+    @Test func friendlyShapeFormAuthorsThroughMCP() async {
+        let session = Fixtures.session()
+        let server = Fixtures.server(session: session)
+        let spec: JSONValue = .object([
+            "name": .string("Thing"), "objectClass": .string("object"),
+            "root": .object([
+                "name": .string("Thing"),
+                "shape": .object(["kind": .string("group")]),
+                "children": .array([
+                    .object([
+                        "name": .string("Body"),
+                        "shape": .object([
+                            "kind": .string("primitive"),
+                            "primitive": .string("box"),
+                        ]),
+                    ]),
+                ]),
+            ]),
+        ])
+        let authored = await callOK(server, "sculpt_author_spec", ["spec": spec])
+        #expect(authored["componentCount"].doubleValue == 2)
+        #expect(authored["currentPass"].stringValue == "blockout")
+    }
+
     /// Re-running `sculpt_build_pass` on blockout must not error with "'X'
     /// already exists" — the create steps are idempotent (issue #111).
     @Test func rebuildBlockoutIsIdempotent() async {

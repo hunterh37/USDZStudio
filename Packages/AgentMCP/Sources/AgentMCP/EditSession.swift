@@ -39,7 +39,13 @@ public enum ValidationStrictness: String, Sendable, CaseIterable {
 public struct MutationOutcome: Sendable {
     public var verb: String
     public var diff: StageDiff
+    /// Post-mutation stage report (nil when strictness is `off`). Retained in
+    /// full for callers that want it; the inline JSON is a compact delta (#142).
     public var validation: ValidationReport?
+    /// Pre-mutation stage report, used to compute the delta emitted inline so a
+    /// mutation only surfaces the diagnostics it actually introduced rather than
+    /// re-dumping the whole stage on every call (#142).
+    public var priorValidation: ValidationReport?
     public var undoToken: Int
     /// Affected path → session-stable prim id.
     public var primIds: [PrimPath: String]
@@ -53,7 +59,9 @@ public struct MutationOutcome: Sendable {
             "undoToken": .number(Double(undoToken)),
             "primIds": .object(ids),
         ]
-        if let validation { payload["validation"] = validation.asJSON }
+        if let validation {
+            payload["validation"] = validation.inlineDeltaJSON(baseline: priorValidation)
+        }
         for (k, v) in extra { payload[k] = v }
         return .object(payload)
     }
@@ -190,8 +198,12 @@ public final class EditSession: @unchecked Sendable {
         removed: [PrimPath] = []
     ) throws -> MutationOutcome {
         let before = stage.currentSnapshot
-        let beforeErrors = strictness == .strict
-            ? profile.engine.validate(stage).errorCount : 0
+        // Snapshot the pre-mutation diagnostics whenever we validate at all, so
+        // the inline report can be a delta (only what THIS mutation introduced)
+        // instead of the whole stage-wide list on every call (#142).
+        let beforeReport: ValidationReport? = strictness != .off
+            ? profile.engine.validate(stage) : nil
+        let beforeErrors = beforeReport?.errorCount ?? 0
 
         let verb: String
         do {
@@ -225,6 +237,7 @@ public final class EditSession: @unchecked Sendable {
             verb: verb,
             diff: diff,
             validation: report,
+            priorValidation: beforeReport,
             undoToken: stack.undoCount,
             primIds: handles(for: affected))
     }
@@ -278,6 +291,39 @@ public extension ValidationReport {
             "isCompliant": .bool(isCompliant),
             "diagnostics": .array(diagnostics.map(\.asJSON)),
         ])
+    }
+
+    /// Compact inline report for a single mutation (#142). Emits stage-wide
+    /// counts plus only the diagnostics THIS mutation introduced (delta vs the
+    /// pre-mutation `baseline`). New error/warning diagnostics are listed in
+    /// full because an agent must act on them; new info diagnostics — the
+    /// high-volume `mesh.normals`/`mesh.unbound` chatter that used to flood
+    /// every response — are collapsed to per-rule counts. The full list stays
+    /// available behind an explicit `validate` call.
+    func inlineDeltaJSON(baseline: ValidationReport?) -> JSONValue {
+        let prior = Set(baseline?.diagnostics ?? [])
+        let introduced = diagnostics.filter { !prior.contains($0) }
+
+        let newActionable = introduced.filter { $0.severity != .info }
+        var newInfoByRule: [String: Int] = [:]
+        for d in introduced where d.severity == .info {
+            newInfoByRule[d.ruleID, default: 0] += 1
+        }
+
+        var payload: [String: JSONValue] = [
+            "errors": .number(Double(errorCount)),
+            "warnings": .number(Double(warningCount)),
+            "info": .number(Double(infoCount)),
+            "isCompliant": .bool(isCompliant),
+        ]
+        if !newActionable.isEmpty {
+            payload["new"] = .array(newActionable.map(\.asJSON))
+        }
+        if !newInfoByRule.isEmpty {
+            payload["newInfoByRule"] = .object(
+                newInfoByRule.mapValues { .number(Double($0)) })
+        }
+        return .object(payload)
     }
 }
 
