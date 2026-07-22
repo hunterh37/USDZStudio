@@ -39,7 +39,7 @@ policy_for() {
     ConversionKit)        echo "USDCore MeshKit CaptureKit" ;;    # derives smooth vertex normals for normal-less imports via MeshKit.VertexNormals (issue #95); CaptureKit: ObjectCaptureImporter realizes its CapturePlan (specs/capture-import.md)
     ValidationKit)        echo "USDCore" ;;
     ScriptingKit)         echo "USDCore" ;;
-    ViewportKit)          echo "USDCore MeshKit RigKit" ;;     # component-overlay rendering (specs/mesh-editing.md); RigKit: skeletal rig-handle overlay (specs/animation-rigging.md)
+    ViewportKit)          echo "USDCore MeshKit RigKit MechanismKit" ;;     # component-overlay rendering (specs/mesh-editing.md); RigKit: skeletal rig-handle overlay (specs/animation-rigging.md); MechanismKit: hinge-axis drag-to-open handle (specs/articulation-mechanisms.md)
     EditingKit)           echo "USDCore ValidationKit MeshKit MechanismKit RigKit" ;;  # QuickFixRegistry maps Diagnostics -> undoable commands; MechanismKit: rigid-joint authoring commands; RigKit: skeletal pose/keyframe/clip/weight commands
     SculptKit)            echo "USDCore MeshKit MechanismKit" ;;     # pure staged-sculpt pipeline logic (specs/sculpt-pipeline.md); MechanismKit: articulation in the spec/runtime layer
     SessionKit)           echo "USDCore ViewportKit EditingKit" ;;  # cross-launch session envelope + restore; reuses ViewportKit value types + EditingKit WAL (specs/session-restoration.md)
