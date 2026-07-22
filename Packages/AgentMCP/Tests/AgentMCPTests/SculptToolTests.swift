@@ -452,6 +452,19 @@ import USDCore
         #expect(ok["warnings"].arrayValue?.isEmpty == true)
     }
 
+    // #111: re-running the same build pass must not error with "already exists";
+    // create steps are idempotent, so a refine→rebuild loop can progress.
+    @Test func rebuildingBlockoutIsIdempotent() async {
+        let server = Fixtures.server(session: Fixtures.emptySession())
+        _ = await callOK(server, "sculpt_author_spec", ["spec": Self.specArg(Self.richSpec())])
+        let first = await callOK(server, "sculpt_build_pass")
+        #expect(first["reviewOnly"].boolValue == false)
+        // Second call over the same (now-populated) stage succeeds rather than
+        // throwing on the existing /Sculpt group.
+        let second = await callOK(server, "sculpt_build_pass")
+        #expect(second["pass"].stringValue == "blockout")
+    }
+
     @Test func specPersistedToWorkDirectory() async {
         let work = Fixtures.tempDirectory()
         let session = Fixtures.session()

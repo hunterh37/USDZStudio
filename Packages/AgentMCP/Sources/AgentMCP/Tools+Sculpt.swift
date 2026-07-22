@@ -565,17 +565,29 @@ public enum SculptTools {
     static func execute(step: BuildStep, session: EditSession) async throws -> String? {
         switch step {
         case .createGroup(let name, let parentPath):
+            // Idempotent: re-running a pass (e.g. blockout after a refine) must
+            // not error with "already exists"; skip if the prim is already there
+            // (#111). Placement/material steps that follow still apply.
+            if let existing = existingPath(name: name, parentPath: parentPath, session: session) {
+                return existing
+            }
             let args = insertArgs(name: name, parent: parentPath)
             let built = try MutateTools.makeInsert(args: args, session: session, extraAttributes: [])
             _ = try session.mutate(built.command)
             return built.path.description
 
         case let .createMesh(name, parentPath, primitive, width, height, depth, radius, segments):
+            if let existing = existingPath(name: name, parentPath: parentPath, session: session) {
+                return existing
+            }
             let mesh = try buildPrimitive(primitive, width: width, height: height, depth: depth,
                                           radius: radius, segments: segments)
             return try insertMesh(mesh, name: name, parentPath: parentPath, session: session)
 
         case .createLibraryMesh(let name, let parentPath, let entryID):
+            if let existing = existingPath(name: name, parentPath: parentPath, session: session) {
+                return existing
+            }
             guard let entry = ShapeLibrary.entry(id: entryID) else {
                 throw ToolError.invalidParams("unknown library entry '\(entryID)'")
             }
@@ -769,6 +781,15 @@ public enum SculptTools {
     /// Resolve a "/A/B" path string to an existing prim path.
     static func resolvePath(_ raw: String, session: EditSession) throws -> PrimPath {
         try session.resolve(.object(["path": .string(raw)]))
+    }
+
+    /// The path a create step would author (`parent/name`), but only if a prim
+    /// already exists there — so a re-run can skip creation and stay idempotent
+    /// (#111). Returns nil when nothing is at that path yet.
+    static func existingPath(name: String, parentPath: String?, session: EditSession) -> String? {
+        let raw = (parentPath ?? "") + "/" + name
+        guard let path = PrimPath(raw), session.stage.prim(at: path) != nil else { return nil }
+        return path.description
     }
 
     static func insertArgs(name: String, parent: String?) -> JSONValue {
