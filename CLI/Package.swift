@@ -17,12 +17,13 @@ let package = Package(
         .package(path: "../Packages/EditingKit"),
         .package(path: "../Packages/ScriptingKit"),
         .package(path: "../Packages/AgentMCP"),
+        .package(path: "../Packages/RenderKit"),
     ],
     targets: [
         .executableTarget(
             name: "openusdz",
             dependencies: ["USDCore", "USDBridge", "ValidationKit", "ConversionKit", "MeshKit",
-                           "EditingKit", "ScriptingKit", "AgentMCP"],
+                           "EditingKit", "ScriptingKit", "AgentMCP", "RenderKit"],
             path: "Sources"),
         .testTarget(name: "CLITests", dependencies: ["openusdz"], path: "Tests"),
     ]

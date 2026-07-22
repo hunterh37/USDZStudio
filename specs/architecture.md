@@ -23,6 +23,7 @@ OpenUSDZEditor/
 │   ├── SculptKit/                # Pure staged-sculpt pipeline logic (image→USD spec, passes, gates)
 │   ├── SessionKit/               # Cross-launch session envelope + restore (models, persistence, WAL recovery)
 │   ├── AgentMCP/                 # MCP server: typed, transactional agent editing API over the kits
+│   ├── RenderKit/                # Shared render_views backends (native SceneKit + opt-in usdrecord) for both MCP hosts
 │   ├── EditorUI/                 # Panels: outliner, inspector, console, toolbar
 │   ├── QuickLookKit/             # Pure render-plan logic for the Finder QuickLook .appex (zero deps)
 │   └── DicyaninDesignSystem/     # Tokens, colors, typography, reusable controls
@@ -48,6 +49,8 @@ SculptKit ─▶ {USDCore, MeshKit}   (pure pipeline logic — spec model, valid
 EditorUI ─▶ SculptKit             (in-app staged-sculpt runner: applies BuildSteps as live document commands)
 App ─▶ AgentMCP                    (composition root hosts the in-app MCP editing session on the open document; specs/agent-live-editing.md. EditorUI still must NOT import AgentMCP)
 AgentMCP ─▶ {USDBridge, EditingKit, ValidationKit, ConversionKit, ScriptingKit, MeshKit, SculptKit} ─▶ USDCore   (thin MCP adapter, docs/AGENT_MCP_PLAN.md; never EditorUI)
+RenderKit ─▶ {AgentMCP, USDBridge}   (implements AgentMCP.RenderExecuting with a native SceneKit renderer + opt-in usdrecord; consumed by BOTH App and CLI so each hosted MCP server gets a renderer — issue #109)
+{App, CLI} ─▶ RenderKit               (composition roots inject the native renderer into their AgentMCPServer.Configuration)
 ```
 
 The authoritative, machine-checked form of this graph is the policy table in

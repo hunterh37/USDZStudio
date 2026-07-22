@@ -352,6 +352,18 @@ public enum SpecValidator {
         return SpecValidationResult(issues: issues)
     }
 
+    /// Geometry components (excluding the root) that have not declared an
+    /// `attachment`. Surfaced as an authoring warning by `sculpt_author_spec`
+    /// so the effectively-required field isn't a surprise that only strict
+    /// validate rejects — and then all at once (issue #113). The strict gate
+    /// (`attachmentIssues`) still enforces it; this only warns earlier.
+    public static func componentsMissingAttachment(_ spec: ObjectSculptSpec) -> [String] {
+        let rootName = spec.root.name
+        return spec.allNodes
+            .filter { $0.name != rootName && $0.shape.authorsGeometry && $0.attachment == nil }
+            .map(\.name)
+    }
+
     // MARK: - Action-ready gate
 
     /// img2threejs's "Action-Ready Gate": confirms the object exposes a usable
