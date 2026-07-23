@@ -1,5 +1,6 @@
 import Testing
 import USDCore
+import EditingKit
 import SculptKit
 import ValidationKit
 @testable import EditorUI
@@ -85,6 +86,37 @@ struct SculptBuildRunnerTests {
 
         let materials = SculptBuildRunner.apply(pass: .material, of: house(), to: doc)
         #expect(!materials.isEmpty)   // painted leaves bound
+    }
+
+    /// Material pass on a painted node WITH a repetition shares the base's one
+    /// material with each copy via `.bindMaterial`, rather than minting a
+    /// duplicate material per copy (#140).
+    @Test func materialPassSharesOneMaterialAcrossRepetitionCopies() {
+        let painted = ComponentNode(
+            name: "Bar", shape: .primitive(.box), materialID: "steel",
+            repetition: RepetitionSystem(name: "row", count: 3, step: [1, 0, 0]))
+        let root = ComponentNode(name: "Rack", shape: .group, children: [painted])
+        let spec = ObjectSculptSpec(
+            name: "Rack", objectClass: .object, root: root,
+            materials: [MaterialSpec(id: "steel", baseColor: [0.6, 0.6, 0.6])])
+
+        let doc = EditorDocument(snapshot: StageSnapshot(rootPrims: []))
+        SculptBuildRunner.apply(pass: .blockout, of: spec, to: doc)
+        SculptBuildRunner.apply(pass: .structural, of: spec, to: doc)
+        let materials = SculptBuildRunner.apply(pass: .material, of: spec, to: doc)
+        #expect(!materials.isEmpty)
+
+        // The base and both copies resolve to the SAME single material.
+        let base = MaterialBinding.materialPath(for: PrimPath("/Rack/Bar")!, in: doc.snapshot)
+        let copy1 = MaterialBinding.materialPath(for: PrimPath("/Rack/Bar_row1")!, in: doc.snapshot)
+        let copy2 = MaterialBinding.materialPath(for: PrimPath("/Rack/Bar_row2")!, in: doc.snapshot)
+        #expect(base != nil)
+        #expect(copy1 == base)
+        #expect(copy2 == base)
+
+        // Only one Material prim was authored (no per-copy duplicates).
+        let mats = doc.snapshot.allPrims().filter { $0.typeName == "Material" }
+        #expect(mats.count == 1)
     }
 
     @Test func playLiveRunsEveryPass() async {

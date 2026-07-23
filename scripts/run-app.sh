@@ -6,7 +6,15 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-if [[ ! -d USDZStudio.xcodeproj ]]; then
+# Regenerate the (git-ignored) Xcode project when it is missing OR stale — i.e.
+# when project.yml or the generator script is newer than the generated project.
+# A stale project left over from another branch is missing newly-added targets
+# (e.g. RenderKit) and fails the build with a confusing linker error (#146).
+# XcodeGen is fast and deterministic, so regenerating on any input change is safe.
+PROJ=USDZStudio.xcodeproj
+if [[ ! -d "$PROJ" ]] \
+  || [[ project.yml -nt "$PROJ" ]] \
+  || [[ scripts/generate-xcodeproj.sh -nt "$PROJ" ]]; then
   scripts/generate-xcodeproj.sh
 fi
 

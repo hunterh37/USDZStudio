@@ -94,6 +94,7 @@ are additionally exposed as read-only **MCP resources** (`usd://scene`, `usd://s
 | `set_transform(path, trs)` | `SetTransformCommand` |
 | `set_variant(path, set, sel)` | `SetVariantSelectionCommand` |
 | `create_material(path, params)` | `CreateMaterialCommand` |
+| `bind_material(target, materialPath)` | `BindMaterialCommand` (share an existing material; also a `batch` op) |
 | `edit_mesh(path, ops)` | `MeshEditCommand` (via `MeshEditSession`) |
 | `batch(ops[])` | `CompositeCommand` (atomic multi-op, one undo step) |
 
