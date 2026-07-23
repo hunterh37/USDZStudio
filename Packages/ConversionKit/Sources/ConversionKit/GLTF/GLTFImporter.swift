@@ -9,7 +9,15 @@ import simd
 public struct GLTFImporter: AssetImporter {
     public static let supportedExtensions = ["glb", "gltf"]
 
-    public init() {}
+    /// The compression codecs the importer decodes through. Defaults to the
+    /// loud-fail `.unavailable` set so a build without native bindings never
+    /// silently drops compressed data; production injects the real bindings and
+    /// tests inject fakes (specs/conversion-pipeline.md — `decode-compressed`).
+    let codecs: DecompressionCodecs
+
+    public init(codecs: DecompressionCodecs = .unavailable) {
+        self.codecs = codecs
+    }
 
     public enum GLTFError: Error, Equatable {
         case unreadableFile(String)
@@ -53,17 +61,28 @@ public struct GLTFImporter: AssetImporter {
         guard document.asset.version.hasPrefix("2") else {
             throw GLTFError.unsupportedVersion(document.asset.version)
         }
-        if let required = document.extensionsRequired?.first {
-            throw GLTFError.requiredExtensionUnsupported(required)
+
+        // Classify declared extensions once: decode the compression extensions,
+        // fail loudly on a *required* extension we cannot honor, warn for the
+        // ones we tolerate by ignoring. Never a silent drop.
+        let classification = ExtensionClassification.classify(
+            used: document.extensionsUsed, required: document.extensionsRequired)
+        if let unsupported = classification.unsupportedRequired.first {
+            throw GLTFError.requiredExtensionUnsupported(unsupported)
         }
 
-        var builder = Builder(document: document, baseURL: url.deletingLastPathComponent(), binChunk: binChunk)
-        if let used = document.extensionsUsed, !used.isEmpty {
-            for ext in used {
-                builder.diagnostics.append(Diagnostic(
-                    severity: .warning, stage: "parse",
-                    message: "extension \(ext) is not supported; content authored without it"))
-            }
+        var builder = Builder(
+            document: document, baseURL: url.deletingLastPathComponent(),
+            binChunk: binChunk, codecs: codecs)
+        for ext in classification.ignoredUsed {
+            builder.diagnostics.append(Diagnostic(
+                severity: .warning, stage: "parse",
+                message: "extension \(ext) is not supported; content authored without it"))
+        }
+        for ext in classification.decodable {
+            builder.diagnostics.append(Diagnostic(
+                severity: .info, stage: "decode-compressed",
+                message: "decoding \(ext.rawValue)"))
         }
         let scene = try builder.buildScene(named: url.deletingPathExtension().lastPathComponent)
         return ImportResult(scene: scene, diagnostics: builder.diagnostics)
@@ -101,24 +120,29 @@ public struct GLTFImporter: AssetImporter {
         let document: GLTFDocument
         let baseURL: URL
         let binChunk: Data?
+        let codecs: DecompressionCodecs
         var diagnostics: [Diagnostic] = []
         private var bufferCache: [Int: Data] = [:]
+        /// Decoded bytes for `EXT_meshopt_compression` buffer views, keyed by
+        /// view index. Populated on first access so each view decodes once.
+        private var meshoptCache: [Int: Data] = [:]
 
-        init(document: GLTFDocument, baseURL: URL, binChunk: Data?) {
+        init(document: GLTFDocument, baseURL: URL, binChunk: Data?, codecs: DecompressionCodecs) {
             self.document = document
             self.baseURL = baseURL
             self.binChunk = binChunk
+            self.codecs = codecs
         }
 
         mutating func buildScene(named fallbackName: String) throws -> IntermediateScene {
             var scene = IntermediateScene(name: fallbackName)
             for (index, material) in (document.materials ?? []).enumerated() {
                 var converted = Self.convert(material, index: index)
-                converted.baseColorTexture = textureRef(material.pbrMetallicRoughness?.baseColorTexture)
-                converted.metallicRoughnessTexture = textureRef(material.pbrMetallicRoughness?.metallicRoughnessTexture)
-                converted.normalTexture = textureRef(material.normalTexture)
-                converted.occlusionTexture = textureRef(material.occlusionTexture)
-                converted.emissiveTexture = textureRef(material.emissiveTexture)
+                converted.baseColorTexture = textureRef(material.pbrMetallicRoughness?.baseColorTexture, usage: .sRGB)
+                converted.metallicRoughnessTexture = textureRef(material.pbrMetallicRoughness?.metallicRoughnessTexture, usage: .linear)
+                converted.normalTexture = textureRef(material.normalTexture, usage: .linear)
+                converted.occlusionTexture = textureRef(material.occlusionTexture, usage: .linear)
+                converted.emissiveTexture = textureRef(material.emissiveTexture, usage: .sRGB)
                 scene.materials.append(converted)
             }
 
@@ -307,6 +331,9 @@ public struct GLTFImporter: AssetImporter {
         // MARK: Meshes
 
         private mutating func buildMesh(_ primitive: GLTFDocument.Primitive, name: String) throws -> MeshData {
+            if let draco = primitive.extensions?.KHR_draco_mesh_compression {
+                return try buildDracoMesh(primitive, draco: draco, name: name)
+            }
             guard let positionAccessor = primitive.attributes["POSITION"] else {
                 throw GLTFError.missingPositions(mesh: name)
             }
@@ -346,6 +373,57 @@ public struct GLTFImporter: AssetImporter {
                 mesh.indices = Array(0..<UInt32(mesh.positions.count))
             }
             return mesh
+        }
+
+        /// Builds a mesh whose geometry is `KHR_draco_mesh_compression`. The
+        /// referenced glTF accessors carry only type/count *hints*; the real
+        /// vertex/index data comes from decoding the Draco stream. We validate
+        /// the decode against those hints so a mismatch fails loudly rather than
+        /// shipping wrong geometry (spec: decoded data overrides the accessors).
+        private mutating func buildDracoMesh(
+            _ primitive: GLTFDocument.Primitive,
+            draco: GLTFDocument.Primitive.DracoPrimitive,
+            name: String
+        ) throws -> MeshData {
+            if let material = primitive.material,
+               !(document.materials ?? []).indices.contains(material) {
+                throw GLTFError.indexOutOfRange(what: "material", index: material)
+            }
+            guard let positionAccessorIndex = primitive.attributes["POSITION"] else {
+                throw GLTFError.missingPositions(mesh: name)
+            }
+            let vertexCount = try accessor(positionAccessorIndex).count
+            let indexCount = try primitive.indices.map { try accessor($0).count }
+
+            let stream = try viewContentBytes(draco.bufferView)
+            let compressed = CompressedPrimitive(
+                data: stream, attributeIDs: draco.attributes,
+                vertexCount: vertexCount, indexCount: indexCount)
+            let geometry = try codecs.geometry.decode(compressed)
+
+            // The decode must honor the accessor-declared counts exactly.
+            guard geometry.positions.count == vertexCount else {
+                throw DecompressionError.decodeFailed(
+                    extension: CompressionExtension.draco.rawValue,
+                    detail: "\(name): decoded \(geometry.positions.count) vertices, accessor promised \(vertexCount)")
+            }
+            if let indexCount, geometry.indices.count != indexCount {
+                throw DecompressionError.decodeFailed(
+                    extension: CompressionExtension.draco.rawValue,
+                    detail: "\(name): decoded \(geometry.indices.count) indices, accessor promised \(indexCount)")
+            }
+            diagnostics.append(Diagnostic(
+                severity: .info, stage: "decode-compressed",
+                message: "\(name): Draco \(stream.count) B → \(vertexCount) verts, \(geometry.indices.count / 3) tris"))
+            return MeshData(
+                name: name,
+                positions: geometry.positions,
+                normals: geometry.normals,
+                uvs: geometry.uvs,
+                indices: geometry.indices,
+                materialIndex: primitive.material,
+                jointIndices: geometry.jointIndices,
+                jointWeights: geometry.jointWeights)
         }
 
         // MARK: Accessors
@@ -459,19 +537,94 @@ public struct GLTFImporter: AssetImporter {
         private mutating func viewData(
             for accessor: GLTFDocument.Accessor, elementSize: Int
         ) throws -> (data: Data, start: Int, stride: Int) {
-            guard let viewIndex = accessor.bufferView,
-                  let views = document.bufferViews, views.indices.contains(viewIndex) else {
-                throw GLTFError.indexOutOfRange(what: "bufferView", index: accessor.bufferView ?? -1)
+            guard let viewIndex = accessor.bufferView else {
+                throw GLTFError.indexOutOfRange(what: "bufferView", index: -1)
+            }
+            let resolved = try viewBytes(viewIndex)
+            let stride = resolved.stride ?? elementSize
+            let start = resolved.base + (accessor.byteOffset ?? 0)
+            let end = start + (accessor.count - 1) * stride + elementSize
+            guard accessor.count > 0, start >= 0, end <= resolved.data.count else {
+                throw GLTFError.bufferOutOfBounds(buffer: resolved.bufferForError)
+            }
+            return (resolved.data, start, stride)
+        }
+
+        /// Resolves a bufferView's backing bytes for a strided accessor read.
+        /// A meshopt-compressed view yields its decoded stream (content base 0);
+        /// a plain view yields the buffer slice offset by the view's `byteOffset`.
+        private mutating func viewBytes(
+            _ viewIndex: Int
+        ) throws -> (data: Data, base: Int, stride: Int?, bufferForError: Int) {
+            guard let views = document.bufferViews, views.indices.contains(viewIndex) else {
+                throw GLTFError.indexOutOfRange(what: "bufferView", index: viewIndex)
             }
             let view = views[viewIndex]
+            if let meshopt = view.extensions?.EXT_meshopt_compression {
+                return (try meshoptView(viewIndex, meshopt), 0, view.byteStride, meshopt.buffer)
+            }
             let data = try bufferData(view.buffer)
-            let stride = view.byteStride ?? elementSize
-            let start = (view.byteOffset ?? 0) + (accessor.byteOffset ?? 0)
-            let end = start + (accessor.count - 1) * stride + elementSize
-            guard accessor.count > 0, end <= data.count else {
+            return (data, view.byteOffset ?? 0, view.byteStride, view.buffer)
+        }
+
+        /// The exact content bytes of a bufferView as a standalone `Data`
+        /// (decoded when meshopt-compressed, else a copied slice). For whole-view
+        /// consumers such as the Draco compressed stream and embedded images.
+        private mutating func viewContentBytes(_ viewIndex: Int) throws -> Data {
+            guard let views = document.bufferViews, views.indices.contains(viewIndex) else {
+                throw GLTFError.indexOutOfRange(what: "bufferView", index: viewIndex)
+            }
+            let view = views[viewIndex]
+            if let meshopt = view.extensions?.EXT_meshopt_compression {
+                return try meshoptView(viewIndex, meshopt)
+            }
+            let data = try bufferData(view.buffer)
+            let start = view.byteOffset ?? 0
+            guard start >= 0, start + view.byteLength <= data.count else {
                 throw GLTFError.bufferOutOfBounds(buffer: view.buffer)
             }
-            return (data, start, stride)
+            return data.subdata(in: (data.startIndex + start)..<(data.startIndex + start + view.byteLength))
+        }
+
+        /// Decodes an `EXT_meshopt_compression` buffer view through the injected
+        /// codec, memoized per view. Validates the decoded byte count against the
+        /// spec-declared `count * byteStride` so a bad codec fails loudly.
+        private mutating func meshoptView(
+            _ viewIndex: Int, _ meshopt: GLTFDocument.BufferView.MeshoptCompression
+        ) throws -> Data {
+            if let cached = meshoptCache[viewIndex] { return cached }
+            let source = try bufferData(meshopt.buffer)
+            let start = meshopt.byteOffset ?? 0
+            guard start >= 0, start + meshopt.byteLength <= source.count else {
+                throw GLTFError.bufferOutOfBounds(buffer: meshopt.buffer)
+            }
+            let compressed = source.subdata(
+                in: (source.startIndex + start)..<(source.startIndex + start + meshopt.byteLength))
+            guard let mode = MeshoptBufferView.Mode(rawValue: meshopt.mode) else {
+                throw DecompressionError.decodeFailed(
+                    extension: CompressionExtension.meshopt.rawValue,
+                    detail: "bufferView \(viewIndex): unknown meshopt mode \"\(meshopt.mode)\"")
+            }
+            let filter = MeshoptBufferView.Filter(rawValue: meshopt.filter ?? "NONE")
+            guard let filter else {
+                throw DecompressionError.decodeFailed(
+                    extension: CompressionExtension.meshopt.rawValue,
+                    detail: "bufferView \(viewIndex): unknown meshopt filter \"\(meshopt.filter ?? "")\"")
+            }
+            let request = MeshoptBufferView(
+                data: compressed, count: meshopt.count,
+                byteStride: meshopt.byteStride, mode: mode, filter: filter)
+            let decoded = try codecs.bufferView.decode(request)
+            guard decoded.count == request.decodedByteCount else {
+                throw DecompressionError.decodeFailed(
+                    extension: CompressionExtension.meshopt.rawValue,
+                    detail: "bufferView \(viewIndex): decoded \(decoded.count) B, expected \(request.decodedByteCount) B")
+            }
+            diagnostics.append(Diagnostic(
+                severity: .info, stage: "decode-compressed",
+                message: "meshopt bufferView \(viewIndex): \(compressed.count) B → \(decoded.count) B"))
+            meshoptCache[viewIndex] = decoded
+            return decoded
         }
 
         // MARK: Buffers & textures
@@ -509,16 +662,41 @@ public struct GLTFImporter: AssetImporter {
             return Data(base64Encoded: String(uri[uri.index(after: comma)...]))
         }
 
-        mutating func textureRef(_ info: GLTFDocument.TextureInfo?) -> TextureRef? {
-            guard let info,
-                  let textures = document.textures, textures.indices.contains(info.index),
-                  let source = textures[info.index].source,
-                  let images = document.images, images.indices.contains(source) else {
+        mutating func textureRef(_ info: GLTFDocument.TextureInfo?, usage: TextureColorSpace) -> TextureRef? {
+            guard let info, let textures = document.textures, textures.indices.contains(info.index) else {
                 if info != nil {
                     diagnostics.append(Diagnostic(
                         severity: .warning, stage: "parse",
                         message: "texture \(info!.index): unresolvable image reference; dropped"))
                 }
+                return nil
+            }
+            let texture = textures[info.index]
+
+            // Prefer the `KHR_texture_basisu` KTX2 source, transcoding it to a
+            // PNG the downstream texture stage accepts. On transcode failure we
+            // fall back to `texture.source` if the asset provides one (that is
+            // the extension's designed fallback) — loudly, never silently.
+            if let basisu = texture.extensions?.KHR_texture_basisu {
+                if let ref = transcodedTextureRef(imageSource: basisu.source, usage: usage, textureIndex: info.index) {
+                    return ref
+                }
+                if texture.source == nil {
+                    diagnostics.append(Diagnostic(
+                        severity: .error, stage: "decode-compressed",
+                        message: "texture \(info.index): KTX2 source could not be transcoded and no fallback image is present; dropped"))
+                    return nil
+                }
+                diagnostics.append(Diagnostic(
+                    severity: .warning, stage: "decode-compressed",
+                    message: "texture \(info.index): KTX2 transcode unavailable; using the uncompressed fallback image"))
+            }
+
+            guard let source = texture.source,
+                  let images = document.images, images.indices.contains(source) else {
+                diagnostics.append(Diagnostic(
+                    severity: .warning, stage: "parse",
+                    message: "texture \(info.index): unresolvable image reference; dropped"))
                 return nil
             }
             let image = images[source]
@@ -543,6 +721,52 @@ public struct GLTFImporter: AssetImporter {
                 severity: .warning, stage: "parse",
                 message: "image \(source): no readable bytes; dropped"))
             return nil
+        }
+
+        /// Transcodes a `KHR_texture_basisu` KTX2 image to RGBA8 through the
+        /// injected transcoder and re-encodes it to PNG (which the texture stage
+        /// and AR profiles accept). Returns `nil` on any failure so the caller
+        /// can fall back or report; success emits an info diagnostic.
+        private mutating func transcodedTextureRef(
+            imageSource: Int, usage: TextureColorSpace, textureIndex: Int
+        ) -> TextureRef? {
+            guard let images = document.images, images.indices.contains(imageSource) else {
+                return nil
+            }
+            guard let ktx2 = imageBytes(images[imageSource]) else { return nil }
+            do {
+                let decoded = try codecs.texture.transcode(ktx2, usage: usage)
+                guard decoded.isWellFormed else {
+                    diagnostics.append(Diagnostic(
+                        severity: .error, stage: "decode-compressed",
+                        message: "texture \(textureIndex): transcoder returned a malformed \(decoded.width)×\(decoded.height) image; dropped"))
+                    return nil
+                }
+                let image = RGBAImage(width: decoded.width, height: decoded.height, pixels: [UInt8](decoded.rgba))
+                let png = try RGBAImageCodec.encodePNG(image)
+                diagnostics.append(Diagnostic(
+                    severity: .info, stage: "decode-compressed",
+                    message: "texture \(textureIndex): KTX2 \(ktx2.count) B → \(decoded.width)×\(decoded.height) \(decoded.colorSpace.rawValue) PNG"))
+                return TextureRef(source: .data(png), mimeType: "image/png")
+            } catch {
+                // Loud, specific — the caller decides fallback vs. hard drop.
+                diagnostics.append(Diagnostic(
+                    severity: .warning, stage: "decode-compressed",
+                    message: "texture \(textureIndex): KTX2 transcode failed (\(error))"))
+                return nil
+            }
+        }
+
+        /// The raw encoded bytes of a glTF image (data URI, external file, or
+        /// bufferView), or `nil` when unreadable. Used by the KTX2 transcode path
+        /// which needs the actual bytes rather than a deferred URI reference.
+        private mutating func imageBytes(_ image: GLTFDocument.Image) -> Data? {
+            if let uri = image.uri {
+                if let decoded = Self.decodeDataURI(uri) { return decoded }
+                return try? Data(contentsOf: baseURL.appendingPathComponent(uri))
+            }
+            guard let viewIndex = image.bufferView else { return nil }
+            return try? viewContentBytes(viewIndex)
         }
 
         // MARK: Materials

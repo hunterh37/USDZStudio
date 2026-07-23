@@ -270,9 +270,13 @@ struct GLTFImporterTests {
     }
 
     @Test func rejectsRequiredExtensions() async throws {
-        let json = #"{"asset": {"version": "2.0"}, "extensionsRequired": ["KHR_draco_mesh_compression"]}"#
-        let url = try GLTFFixtures.write(GLTFFixtures.glb(json: json), name: "draco.glb")
-        await expectError(.requiredExtensionUnsupported("KHR_draco_mesh_compression")) {
+        // A *required* extension we neither decode nor tolerate is a hard error:
+        // honoring it silently would misrepresent the asset. (Compression
+        // extensions are decodable and covered separately in the decompression
+        // suite; this asserts the unsupported-required gate.)
+        let json = #"{"asset": {"version": "2.0"}, "extensionsRequired": ["KHR_materials_variants"]}"#
+        let url = try GLTFFixtures.write(GLTFFixtures.glb(json: json), name: "variants.glb")
+        await expectError(.requiredExtensionUnsupported("KHR_materials_variants")) {
             try await importer.importAsset(at: url, options: options)
         }
     }
