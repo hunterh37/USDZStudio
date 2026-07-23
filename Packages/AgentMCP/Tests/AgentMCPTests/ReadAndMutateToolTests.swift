@@ -340,6 +340,38 @@ import USDCore
                             ["path": "/Root/Box", "ops": [["op": "solidify"]]])
     }
 
+    /// #127: whole-mesh QEM decimation over the MCP mutate path.
+    @Test func editMeshDecimate() async {
+        let server = Fixtures.server(session: Fixtures.session())
+
+        // ratio 1.0 just triangulates the box: 6 quads → 12 triangles (+6 faces).
+        let triangulated = await callOK(server, "edit_mesh", [
+            "path": "/Root/Box",
+            "ops": [["op": "decimate", "ratio": 1.0]],
+        ])
+        #expect(triangulated["topologyDeltas"].arrayValue?.first?["faces"].intValue == 6)
+
+        // Absolute triangle budget, boundary/seam flags parsed.
+        let budgeted = await callOK(server, "edit_mesh", [
+            "path": "/Root/Lid",
+            "ops": [["op": "decimate", "triangle_count": 2,
+                     "max_error": 100.0,
+                     "preserve_boundary": false, "preserve_uv_seams": false]],
+        ])
+        #expect(budgeted["topologyDeltas"].arrayValue?.count == 1)
+
+        // Error paths: bad ratio, bad triangle_count, missing target, bad max_error.
+        _ = await callError(server, "edit_mesh",
+                            ["path": "/Root/Box", "ops": [["op": "decimate", "ratio": 0]]])
+        _ = await callError(server, "edit_mesh",
+                            ["path": "/Root/Box", "ops": [["op": "decimate", "triangle_count": 0]]])
+        _ = await callError(server, "edit_mesh",
+                            ["path": "/Root/Box", "ops": [["op": "decimate"]]])
+        _ = await callError(server, "edit_mesh",
+                            ["path": "/Root/Box",
+                             "ops": [["op": "decimate", "ratio": 0.5, "max_error": -1]]])
+    }
+
     @Test func batchIsOneUndoStep() async {
         let session = Fixtures.session()
         let server = Fixtures.server(session: session)
