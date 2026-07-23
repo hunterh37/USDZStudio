@@ -50,7 +50,15 @@ struct FuzzTests {
         for opIndex in 0..<3 {
             let result: MeshOpResult?
             do {
-                switch (Int(seed % 11) + opIndex) % 11 {
+                switch (Int(seed % 12) + opIndex) % 12 {
+                case 11:
+                    // QEM decimation of the whole mesh at a random keep-ratio.
+                    // Output is triangulated; boundary/seam pinning plus the
+                    // link-condition and flip guards must keep it invariant-clean.
+                    result = try Decimate.apply(
+                        mesh, selection: .faces(Set(mesh.faceOrder)),
+                        params: .init(target: .ratio(Double.random(in: 0.2...0.9, using: &rng)),
+                                      preserveBoundary: Bool.random(using: &rng)))
                 case 0:
                     result = try ExtrudeFaces.apply(mesh, selection: .faces(randomFaces(mesh, &rng)),
                                                     params: .init(distance: Double.random(in: 0.1...2, using: &rng)))

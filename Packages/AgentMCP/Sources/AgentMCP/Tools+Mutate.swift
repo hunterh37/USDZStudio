@@ -335,17 +335,22 @@ public enum MutateTools {
     private static func registerMesh(on server: MCPServer, session: EditSession) {
         server.register(MCPTool(
             name: "edit_mesh", group: .mutate,
-            description: "Apply a chain of topology ops to a Mesh prim in one undoable step. Ops: extrude_faces {faces, distance}, inset_faces {faces, fraction}, delete_faces {faces}, mirror {axis, coordinate}, solidify {thickness}. mirror/solidify are whole-mesh (they act on every face; 'faces' is ignored). Omitted 'faces' reuses the previous op's result selection. Returns per-op topology deltas.",
+            description: "Apply a chain of topology ops to a Mesh prim in one undoable step. Ops: extrude_faces {faces, distance}, inset_faces {faces, fraction}, delete_faces {faces}, mirror {axis, coordinate}, solidify {thickness}, decimate {ratio | triangle_count, max_error?, preserve_boundary?, preserve_uv_seams?}. mirror/solidify/decimate are whole-mesh (they act on every face; 'faces' is ignored). decimate is QEM edge-collapse: output is triangulated, boundaries and UV seams are preserved by default — use it to fit a heavy mesh to a poly budget. Omitted 'faces' reuses the previous op's result selection. Returns per-op topology deltas.",
             inputSchema: Schema.object([
                 "path": Schema.primRef,
                 "ops": Schema.array(of: Schema.object([
-                    "op": Schema.string("extrude_faces | inset_faces | delete_faces | mirror | solidify"),
+                    "op": Schema.string("extrude_faces | inset_faces | delete_faces | mirror | solidify | decimate"),
                     "faces": Schema.array(of: .object(["type": "integer"]), "face ids"),
                     "distance": Schema.number("extrude distance"),
                     "fraction": Schema.number("inset fraction (0–1)"),
                     "axis": Schema.string("mirror plane axis: x | y | z"),
                     "coordinate": Schema.number("mirror plane coordinate along axis (default 0)"),
                     "thickness": Schema.number("solidify shell thickness (> 0)"),
+                    "ratio": Schema.number("decimate: fraction of triangles to keep, in (0, 1]"),
+                    "triangle_count": Schema.number("decimate: absolute triangle budget (≥ 1)"),
+                    "max_error": Schema.number("decimate: reject collapses above this QEM error (default: no cap)"),
+                    "preserve_boundary": Schema.boolean("decimate: freeze boundary-loop vertices (default true)"),
+                    "preserve_uv_seams": Schema.boolean("decimate: freeze UV-seam vertices (default true)"),
                 ], required: ["op"]), "ops applied in order"),
             ], required: ["path", "ops"])
         ) { args in
@@ -366,9 +371,10 @@ public enum MutateTools {
             var carrySelection: ComponentSelection?
             for (index, opJSON) in ops.enumerated() {
                 let selection: ComponentSelection
-                // mirror/solidify are whole-mesh (#69): they act on every face,
-                // so they never require a 'faces' arg or a carried selection.
-                if opJSON["op"].stringValue == "mirror" || opJSON["op"].stringValue == "solidify" {
+                // mirror/solidify/decimate are whole-mesh (#69, #127): they act
+                // on every face, so they never require a 'faces' arg or a
+                // carried selection.
+                if ["mirror", "solidify", "decimate"].contains(opJSON["op"].stringValue ?? "") {
                     selection = .faces(Set(meshSession.mesh.faceOrder))
                 } else if let faceInts = opJSON["faces"].intArrayValue {
                     selection = .faces(Set(faceInts.map(FaceID.init)))
@@ -446,9 +452,36 @@ public enum MutateTools {
             return try Solidify.apply(
                 mesh, selection: .faces(Set(mesh.faceOrder)),
                 params: Solidify.Params(thickness: thickness))
+        case "decimate":
+            // Whole-mesh QEM edge-collapse toward a triangle budget (#127).
+            let target: Decimate.Params.Target
+            if let ratio = opJSON["ratio"].doubleValue {
+                guard ratio > 0, ratio <= 1 else {
+                    throw ToolError.invalidParams("op[\(index)] decimate 'ratio' must be in (0, 1]")
+                }
+                target = .ratio(ratio)
+            } else if let count = opJSON["triangle_count"].intValue {
+                guard count >= 1 else {
+                    throw ToolError.invalidParams("op[\(index)] decimate 'triangle_count' must be ≥ 1")
+                }
+                target = .triangleCount(count)
+            } else {
+                throw ToolError.invalidParams("op[\(index)] decimate needs 'ratio' or 'triangle_count'")
+            }
+            let maxError = opJSON["max_error"].doubleValue ?? .infinity
+            guard maxError >= 0 else {
+                throw ToolError.invalidParams("op[\(index)] decimate 'max_error' must be ≥ 0")
+            }
+            return try Decimate.apply(
+                mesh, selection: .faces(Set(mesh.faceOrder)),
+                params: Decimate.Params(
+                    target: target,
+                    maxError: maxError,
+                    preserveBoundary: opJSON["preserve_boundary"].boolValue ?? true,
+                    preserveUVSeams: opJSON["preserve_uv_seams"].boolValue ?? true))
         default:
             throw ToolError.invalidParams(
-                "op[\(index)] unknown op '\(opJSON["op"].stringValue ?? "?")' (extrude_faces, inset_faces, delete_faces, mirror, solidify)")
+                "op[\(index)] unknown op '\(opJSON["op"].stringValue ?? "?")' (extrude_faces, inset_faces, delete_faces, mirror, solidify, decimate)")
         }
     }
 

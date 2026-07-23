@@ -158,6 +158,7 @@ final class Driver {
                 case .bevel: document.meshEdit?.bevelWidth = number
                 case .mirror: document.meshEdit?.mirrorCoordinate = number
                 case .solidify: document.meshEdit?.solidifyThickness = number
+                case .decimate: document.meshEdit?.decimateRatio = number
                 case .delete, .fill: break
                 }
             }

@@ -478,6 +478,12 @@ public struct EditorShellView: View {
                 document?.meshEdit?.tool = .solidify
                 document?.applyActiveMeshTool()
             },
+            action("mesh.decimate", "Decimate / Reduce Mesh", "Mesh",
+                   keywords: ["reduce", "simplify", "budget", "lod", "poly", "triangles", "qem"],
+                   enabled: document?.meshEdit != nil) {
+                document?.meshEdit?.tool = .decimate
+                document?.applyActiveMeshTool()
+            },
         ]
     }
 

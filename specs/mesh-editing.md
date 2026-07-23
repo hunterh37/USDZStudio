@@ -56,6 +56,7 @@ Every op documents and enforces **preconditions** (e.g. Bevel: manifold edges on
 | BevelEdges (v1) | Single-segment edge bevel, uniform width | analytic per edge class |
 | LoopCut (v1.5) | Insert edge loop through quad strip | analytic; op refuses on non-quad strips |
 | SubdivideCatmullClark | Whole-mesh Catmull-Clark smoothing (n levels) | per level: V+=E+F, E+=E+C, F+=C−F (C=Σ loop.count) |
+| Decimate (#127) | Whole-mesh QEM (Garland–Heckbert) edge-collapse to a triangle budget (`ratio` or `triangleCount`, optional `maxError` cap). Output is triangulated; boundary loops and UV-seam vertices are pinned by default; every collapse passes the manifold link condition + normal-flip guard | measured (data-dependent), invariant suite enforced |
 
 ## Correctness Invariants (the LLM-agent feedback loop)
 
