@@ -114,6 +114,19 @@ public struct PreSpecAssessment: Codable, Sendable, Equatable {
         "robot", "mascot", "face", "body",
     ]
 
+    /// Keywords marking a photographic, cluttered-background, or multi-subject
+    /// reference (a skyline, a landscape, a street). A 5-primitive clay
+    /// reconstruction can never reach the standard silhouette-similarity floor
+    /// against a dusk photograph with a sky gradient, atmospheric haze, and
+    /// thousands of lit windows — the render's subject is being compared against
+    /// sky and background, not a clean matte — so the floor is relaxed for these
+    /// (#145). This does NOT weaken the score gate; it only calibrates the
+    /// measured-similarity floor to what the metric can actually reach.
+    static let sceneKeywords: Set<String> = [
+        "skyline", "cityscape", "city", "landscape", "scene", "street",
+        "panorama", "aerial", "photograph", "photo", "vista", "horizon",
+    ]
+
     /// Deterministically assess an object from descriptive hints and the
     /// reference image's pixel dimensions.
     ///
@@ -122,11 +135,18 @@ public struct PreSpecAssessment: Codable, Sendable, Equatable {
     ///     bevels", "glossy").
     ///   - width/height: reference image dimensions in pixels (larger images
     ///     get a small complexity bump — more visible detail).
-    public static func assess(hints: [String], width: Int, height: Int) -> PreSpecAssessment {
+    ///   - hasAlpha: whether the reference carries a clean transparency channel,
+    ///     if known. `false` (a photographic reference with no cutout) relaxes
+    ///     the similarity floor, since the silhouette must be inferred from the
+    ///     background and the metric compares subject against sky/scene (#145).
+    public static func assess(
+        hints: [String], width: Int, height: Int, hasAlpha: Bool? = nil
+    ) -> PreSpecAssessment {
         let lowered = hints.map { $0.lowercased() }
         let joined = lowered.joined(separator: " ")
 
         let isCharacter = characterKeywords.contains { joined.contains($0) }
+        let isScene = sceneKeywords.contains { joined.contains($0) }
         let objectClass: ObjectClass
         if isCharacter {
             objectClass = hints.count >= 4 ? .hybrid : .character
@@ -148,18 +168,45 @@ public struct PreSpecAssessment: Codable, Sendable, Equatable {
             // score: a coarse-but-correct blockout should clear it, while a
             // render of the wrong shape (low IoU) cannot. It rises modestly with
             // complexity because more-detailed targets tolerate less drift.
-            similarityFloor: isCharacter ? 0.55 : 0.5,
+            //
+            // Photographic / cluttered / multi-subject references (no clean
+            // matte) get a substantially lower floor: the silhouette metric is
+            // comparing the render's subject against sky and background, so an
+            // otherwise-faithful reconstruction measures far below the base floor
+            // and the gate becomes unreachable (#145). A missing alpha channel
+            // and scene keywords are the two signals; either relaxes the floor.
+            similarityFloor: similarityFloor(
+                isCharacter: isCharacter, isScene: isScene, hasAlpha: hasAlpha),
             // An assessed object must finish AR-valid — the completion gate runs
             // the ARKit profile over the finished stage.
             requireCompliance: true)
 
         var notes = ["classified as \(objectClass.rawValue)", "complexity \(complexity)"]
         if hints.isEmpty { notes.append("no hints supplied — assessment is conservative") }
+        if isScene || hasAlpha == false {
+            notes.append("photographic/cluttered reference — similarity floor relaxed to "
+                + "\(policy.similarityFloor) (subject scored against an un-matted background)")
+        }
 
         return PreSpecAssessment(
             suitability: suitability(hints: hints, width: width, height: height, isCharacter: isCharacter),
             objectClass: objectClass, complexity: complexity,
             policy: policy, notes: notes)
+    }
+
+    /// The measured-similarity floor, calibrated to what the silhouette metric
+    /// can actually reach for the reference type (#145).
+    ///
+    /// Base floors: character 0.55, object 0.5. A photographic/cluttered scene
+    /// (scene keywords, or an explicitly absent alpha channel) drops the floor to
+    /// 0.3 — enough that a render of the wrong shape still fails, but reachable by
+    /// a faithful clay reconstruction scored against an un-matted background.
+    static func similarityFloor(isCharacter: Bool, isScene: Bool, hasAlpha: Bool?) -> Double {
+        let base = isCharacter ? 0.55 : 0.5
+        // No clean cutout to isolate the subject: silhouette work is inferred and
+        // the metric is depressed by background pixels.
+        let photographic = isScene || hasAlpha == false
+        return photographic ? min(base, 0.3) : base
     }
 
     /// The suitability gate. Rejects references too small to carry

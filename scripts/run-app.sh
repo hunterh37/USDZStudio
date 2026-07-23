@@ -35,6 +35,13 @@ if [[ ! -d "$APP" ]]; then
   exit 1
 fi
 
+# Refresh the release CLI binary the MCP server config points at
+# (CLI/.build/release/openusdz). It is a separate artifact from the .app, so a
+# stale release binary can serve an old MCP surface (e.g. predating the #112
+# ShapeKind decoder) even after the app is rebuilt from latest main (#143).
+echo "──── swift build: openusdz CLI (release, MCP server)"
+(cd CLI && swift build -c release >/dev/null)
+
 echo "──── launching $APP"
 if [[ $# -ge 1 ]]; then
   open -a "$APP" "$1"
