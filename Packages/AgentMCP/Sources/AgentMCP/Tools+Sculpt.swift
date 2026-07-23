@@ -661,8 +661,20 @@ public enum SculptTools {
             _ = try session.mutate(SetTransformCommand(path: primPath, newTRS: trs, oldAttribute: old))
             return primPath.description
 
-        case .createMaterial(let targetPath, let material):
+        case .createMaterial(let targetPath, let rawMaterial):
             let primPath = try resolvePath(targetPath, session: session)
+            // #147: a material carrying a procedural `facade` bakes lit-window
+            // albedo + emissive PNGs (beside the stage, or a temp dir when
+            // headless) and binds them, giving a plain building box detail for
+            // near-zero geometry cost. Falls through unchanged when there is no
+            // facade or the bake fails (better a flat colour than a dead pass).
+            let material: MaterialSpec
+            if rawMaterial.hasFacade {
+                let dir = FacadeBaker.bakeDirectory(for: session.sourceURL)
+                material = (try? FacadeBaker.bake(rawMaterial, into: dir)) ?? rawMaterial
+            } else {
+                material = rawMaterial
+            }
             // Re-run hygiene (issue #158): if this spec material already exists
             // under /Looks (a material-pass replay after a refine loop), bind the
             // existing prim instead of minting `<id>_1`, `<id>_2`… garbage.

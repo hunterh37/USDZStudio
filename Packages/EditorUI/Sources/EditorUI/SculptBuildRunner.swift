@@ -3,6 +3,11 @@ import EditingKit
 import MeshKit
 import SculptKit
 import USDCore
+#if canImport(ImageIO)
+import ImageIO
+import CoreGraphics
+import UniformTypeIdentifiers
+#endif
 
 /// Runs the SculptKit staged-sculpt pipeline **in-app against the open
 /// document**, so each pass renders live in the viewport exactly like a
@@ -72,7 +77,11 @@ public enum SculptBuildRunner {
             return document.run(SetTransformCommand(path: primPath, newTRS: trs, oldAttribute: old)) != nil
                 ? primPath.description : nil
 
-        case .createMaterial(let targetPath, let material):
+        case .createMaterial(let targetPath, let rawMaterial):
+            // #147: bake a procedural facade (if any) into albedo/emissive PNGs
+            // in a temp dir so the live preview shows lit-window detail. Falls
+            // back to the flat material when there is no facade or the bake fails.
+            let material = bakeFacadeIfNeeded(rawMaterial)
             guard let primPath = PrimPath(targetPath),
                   let command = CreateMaterialCommand.make(
                     bindingTo: primPath, baseColor: material.baseColor, in: document.snapshot)
@@ -207,6 +216,50 @@ public enum SculptBuildRunner {
                 Attribute(name: "inputs:intensity", value: .double(intensity)),
                 Attribute(name: "inputs:color", value: .vector(color)),
             ])
+    }
+
+    /// Bake a procedural facade (#147) into albedo + emissive PNGs in a temp
+    /// directory and return the material with those map paths filled in. Returns
+    /// the material unchanged when it has no facade or the bake fails (the live
+    /// preview then shows the flat base colour rather than nothing).
+    static func bakeFacadeIfNeeded(_ material: MaterialSpec) -> MaterialSpec {
+        guard let facade = material.facade else { return material }
+        let maps = FacadeTextureGenerator.generate(facade)
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("usdz-facade-\(UUID().uuidString)")
+        let stem = CreateMaterialCommand.sanitizedPrimName(material.id)
+        var out = material
+        if out.albedoMap == nil,
+           let path = writeFacadePNG(maps.albedo, to: dir.appendingPathComponent("\(stem)_albedo.png")) {
+            out.albedoMap = path
+        }
+        if out.emissiveMap == nil,
+           let path = writeFacadePNG(maps.emissive, to: dir.appendingPathComponent("\(stem)_emissive.png")) {
+            out.emissiveMap = path
+        }
+        return out
+    }
+
+    /// Write an RGBA8 raster to a PNG; returns its path, or nil on failure.
+    static func writeFacadePNG(_ image: RasterImage, to url: URL) -> String? {
+        #if canImport(ImageIO)
+        try? FileManager.default.createDirectory(
+            at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        var buffer = image.rgba
+        guard let ctx = buffer.withUnsafeMutableBytes({ raw in
+            CGContext(data: raw.baseAddress, width: image.width, height: image.height,
+                      bitsPerComponent: 8, bytesPerRow: image.width * 4,
+                      space: CGColorSpaceCreateDeviceRGB(),
+                      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+        }), let cg = ctx.makeImage(),
+              let dest = CGImageDestinationCreateWithURL(
+                url as CFURL, UTType.png.identifier as CFString, 1, nil)
+        else { return nil }
+        CGImageDestinationAddImage(dest, cg, nil)
+        return CGImageDestinationFinalize(dest) ? url.path : nil
+        #else
+        return nil
+        #endif
     }
 
     /// The extra shader-input attributes beyond the base colour authored by

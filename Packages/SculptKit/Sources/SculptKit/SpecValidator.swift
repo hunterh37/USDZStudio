@@ -260,6 +260,32 @@ public enum SpecValidator {
         if let scale = material.normalScale, !scale.isFinite || scale < 0 {
             issues.append(.init(.error, "material '\(material.id)' normalScale must be >= 0"))
         }
+        if let facade = material.facade {
+            issues.append(contentsOf: facadeIssues(facade, materialID: material.id))
+        }
+        return issues
+    }
+
+    /// Validate a procedural facade (#147): at least one row and column, a
+    /// finite lit fraction in 0...1, a resolution within the bake range, and
+    /// three-component finite colours.
+    static func facadeIssues(_ facade: FacadeTexture, materialID: String) -> [SpecIssue] {
+        var issues: [SpecIssue] = []
+        if facade.rows < 1 || facade.columns < 1 {
+            issues.append(.init(.error, "material '\(materialID)' facade rows/columns must be >= 1"))
+        }
+        if !facade.litFraction.isFinite || facade.litFraction < 0 || facade.litFraction > 1 {
+            issues.append(.init(.error, "material '\(materialID)' facade litFraction must be in 0...1"))
+        }
+        if !FacadeTextureGenerator.resolutionRange.contains(facade.resolution) {
+            issues.append(.init(.warning,
+                "material '\(materialID)' facade resolution \(facade.resolution) is outside \(FacadeTextureGenerator.resolutionRange.lowerBound)...\(FacadeTextureGenerator.resolutionRange.upperBound); it will be clamped"))
+        }
+        for (rgb, label) in [(facade.wallColor, "wallColor"), (facade.windowColor, "windowColor"), (facade.litColor, "litColor")] {
+            if rgb.count < 3 || rgb.contains(where: { !$0.isFinite }) {
+                issues.append(.init(.error, "material '\(materialID)' facade \(label) must be 3 finite components"))
+            }
+        }
         return issues
     }
 

@@ -336,6 +336,38 @@ import USDCore
                 roughnessMap: "rough.png", emissiveMap: "emit.png", normalScale: 0.75)])
     }
 
+    @Test func createMaterialBakesProceduralFacade() async throws {
+        // A material carrying a procedural facade (#147) bakes albedo + emissive
+        // PNGs and binds them onto the surface shader — even though the spec
+        // declared no map paths.
+        let session = Fixtures.session()
+        _ = try await SculptTools.execute(step: .createGroup(name: "Tower", parentPath: nil), session: session)
+        _ = try await SculptTools.execute(
+            step: .createMesh(name: "Body", parentPath: "/Tower", primitive: .box,
+                              width: 1, height: 1, depth: 1, radius: 0.5, segments: 8),
+            session: session)
+        let facade = FacadeTexture(rows: 6, columns: 4, litFraction: 0.5, resolution: 32)
+        let mat = try await SculptTools.execute(
+            step: .createMaterial(targetPath: "/Tower/Body",
+                                  material: MaterialSpec(id: "facade_mat", baseColor: [0.1, 0.1, 0.12],
+                                                         facade: facade)),
+            session: session)
+        #expect(mat == "/Looks/facade_mat")
+
+        func mapPath(_ name: String) -> String? {
+            guard let surface = session.stage.prim(at: PrimPath("/Looks/facade_mat/Surface")!),
+                  case let .string(s)? = surface.attribute(named: name)?.value else { return nil }
+            return s
+        }
+        let albedo = mapPath("inputs:albedoMap")
+        let emissive = mapPath("inputs:emissiveMap")
+        #expect(albedo?.hasSuffix("facade_mat_facade_albedo.png") == true)
+        #expect(emissive?.hasSuffix("facade_mat_facade_emissive.png") == true)
+        // The baked files really exist and decode.
+        #expect(RasterLoader.load(path: albedo ?? "") != nil)
+        #expect(RasterLoader.load(path: emissive ?? "") != nil)
+    }
+
     @Test func materialPassAuthorsTextureChannels() async {
         let session = Fixtures.session()
         let server = Fixtures.server(session: session)
