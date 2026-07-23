@@ -618,6 +618,20 @@ public enum SculptTools {
             }
             return command.materialPath.description
 
+        case let .bindMaterial(targetPath, sourcePath):
+            let target = try resolvePath(targetPath, session: session)
+            let source = try resolvePath(sourcePath, session: session)
+            guard let materialPath = MaterialBinding.materialPath(for: source, in: session.stage),
+                  let command = BindMaterialCommand.make(
+                    materialPath: materialPath, bindingTo: target, in: session.stage)
+            else {
+                // Source not yet materialized or target already bound: skip
+                // gracefully so a partial/replayed build still completes.
+                return nil
+            }
+            _ = try session.mutate(command)
+            return materialPath.description
+
         case let .createLight(name, parentPath, kind, intensity, color):
             let args = insertArgs(name: name, parent: parentPath)
             let built = try MutateTools.makeInsert(

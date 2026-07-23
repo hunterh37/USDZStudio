@@ -214,6 +214,26 @@ public enum MutateTools {
             let outcome = try session.mutate(command)
             return outcome.asJSON(extra: ["materialPath": .string(command.materialPath.description)])
         })
+
+        server.register(MCPTool(
+            name: "bind_material", group: .mutate,
+            description: "Bind an EXISTING material to a target prim (no new material minted). Use this to share one material across many prims — e.g. every repetition copy of a facade — instead of create_material, which duplicates a material per target.",
+            inputSchema: Schema.object([
+                "target": Schema.primRef,
+                "materialPath": Schema.primRef,
+            ], required: ["target", "materialPath"])
+        ) { args in
+            let target = try session.resolve(args, key: "target")
+            let materialPath = try session.resolve(args, key: "materialPath")
+            guard let command = BindMaterialCommand.make(
+                materialPath: materialPath, bindingTo: target, in: session.stage)
+            else {
+                throw ToolError.invalidParams(
+                    "cannot bind \(materialPath) to \(target): materialPath must be an existing Material prim, and the target must not already bind it")
+            }
+            let outcome = try session.mutate(command)
+            return outcome.asJSON(extra: ["materialPath": .string(materialPath.description)])
+        })
     }
 
     // MARK: - Attributes & transform
@@ -470,11 +490,11 @@ public enum MutateTools {
     private static func registerBatch(on server: MCPServer, session: EditSession) {
         server.register(MCPTool(
             name: "batch", group: .mutate,
-            description: "Run several simple mutations atomically as ONE undo step (CompositeCommand). Supported ops: set_attribute, set_active, remove_prim, rename_prim. Keeps individual calls small while transactions stay big.",
+            description: "Run several simple mutations atomically as ONE undo step (CompositeCommand). Supported ops: set_attribute, set_active, bind_material, remove_prim, rename_prim. Keeps individual calls small while transactions stay big.",
             inputSchema: Schema.object([
                 "label": Schema.string("undo label for the whole batch"),
                 "ops": Schema.array(of: Schema.object([
-                    "tool": Schema.string("set_attribute | set_active | remove_prim | rename_prim"),
+                    "tool": Schema.string("set_attribute | set_active | bind_material | remove_prim | rename_prim"),
                     "args": .object(["description": "that tool's arguments"]),
                 ], required: ["tool", "args"]), "mutations, applied in order"),
             ], required: ["ops"])
@@ -506,6 +526,16 @@ public enum MutateTools {
                     commands.append(SetActiveCommand(
                         path: path, newValue: active,
                         oldValue: session.stage.prim(at: path)?.isActive ?? true))
+                case "bind_material":
+                    let target = try session.resolve(sub, key: "target")
+                    let materialPath = try session.resolve(sub, key: "materialPath")
+                    guard let command = BindMaterialCommand.make(
+                        materialPath: materialPath, bindingTo: target, in: session.stage)
+                    else {
+                        throw ToolError.invalidParams(
+                            "ops[\(index)]: cannot bind \(materialPath) to \(target) (materialPath must be an existing Material; target must not already bind it)")
+                    }
+                    commands.append(command)
                 case "remove_prim":
                     let path = try session.resolve(sub)
                     commands.append(try removeCommand(for: path, session: session))

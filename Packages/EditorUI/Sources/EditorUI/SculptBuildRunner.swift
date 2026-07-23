@@ -85,6 +85,19 @@ public enum SculptBuildRunner {
             }
             return command.materialPath.description
 
+        case let .bindMaterial(targetPath, sourcePath):
+            // Share the source component's existing material with a repetition
+            // copy instead of minting a duplicate (#140). Best-effort: skip when
+            // the source has no material yet or the target already binds it.
+            guard let target = PrimPath(targetPath), let source = PrimPath(sourcePath),
+                  document.snapshot.prim(at: target) != nil,
+                  let materialPath = MaterialBinding.materialPath(for: source, in: document.snapshot),
+                  let command = BindMaterialCommand.make(
+                    materialPath: materialPath, bindingTo: target, in: document.snapshot),
+                  document.run(command) != nil
+            else { return nil }
+            return materialPath.description
+
         case let .createLight(name, parentPath, kind, intensity, color):
             return insert(prim: lightPrim(at: fullPath(name, under: parentPath), kind: kind,
                                           intensity: intensity, color: color), to: document)

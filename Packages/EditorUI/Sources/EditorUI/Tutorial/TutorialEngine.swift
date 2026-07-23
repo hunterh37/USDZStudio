@@ -95,9 +95,18 @@ public final class TutorialEngine {
         orbitTask = Task { [weak self] in
             // Let the viewport load + capture its baseline before deleting.
             try? await Task.sleep(for: .milliseconds(900))
-            guard let self, !Task.isCancelled else { return }
-            if self.stepIndex == 0 { self.document.delete(TutorialScene.cubePath) }
+            guard !Task.isCancelled else { return }
+            if let self, self.stepIndex == 0 { self.document.delete(TutorialScene.cubePath) }
             while !Task.isCancelled {
+                // Re-acquire `self` weakly each frame: holding it strongly
+                // across this unbounded loop would keep the engine (and its
+                // sandbox document) alive forever — the task retains `self`,
+                // so `deinit` could never run to cancel the task (a retain
+                // cycle in effect). Ending the loop when the engine is gone
+                // lets deallocation tear the tour down. (No deinit cancel is
+                // needed — or possible under Swift 6 MainActor isolation —
+                // because this guard is the task's own exit.)
+                guard let self else { return }
                 self.azimuth += 0.0035
                 self.publishPose()
                 try? await Task.sleep(for: .milliseconds(33))

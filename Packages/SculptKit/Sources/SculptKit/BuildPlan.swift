@@ -20,6 +20,12 @@ public enum BuildStep: Sendable, Equatable {
     /// carrying the full channel set (scalars + optional texture maps) so the
     /// executor authors real image channels, not just a flat colour.
     case createMaterial(targetPath: String, material: MaterialSpec)
+    /// Bind the material already bound to `sourcePath` (a repetition system's
+    /// base component) to `targetPath` (one expanded copy), so every copy shares
+    /// the base's single material instead of minting a duplicate per copy
+    /// (issue #140/#141). Emitted by the material pass after the base's
+    /// `createMaterial`; the executor resolves the source's material at run time.
+    case bindMaterial(targetPath: String, sourcePath: String)
     /// Create a real `UsdLux` light of `kind` under the sculpt root. Emitted by
     /// the lighting pass; the executor authors the typed light prim + channels.
     case createLight(name: String, parentPath: String?, kind: LightSpec.Kind,
@@ -339,6 +345,13 @@ public enum BuildPlanner {
             let selfPath = path(for: node.name, under: parentPath)
             if let materialID = node.materialID, let material = byID[materialID] {
                 steps.append(.createMaterial(targetPath: selfPath, material: material))
+                // Repetition copies inherit the base's material by *binding* to
+                // the same material prim, not by minting one per copy — otherwise
+                // an N-copy grid produces N identical /Looks/Material_N (#140).
+                for copy in copies(for: node) {
+                    let copyPath = path(for: copy.name, under: parentPath)
+                    steps.append(.bindMaterial(targetPath: copyPath, sourcePath: selfPath))
+                }
             }
             return selfPath
         }

@@ -32,6 +32,9 @@ public enum WorkflowPrompts {
             `inputs:diffuseColor` on the surface shader with \
             `set_attribute { path, name: "inputs:diffuseColor", type: "vector", value: [r, g, b] }`.
             2. If nothing is bound, call `create_material { target, baseColor: [r, g, b] }`.
+            To give several prims the SAME material, create it once, then \
+            `bind_material { target, materialPath }` the rest (or a `batch` of them) — \
+            don't `create_material` per prim, which mints a duplicate each time.
             3. Verify with `validate {}` — zero new errors expected. Undo with `undo` if not.
             """))
 
