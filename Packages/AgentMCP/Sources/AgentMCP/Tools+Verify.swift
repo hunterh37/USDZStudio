@@ -1,5 +1,6 @@
 import Foundation
 import MeshKit
+import SculptKit
 import USDCore
 import ValidationKit
 
@@ -8,7 +9,9 @@ import ValidationKit
 /// exact); renders are reserved for genuinely visual judgments.
 public enum VerifyTools {
 
-    public static func register(on server: MCPServer, session: EditSession) {
+    public static func register(
+        on server: MCPServer, session: EditSession, sculptStore: SculptStore? = nil
+    ) {
         server.register(MCPTool(
             name: "validate", group: .verify,
             description: "Run the validation rule catalog over the whole stage. Optional profile: arkit (default) | arkit-strict.",
@@ -70,13 +73,13 @@ public enum VerifyTools {
 
         server.register(MCPTool(
             name: "score", group: .verify,
-            description: "Closed-loop fidelity gate ladder (schema → mesh integrity → scale sanity → spatial). Returns 0–1 score plus each gate's PASS/FAIL detail; iterate mutate → validate → score until it passes.",
+            description: "Closed-loop fidelity gate ladder (schema → mesh integrity → scale sanity → spatial). Returns 0–1 score plus each gate's PASS/FAIL detail; iterate mutate → validate → score until it passes. When a sculpt spec is active, overlaps between components whose spec `attachment` declares intended contact (root/weld/socket/pin) are reported as declaredContacts, not spatial failures — welded parts are expected to interpenetrate.",
             inputSchema: Schema.object([
                 "intent": Schema.string("what the agent is building (recorded in the report)"),
                 "expectedMaxExtent": Schema.number("plausible real-world max extent in meters (default 50)"),
             ])
         ) { args in
-            score(session: session, args: args)
+            score(session: session, args: args, spec: await sculptStore?.spec)
         })
     }
 
@@ -114,8 +117,10 @@ public enum VerifyTools {
     }
 
     /// §4 gate ladder. Gate 5 (visual) is the agent's own judgment over
-    /// `render_views` output and is intentionally not scored here.
-    static func score(session: EditSession, args: JSONValue) -> JSONValue {
+    /// `render_views` output and is intentionally not scored here. `spec` (the
+    /// active sculpt spec, when one exists) informs the spatial gate about
+    /// declared-contact parts.
+    static func score(session: EditSession, args: JSONValue, spec: ObjectSculptSpec? = nil) -> JSONValue {
         let stage = session.stage
         var gates: [JSONValue] = []
         var passed = 0
@@ -170,19 +175,43 @@ public enum VerifyTools {
             "diagnostics": .array(mpuDiagnostics.map(\.asJSON)),
         ]))
 
-        // Gate 4 — spatial: no unintended interpenetration.
+        // Gate 4 — spatial: no *unintended* interpenetration. An object built
+        // the recommended way — overlapping primitives welded into a body —
+        // overlaps by design wherever the spec declares an attachment, so
+        // those pairs must not fail the gate (issue #161): the gate hunts
+        // free-floating/undeclared collisions, not intentional welds.
         let overlaps = GeometryProbe.interpenetrations(in: stage)
-        let spatialPass = overlaps.isEmpty
+        let componentNames = spec?.allComponentNames ?? []
+        let contactNames = spec?.declaredContactComponentNames ?? []
+        var unintended: [(a: PrimPath, b: PrimPath, overlapVolume: Double)] = []
+        var declared: [(a: PrimPath, b: PrimPath, overlapVolume: Double)] = []
+        for overlap in overlaps {
+            let aName = overlap.a.name, bName = overlap.b.name
+            // Declared contact: both prims belong to the spec's component set
+            // and at least one of the pair declares a rigid attachment
+            // (root/weld/socket/pin) — it is *supposed* to touch its neighbors.
+            if componentNames.contains(aName), componentNames.contains(bName),
+               contactNames.contains(aName) || contactNames.contains(bName) {
+                declared.append(overlap)
+            } else {
+                unintended.append(overlap)
+            }
+        }
+        let spatialPass = unintended.isEmpty
         if spatialPass { passed += 1 }
+        func overlapJSON(_ o: (a: PrimPath, b: PrimPath, overlapVolume: Double)) -> JSONValue {
+            .object([
+                "a": .string(o.a.description),
+                "b": .string(o.b.description),
+                "overlapVolume": .number(o.overlapVolume),
+            ])
+        }
         gates.append(.object([
             "gate": "spatial", "pass": .bool(spatialPass),
-            "interpenetrations": .array(overlaps.map {
-                .object([
-                    "a": .string($0.a.description),
-                    "b": .string($0.b.description),
-                    "overlapVolume": .number($0.overlapVolume),
-                ])
-            }),
+            "interpenetrations": .array(unintended.map(overlapJSON)),
+            // Informational: overlaps expected by the spec's attachments.
+            "declaredContactCount": .number(Double(declared.count)),
+            "declaredContacts": .array(declared.map(overlapJSON)),
         ]))
 
         var payload: [String: JSONValue] = [

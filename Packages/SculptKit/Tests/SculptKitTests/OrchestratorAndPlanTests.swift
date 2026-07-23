@@ -122,8 +122,10 @@ import Testing
         for pass in SculptPass.allCases where pass != .blockout {
             #expect(pass.enforcesScoreGate)
         }
-        // Similarity floor: only the textured passes (material onward).
-        let textured: Set<SculptPass> = [.material, .surface, .lighting, .interaction, .optimization]
+        // Similarity floor: the textured passes (material onward) — except
+        // interaction, whose joints are correctness features gated by their own
+        // invariants, not by appearance (issue #157).
+        let textured: Set<SculptPass> = [.material, .surface, .lighting, .optimization]
         for pass in SculptPass.allCases {
             #expect(pass.enforcesSimilarityFloor == textured.contains(pass))
         }

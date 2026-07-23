@@ -42,10 +42,15 @@ public struct CreateMaterialCommand: EditCommand {
     ///     model root, so the whole subtree inherits it.
     ///   - baseColor: the initial linear `diffuseColor` (defaults to a neutral
     ///     grey matching the USD fallback).
+    ///   - name: preferred material prim name (e.g. a sculpt spec's material id
+    ///     like `red_paint`), uniqued against existing siblings; nil keeps the
+    ///     generic `Material` naming. Meaningful shared names beat a trail of
+    ///     `Material_1…Material_N` for both file size and editability (#158).
     ///   - stage: the stage to resolve names, indices, and the target against.
     public static func make(
         bindingTo target: PrimPath,
         baseColor: [Double] = [0.18, 0.18, 0.18],
+        name: String? = nil,
         in stage: any USDStageProtocol
     ) -> CreateMaterialCommand? {
         guard let (targetPrim, targetParent, targetIndex) = locate(target, in: stage) else { return nil }
@@ -58,7 +63,7 @@ public struct CreateMaterialCommand: EditCommand {
 
         // 2. A unique material name under the scope.
         let siblingNames = Set((existingScope?.children ?? []).map(\.name))
-        let materialName = uniqueName("Material", taken: siblingNames)
+        let materialName = uniqueName(name.map(sanitizedPrimName) ?? "Material", taken: siblingNames)
         guard let materialPath = scopePath.appending(materialName),
               let surfacePath = materialPath.appending("Surface") else { return nil }
 
@@ -131,6 +136,18 @@ public struct CreateMaterialCommand: EditCommand {
         guard let parent = stage.prim(at: parentPath),
               let i = parent.children.firstIndex(where: { $0.path == path }) else { return nil }
         return (parent.children[i], parentPath, i)
+    }
+
+    /// A caller-preferred name coerced into a legal USD prim identifier:
+    /// non-identifier characters become `_`, a leading digit is prefixed, and
+    /// an empty result falls back to the generic `Material`.
+    public static func sanitizedPrimName(_ raw: String) -> String {
+        var out = raw.map { ch -> Character in
+            (ch.isLetter && ch.isASCII) || (ch.isNumber && ch.isASCII) || ch == "_" ? ch : "_"
+        }
+        if let first = out.first, first.isNumber { out.insert("_", at: 0) }
+        let name = String(out)
+        return name.isEmpty ? "Material" : name
     }
 
     /// `base`, or `base_1`, `base_2`… — the first name not already taken.

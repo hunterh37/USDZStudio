@@ -187,7 +187,7 @@ set of failing gates. Gates, in order:
 1. **Schema** — `ValidationEngine` / `ComplianceChecker` report zero `.error` diagnostics.
 2. **Mesh integrity** — `MeshInvariants` pass (manifold, consistent normals, no degenerate faces).
 3. **Scale sanity** — `MetersPerUnitRule` + bbox within plausible real-world range.
-4. **Spatial** — no unintended interpenetration; declared relationships hold (bbox/raycast).
+4. **Spatial** — no *unintended* interpenetration; declared relationships hold (bbox/raycast). When a sculpt spec is active, overlaps between components whose spec `attachment` declares rigid contact (`root`/`weld`/`socket`/`pin`) are expected by design and reported as `declaredContacts` (informational), not failures — the gate hunts free-floating/undeclared collisions (#161).
 5. **Visual** — multi-view render matches intent (agent-judged).
 
 The agent iterates mutate → validate → score until gates pass or a step budget is hit.

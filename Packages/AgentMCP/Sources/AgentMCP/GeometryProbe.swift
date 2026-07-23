@@ -133,12 +133,26 @@ public enum GeometryProbe {
         from flat: FlatMesh,
         subdivisionScheme: String = "none"
     ) -> [Attribute] {
-        [
+        var attributes = [
             Attribute(name: "points", value: .float3Array(flat.points.flatMap { [$0.x, $0.y, $0.z] })),
             Attribute(name: "faceVertexCounts", value: .intArray(flat.faceVertexCounts)),
             Attribute(name: "faceVertexIndices", value: .intArray(flat.faceVertexIndices)),
             Attribute(name: "subdivisionScheme", value: .token(subdivisionScheme), isUniform: true),
         ]
+        // Author smooth per-vertex normals with the topology (issue #159): a
+        // mesh with none falls back to faceted shading in RealityKit/QuickLook
+        // and trips a `mesh.normals` info diagnostic on every prim — repeated
+        // back to the agent after every mutation on large stages. The math
+        // lives once in `MeshKit.VertexNormals`; an empty result means the
+        // topology can't be honestly interpreted, in which case authoring no
+        // normals is the truthful answer.
+        let normals = VertexNormals.smoothFlat(for: flat)
+        if !normals.isEmpty {
+            attributes.append(Attribute(
+                name: "normals", value: .float3Array(normals),
+                metadata: ["interpolation": "\"vertex\""]))
+        }
+        return attributes
     }
 
     // MARK: - Ray casting

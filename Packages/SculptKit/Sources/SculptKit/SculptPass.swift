@@ -67,7 +67,14 @@ public enum SculptPass: String, Codable, Sendable, CaseIterable, Comparable {
     /// and applies through every pass that follows. The geometry passes are
     /// still gated on shape via the subjective score (`enforcesScoreGate`); only
     /// the colour-dependent deterministic floor is deferred to where it is fair.
-    public var enforcesSimilarityFloor: Bool { self >= .material }
+    ///
+    /// `interaction` is also exempt (issue #157): it authors joints, sockets,
+    /// and colliders — *correctness* features verified deterministically by
+    /// their own invariants (`JointInvariants`, the action-ready gate) — and
+    /// changes nothing about the rendered appearance. Locking articulation
+    /// behind an appearance metric only guaranteed that objects whose look had
+    /// plateaued could never receive the joints their spec declares.
+    public var enforcesSimilarityFloor: Bool { self >= .material && self != .interaction }
 
     public static func < (lhs: SculptPass, rhs: SculptPass) -> Bool {
         lhs.index < rhs.index

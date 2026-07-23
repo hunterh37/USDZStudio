@@ -323,7 +323,12 @@ final class MCPActivityListener: ObservableObject {
             fileExists: { FileManager.default.fileExists(atPath: $0) })
         hostServer = AgentMCPServer.make(
             session: session,
-            configuration: AgentMCPServer.Configuration(renderer: renderer, eventSink: sink))
+            configuration: AgentMCPServer.Configuration(
+                renderer: renderer, eventSink: sink,
+                // The session shares the open document's stage, so agents (via
+                // the `capabilities` tool) know their edits are already visible
+                // in the app window (issue #162).
+                stageAttachment: .appHosted))
     }
 
     /// Fold a reference-image change into the panel model and the hand-off file.

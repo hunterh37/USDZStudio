@@ -143,7 +143,7 @@ public enum SculptTools {
     ) {
         registerProbe(on: server)
         registerAssess(on: server, store: store)
-        registerAuthor(on: server, store: store)
+        registerAuthor(on: server, session: session, store: store)
         registerValidate(on: server, store: store)
         registerBuild(on: server, session: session, store: store)
         registerReview(on: server, session: session, store: store)
@@ -197,17 +197,19 @@ public enum SculptTools {
     private static func registerAssess(on server: MCPServer, store: SculptStore) {
         server.register(MCPTool(
             name: "sculpt_assess", group: .sculpt,
-            description: "Pre-spec assessment of a reference image: classify (character/object/hybrid), score complexity, and set the acceptance policy (thresholds — including the measured-similarity floor — the strict-quality gate and review loop enforce). Deterministic from descriptive hints + image dimensions. Prefer 'imagePath' (decoded for true dimensions) or supply width/height.",
+            description: "Pre-spec assessment of a reference image: classify (character/object/hybrid), score complexity, and set the acceptance policy (thresholds — including the measured-similarity floor — the strict-quality gate and review loop enforce; the floor is calibrated down for references without an alpha cutout, whose silhouette must be inferred). Deterministic from descriptive hints + image dimensions/alpha. Prefer 'imagePath' (decoded for true dimensions + alpha) or supply width/height (and hasAlpha).",
             inputSchema: Schema.object([
                 "hints": Schema.array(of: Schema.string("descriptive tag"), "descriptive tags, e.g. 'wooden barrel', 'rusty', 'glossy'"),
-                "imagePath": Schema.string("path to the reference image — decoded for true dimensions (preferred)"),
+                "imagePath": Schema.string("path to the reference image — decoded for true dimensions + alpha (preferred)"),
                 "width": Schema.integer("reference image width in pixels (used when imagePath is absent)"),
                 "height": Schema.integer("reference image height in pixels (used when imagePath is absent)"),
+                "hasAlpha": Schema.boolean("whether the reference carries a transparency channel (used when imagePath is absent)"),
             ], required: ["hints"])
         ) { args in
             let hints = args["hints"].stringArrayValue ?? []
-            let (width, height, _) = try resolveImageDimensions(args)
-            let assessment = PreSpecAssessment.assess(hints: hints, width: width, height: height)
+            let (width, height, hasAlpha) = try resolveImageDimensions(args)
+            let assessment = PreSpecAssessment.assess(
+                hints: hints, width: width, height: height, hasAlpha: hasAlpha)
             await store.setAssessment(assessment)
             return assessmentJSON(assessment)
         })
@@ -215,11 +217,11 @@ public enum SculptTools {
 
     // MARK: - Author spec
 
-    private static func registerAuthor(on server: MCPServer, store: SculptStore) {
+    private static func registerAuthor(on server: MCPServer, session: EditSession, store: SculptStore) {
         server.register(MCPTool(
             name: "sculpt_author_spec", group: .sculpt,
             description: """
-                Author (or replace) the ObjectSculptSpec and reset the pass orchestrator to blockout. Pass the full spec as JSON under `spec`.
+                Author (or replace) the ObjectSculptSpec and reset the pass orchestrator to blockout. Pass the full spec as JSON under `spec`. When replacing a previous spec, its build is cleaned off the stage first (the old root prim plus any /Looks materials left orphaned) so the next sculpt_build_pass never collides with stale prims — pass clean:false to keep the old build (undoable either way).
 
                 Shape (SculptKit.ObjectSculptSpec): {
                   "name": String, "objectClass": "character"|"object"|"hybrid",
@@ -233,6 +235,7 @@ public enum SculptTools {
                 """,
             inputSchema: Schema.object([
                 "spec": .object(["type": "object", "description": "the full ObjectSculptSpec JSON (see tool description for the schema + a minimal example)"]),
+                "clean": Schema.boolean("remove the previous spec's build (old root prim + orphaned /Looks materials) before resetting to blockout (default true)"),
             ], required: ["spec"])
         ) { args in
             guard case .object = args["spec"] else {
@@ -244,6 +247,14 @@ public enum SculptTools {
                 spec = try ObjectSculptSpec.decoded(from: data)
             } catch {
                 throw ToolError.invalidParams("could not decode spec: \(decodeHint(error))")
+            }
+            // Rebuild hygiene (issue #158): replacing a spec resets the
+            // orchestrator to blockout, but the *previous* build would stay on
+            // the stage — colliding with the next build pass and stranding its
+            // /Looks materials as orphans. Clean it up front (all undoable).
+            var cleaned: [String] = []
+            if args["clean"].boolValue ?? true, let previous = await store.spec {
+                cleaned = try cleanPreviousBuild(of: previous, session: session)
             }
             await store.setSpec(spec)
             // Surface the attachment requirement now (issue #113): a geometry
@@ -262,9 +273,49 @@ public enum SculptTools {
                 "materialCount": .number(Double(spec.materials.count)),
                 "detailItems": .number(Double(spec.detailInventory.items.count)),
                 "currentPass": .string(SculptPass.blockout.rawValue),
+                "cleaned": .array(cleaned.map { .string($0) }),
                 "warnings": .array(warnings),
             ])
         })
+    }
+
+    /// Remove the previous spec's build from the stage: its root prim (when
+    /// present) and any /Looks material left with no remaining binder. Each
+    /// removal funnels through the edit stack, so the whole cleanup is
+    /// undoable. Returns the removed prim paths (issue #158).
+    static func cleanPreviousBuild(of previous: ObjectSculptSpec, session: EditSession) throws -> [String] {
+        var removed: [String] = []
+        if let rootPath = try? resolvePath("/" + previous.root.name, session: session) {
+            let command = try MutateTools.removeCommand(for: rootPath, session: session)
+            _ = try session.mutate(command, removed: [rootPath])
+            removed.append(rootPath.description)
+        }
+        removed.append(contentsOf: try removeOrphanedLooksMaterials(session: session))
+        return removed
+    }
+
+    /// Remove every child of /Looks that no prim on the stage still binds.
+    /// Run after the old sculpt root is gone, so materials only its geometry
+    /// referenced count as orphans.
+    static func removeOrphanedLooksMaterials(session: EditSession) throws -> [String] {
+        guard let looksPath = PrimPath("/Looks"),
+              let looks = session.stage.prim(at: looksPath) else { return [] }
+        // Every material path some prim still binds (material:binding targets).
+        var bound: Set<PrimPath> = []
+        for root in session.stage.rootPrims {
+            for prim in root.flattened() {
+                for rel in prim.relationships where rel.name == MaterialBinding.key {
+                    bound.formUnion(rel.targets)
+                }
+            }
+        }
+        var removed: [String] = []
+        for child in looks.children where !bound.contains(child.path) {
+            let command = try MutateTools.removeCommand(for: child.path, session: session)
+            _ = try session.mutate(command, removed: [child.path])
+            removed.append(child.path.description)
+        }
+        return removed
     }
 
     /// Turn a raw `DecodingError` into an actionable message that names the
@@ -364,13 +415,20 @@ public enum SculptTools {
                     authored.append(path)
                 }
             }
-            return .object([
+            var result: [String: JSONValue] = [
                 "pass": .string(pass.rawValue),
                 "stepCount": .number(Double(steps.count)),
                 "authored": .array(authored.map { .string($0) }),
                 "reviewOnly": .bool(steps.isEmpty),
                 "warnings": .array(warnings),
-            ])
+            ]
+            if pass == .blockout {
+                // Say what the render will show (issue #160): agents otherwise
+                // read early-pass placement state as "transforms are broken".
+                result["note"] = .string(
+                    "blockout authors coarse geometry placed at each component's spec transform; the structural pass re-affirms placement and expands repetition systems")
+            }
+            return .object(result)
         })
     }
 
@@ -605,7 +663,19 @@ public enum SculptTools {
 
         case .createMaterial(let targetPath, let material):
             let primPath = try resolvePath(targetPath, session: session)
-            guard let command = CreateMaterialCommand.make(bindingTo: primPath, baseColor: material.baseColor, in: session.stage) else {
+            // Re-run hygiene (issue #158): if this spec material already exists
+            // under /Looks (a material-pass replay after a refine loop), bind the
+            // existing prim instead of minting `<id>_1`, `<id>_2`… garbage.
+            let existingName = CreateMaterialCommand.sanitizedPrimName(material.id)
+            if let existing = try? resolvePath("/Looks/\(existingName)", session: session),
+               let bind = BindMaterialCommand.make(
+                   materialPath: existing, bindingTo: primPath, in: session.stage) {
+                _ = try session.mutate(bind)
+                return existing.description
+            }
+            guard let command = CreateMaterialCommand.make(
+                bindingTo: primPath, baseColor: material.baseColor,
+                name: material.id, in: session.stage) else {
                 // coverage:disable — make() returns nil only for a missing target, which resolvePath already rejects.
                 throw ToolError.invalidParams("cannot bind material to \(targetPath)")
                 // coverage:enable
@@ -875,6 +945,10 @@ public enum SculptTools {
                 "minDetailItems": .number(Double(a.policy.minDetailItems)),
                 "minComponents": .number(Double(a.policy.minComponents)),
                 "requireMaterials": .bool(a.policy.requireMaterials),
+                // Surface the enforced floor up front (issue #157) — agents
+                // previously discovered it only via a failed review.
+                "similarityFloor": .number(a.policy.similarityFloor),
+                "requireCompliance": .bool(a.policy.requireCompliance),
             ]),
             "notes": .array(a.notes.map { .string($0) }),
         ])

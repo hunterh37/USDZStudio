@@ -77,7 +77,8 @@ public final class MCPServer: @unchecked Sendable {
     private var tools: [MCPTool] = []
     private var resources: [MCPResource] = []
     private var prompts: [MCPPrompt] = []
-    private let enabledGroups: Set<ToolGroup>
+    /// The tool groups this server exposes (read by the `capabilities` tool).
+    public let enabledGroups: Set<ToolGroup>
 
     /// Optional live-activity observer (docs/AGENT_MCP_PLAN.md). Fired on every
     /// tool call; nil in headless/test contexts with no observer attached.
