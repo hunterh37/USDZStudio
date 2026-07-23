@@ -21,6 +21,8 @@ enum FuzzCorpus {
         0xC0FFEE + 44,     // SetVertexPositions jitter collapsing a face (live vertex edit)
         0xC0FFEE + 51,     // mirror whole-mesh doubling on a jittered grid (Mirror bring-up)
         0xC0FFEE + 58,     // solidify shelling a jittered grid; closed input refused (Solidify bring-up)
+        0xC0FFEE + 61,     // QEM decimation of a jittered cube/grid at a random ratio (Decimate bring-up)
+        0xC0FFEE + 66,     // QEM decimation with boundary preservation off on a jittered grid (Decimate bring-up)
     ]
 
     /// `MESHKIT_FUZZ_ITERATIONS` (CI knob) > default 40.

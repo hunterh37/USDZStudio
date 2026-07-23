@@ -310,6 +310,30 @@ struct BevelToolTests {
         #expect(doc.meshEdit!.session.mesh.faceCount > before)  // inner shell + walls
     }
 
+    /// #127: whole-mesh QEM decimation. On a single boundary-pinned quad the
+    /// op triangulates (1 quad → 2 tris) and collapses nothing further.
+    @Test func decimateAppliesWholeMesh() {
+        let (doc, path) = makeDocument()
+        doc.enterMeshEditMode(at: path)
+        doc.meshEdit?.tool = .decimate
+        doc.meshEdit?.decimateRatio = 0.5
+        doc.applyActiveMeshTool()
+        #expect(doc.meshEdit?.lastDiagnostic == nil)
+        let mesh = doc.meshEdit!.session.mesh
+        #expect(mesh.faceLoops.values.allSatisfy { $0.count == 3 })
+        #expect(mesh.faceCount == 2)
+    }
+
+    @Test func decimateRefusalIsLoud() {
+        let (doc, path) = makeDocument()
+        doc.enterMeshEditMode(at: path)
+        doc.meshEdit?.tool = .decimate
+        doc.meshEdit?.decimateRatio = 0        // out of (0, 1] → loud refusal
+        doc.applyActiveMeshTool()
+        #expect(doc.meshEdit?.lastDiagnostic != nil)
+        #expect(doc.meshEdit?.session.isDirty == false)
+    }
+
     @Test func meshToolMetadataIsComplete() {
         for tool in MeshTool.allCases {
             #expect(!tool.label.isEmpty)
@@ -317,8 +341,10 @@ struct BevelToolTests {
         }
         #expect(MeshTool.mirror.hotkey == "r")
         #expect(MeshTool.solidify.hotkey == "s")
+        #expect(MeshTool.decimate.hotkey == "d")
         #expect(MeshTool.mirror.isWholeMesh)
         #expect(MeshTool.solidify.isWholeMesh)
+        #expect(MeshTool.decimate.isWholeMesh)
         #expect(!MeshTool.extrude.isWholeMesh)
     }
 }
