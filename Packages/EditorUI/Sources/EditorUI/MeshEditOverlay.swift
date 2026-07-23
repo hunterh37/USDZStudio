@@ -367,6 +367,11 @@ public struct MeshEditOverlay: View {
                     paramField("Thickness", value: Binding(
                         get: { document.meshEdit?.solidifyThickness ?? 0.05 },
                         set: { document.meshEdit?.solidifyThickness = $0 }))
+                case .decimate:
+                    // Keep-ratio in (0, 1]: 0.5 halves the triangle budget (#127).
+                    paramField("Keep ratio", value: Binding(
+                        get: { document.meshEdit?.decimateRatio ?? 0.5 },
+                        set: { document.meshEdit?.decimateRatio = $0 }))
                 case .delete, .fill:
                     Text("No parameters")
                         .font(.system(size: TypeScale.caption))
