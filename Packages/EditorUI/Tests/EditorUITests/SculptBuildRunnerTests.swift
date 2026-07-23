@@ -14,6 +14,47 @@ struct SculptBuildRunnerTests {
 
     private func house() -> ObjectSculptSpec { SculptDemos.lowPolyHouse() }
 
+    /// #147: a material carrying a procedural facade bakes albedo + emissive
+    /// PNGs and binds them onto the surface shader in the live-preview runner.
+    @Test func createMaterialBakesFacade() {
+        let doc = EditorDocument(snapshot: StageSnapshot(rootPrims: []))
+        _ = SculptBuildRunner.apply(step: .createGroup(name: "Tower", parentPath: nil), to: doc)
+        _ = SculptBuildRunner.apply(
+            step: .createMesh(name: "Body", parentPath: "/Tower", primitive: .box,
+                              width: 1, height: 1, depth: 1, radius: 0.5, segments: 8), to: doc)
+        let facade = FacadeTexture(rows: 4, columns: 4, litFraction: 0.5, resolution: 32)
+        let path = SculptBuildRunner.apply(
+            step: .createMaterial(targetPath: "/Tower/Body",
+                                  material: MaterialSpec(id: "facade_mat", baseColor: [0.1, 0.1, 0.12],
+                                                         facade: facade)), to: doc)
+        // EditorUI's CreateMaterialCommand names the material "Material" (it does
+        // not carry the spec id like the MCP path); the baked file stem still
+        // derives from the spec id.
+        #expect(path == "/Looks/Material")
+
+        let surface = doc.snapshot.prim(at: PrimPath("/Looks/Material/Surface")!)
+        func mapPath(_ name: String) -> String? {
+            if case let .string(s)? = surface?.attribute(named: name)?.value { return s }
+            return nil
+        }
+        #expect(mapPath("inputs:albedoMap")?.hasSuffix("facade_mat_albedo.png") == true)
+        #expect(mapPath("inputs:emissiveMap")?.hasSuffix("facade_mat_emissive.png") == true)
+    }
+
+    /// A material without a facade is authored unchanged (no baked maps).
+    @Test func createMaterialWithoutFacadeAuthorsNoMaps() {
+        let doc = EditorDocument(snapshot: StageSnapshot(rootPrims: []))
+        _ = SculptBuildRunner.apply(step: .createGroup(name: "G", parentPath: nil), to: doc)
+        _ = SculptBuildRunner.apply(
+            step: .createMesh(name: "M", parentPath: "/G", primitive: .box,
+                              width: 1, height: 1, depth: 1, radius: 0.5, segments: 8), to: doc)
+        _ = SculptBuildRunner.apply(
+            step: .createMaterial(targetPath: "/G/M",
+                                  material: MaterialSpec(id: "plain", baseColor: [0.2, 0.2, 0.2])), to: doc)
+        let surface = doc.snapshot.prim(at: PrimPath("/Looks/Material/Surface")!)
+        #expect(surface?.attribute(named: "inputs:albedoMap") == nil)
+    }
+
     @Test func blockoutAuthorsGeometryTree() {
         let doc = EditorDocument(snapshot: StageSnapshot(rootPrims: []))
         let authored = SculptBuildRunner.apply(pass: .blockout, of: house(), to: doc)

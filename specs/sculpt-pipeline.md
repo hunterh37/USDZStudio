@@ -41,6 +41,16 @@ The USD-native analog of img2threejs's spec (`ObjectSculptSpec.swift`):
   duplicates, and `sculpt_author_spec` (default `clean: true`) removes the
   previous spec's root prim and any orphaned `/Looks` materials before a
   rebuild — all through the undoable edit stack.
+  A material may also carry a procedural **`facade: FacadeTexture`** (#147): a
+  parametric window grid (rows, columns, `litFraction`, wall/window/lit colours,
+  seed, resolution) that the material pass **bakes** into albedo + emissive PNGs
+  and binds, giving a plain building box lit-window detail for near-zero geometry
+  cost. Generation is pure `SculptKit.FacadeTextureGenerator` (RGBA pixel
+  buffers, no codecs — SculptKit stays decode-free); the AgentMCP/EditorUI runner
+  writes the PNGs (beside the stage in `textures/`, else a temp dir) and fills any
+  empty `albedoMap`/`emissiveMap` — an explicit map on the spec always wins. The
+  validator schema-checks facades (rows/columns ≥ 1, `litFraction` in 0…1, finite
+  3-component colours; out-of-range resolution warns and clamps).
 - `surfaceProjection: SurfaceProjection?` — optional projected-texture /
   de-light descriptor (a `CameraPose` + target UV set + target component +
   `delight` flag) realized by the surface pass. Decode-defaults to nil.

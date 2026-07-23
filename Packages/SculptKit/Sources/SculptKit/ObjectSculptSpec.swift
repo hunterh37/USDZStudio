@@ -114,12 +114,16 @@ public struct MaterialSpec: Codable, Sendable, Equatable, Identifiable {
     public var emissiveMap: String?
     /// Strength applied to the normal map (>= 0; 1 = full strength).
     public var normalScale: Double?
+    /// Optional procedural window-grid facade (#147). When present the surface
+    /// pass bakes albedo + emissive maps from it and binds them, so a plain
+    /// building box gains lit-window detail for near-zero geometry cost.
+    public var facade: FacadeTexture?
 
     public init(id: String, baseColor: [Double], roughness: Double = 0.5,
                 metallic: Double = 0, emissive: [Double]? = nil,
                 albedoMap: String? = nil, normalMap: String? = nil,
                 roughnessMap: String? = nil, emissiveMap: String? = nil,
-                normalScale: Double? = nil) {
+                normalScale: Double? = nil, facade: FacadeTexture? = nil) {
         self.id = id
         self.baseColor = baseColor
         self.roughness = roughness
@@ -130,13 +134,14 @@ public struct MaterialSpec: Codable, Sendable, Equatable, Identifiable {
         self.roughnessMap = roughnessMap
         self.emissiveMap = emissiveMap
         self.normalScale = normalScale
+        self.facade = facade
     }
 
     // Custom decoding so specs authored before texture channels existed still
     // decode (every map field and normalScale decode-default to nil).
     private enum CodingKeys: String, CodingKey {
         case id, baseColor, roughness, metallic, emissive
-        case albedoMap, normalMap, roughnessMap, emissiveMap, normalScale
+        case albedoMap, normalMap, roughnessMap, emissiveMap, normalScale, facade
     }
 
     public init(from decoder: Decoder) throws {
@@ -151,12 +156,16 @@ public struct MaterialSpec: Codable, Sendable, Equatable, Identifiable {
         roughnessMap = try c.decodeIfPresent(String.self, forKey: .roughnessMap)
         emissiveMap = try c.decodeIfPresent(String.self, forKey: .emissiveMap)
         normalScale = try c.decodeIfPresent(Double.self, forKey: .normalScale)
+        facade = try c.decodeIfPresent(FacadeTexture.self, forKey: .facade)
     }
 
     /// True when the material carries at least one texture map.
     public var hasTextures: Bool {
         albedoMap != nil || normalMap != nil || roughnessMap != nil || emissiveMap != nil
     }
+
+    /// True when the material carries a procedural facade to bake.
+    public var hasFacade: Bool { facade != nil }
 }
 
 /// A camera pose for a projected-texture bake: eye position, the point it looks
