@@ -34,7 +34,7 @@ struct ConversionContext {
 ### Standard stage sequence (glTF preset)
 
 1. `parse` — importer → IntermediateScene
-2. `decode-compressed` — Draco/meshopt decode, image decompression (KTX2/Basis → PNG)
+2. `decode-compressed` — Draco/meshopt geometry decode + KTX2/Basis image transcode (→ RGBA8 → PNG). Because the compressed bytes are intrinsic to glTF parsing (a Draco primitive carries no plain accessors; a meshopt buffer view is not readable until expanded), decode is performed *inside* the native `GLTFImporter` through injected codec seams (`GeometryDecompressor`, `BufferViewDecompressor`, `TextureTranscoder`) rather than as a separate post-parse `ConversionStage`. The seams keep the orchestration 100%-unit-testable against fakes; the real native codec bindings (libdraco, meshoptimizer, libktx/Basis) are the single coverage-excluded surface, exactly like the capture/`usdrecord` seams. Decode is keyed off `extensionsUsed`/`extensionsRequired`: a *required* extension we cannot honor fails loudly (`requiredExtensionUnsupported`), and every decode/failure emits a diagnostic — never a silent drop. Re-compression on *export* (KTX2/meshopt out) is a separate advanced-profile concern (Phase 7).
 3. `sanitize-names` — USD-legal prim names, dedupe, preserve original in metadata
 4. `weld-and-index` — optional vertex welding, triangulation of non-tri prims
 5. `materials` — glTF PBR → UsdPreviewSurface mapping (see table below)

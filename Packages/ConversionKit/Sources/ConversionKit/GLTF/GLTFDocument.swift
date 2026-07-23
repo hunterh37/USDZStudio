@@ -36,6 +36,20 @@ struct GLTFDocument: Decodable {
         var indices: Int?
         var material: Int?
         var mode: Int?  // default 4 = TRIANGLES
+        var extensions: Extensions?
+
+        /// Per-primitive extension payloads the importer decodes.
+        struct Extensions: Decodable {
+            var KHR_draco_mesh_compression: DracoPrimitive?
+        }
+
+        /// `KHR_draco_mesh_compression`: geometry lives in `bufferView`, keyed
+        /// by Draco attribute id rather than glTF accessor. The referenced
+        /// accessors carry only type/count hints (spec: decoded data overrides).
+        struct DracoPrimitive: Decodable {
+            var bufferView: Int
+            var attributes: [String: Int]
+        }
     }
 
     struct Buffer: Decodable {
@@ -48,6 +62,25 @@ struct GLTFDocument: Decodable {
         var byteOffset: Int?
         var byteLength: Int
         var byteStride: Int?
+        var extensions: Extensions?
+
+        /// Per-bufferView extension payloads.
+        struct Extensions: Decodable {
+            var EXT_meshopt_compression: MeshoptCompression?
+        }
+
+        /// `EXT_meshopt_compression`: the *view's* bytes are produced by decoding
+        /// this compressed stream (its own `buffer`/`byteOffset`/`byteLength`),
+        /// not by slicing the plain buffer. `mode`/`filter` default per spec.
+        struct MeshoptCompression: Decodable {
+            var buffer: Int
+            var byteOffset: Int?
+            var byteLength: Int
+            var byteStride: Int
+            var count: Int
+            var mode: String            // ATTRIBUTES | TRIANGLES | INDICES
+            var filter: String?         // NONE (default) | OCTAHEDRAL | QUATERNION | EXPONENTIAL
+        }
     }
 
     struct Accessor: Decodable {
@@ -67,6 +100,18 @@ struct GLTFDocument: Decodable {
 
     struct Texture: Decodable {
         var source: Int?
+        var extensions: Extensions?
+
+        /// Per-texture extension payloads.
+        struct Extensions: Decodable {
+            var KHR_texture_basisu: Basisu?
+        }
+
+        /// `KHR_texture_basisu`: `source` points at a KTX2 image that supersedes
+        /// the fallback `texture.source` when the transcoder is available.
+        struct Basisu: Decodable {
+            var source: Int
+        }
     }
 
     struct TextureInfo: Decodable {

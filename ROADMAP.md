@@ -131,7 +131,7 @@ With the golden-image, round-trip, corpus, and XCUITest harnesses now built by e
 ## Phase 2 — Conversion (v0.2)
 
 - [x] IntermediateScene IR + `AssetImporter` protocol
-- [ ] Native GLB/glTF importer — PBR ✓, KHR subset ✓, skinning + animations ✓ (UsdSkel); Draco decode still TODO
+- [ ] Native GLB/glTF importer — PBR ✓, KHR subset ✓, skinning + animations ✓ (UsdSkel); compression-extension **decode orchestration ✓** (`decode-compressed`: Draco geometry, `EXT_meshopt_compression` buffer views, `KHR_texture_basisu` → PNG, all behind injected codec seams with 100%-covered routing/gating/diagnostics — see specs/conversion-pipeline.md §decode-compressed). Remaining: link the native codec bindings (libdraco/meshoptimizer/libktx via `fetch-*.sh`) behind the shipped seams, then commit compressed golden fixtures + decoded-twin assertions.
 - [x] OBJ/STL/PLY/DAE via ModelIO
 - [x] Texture pipeline (resize, re-encode, channel handling)
 - [x] Conversion sheet UI with per-stage options + live log; presets (ecommerce, quicklook-strict, lossless) — preset model + CLI `--preset` ✓; sheet UI + live log ✓
