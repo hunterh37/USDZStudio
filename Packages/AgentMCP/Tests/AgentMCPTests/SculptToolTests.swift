@@ -229,7 +229,7 @@ import USDCore
             step: .createMaterial(targetPath: "/G/M",
                                   material: MaterialSpec(id: "m", baseColor: [0.2, 0.2, 0.2])),
             session: session)
-        #expect(mat!.contains("Material"))
+        #expect(mat == "/Looks/m")
         let xf = try await SculptTools.execute(
             step: .setTransform(path: "/G/M", translation: [1, 2, 3],
                                 rotationEulerDegrees: [0, 0, 0], scale: [1, 1, 1]),
@@ -349,7 +349,7 @@ import USDCore
         #expect(material["stepCount"].doubleValue == 1)
 
         // Every extra channel landed on the surface shader.
-        let surface = session.stage.prim(at: PrimPath("/Looks/Material/Surface")!)
+        let surface = session.stage.prim(at: PrimPath("/Looks/pbr/Surface")!)
         #expect(surface?.attribute(named: "inputs:roughness") != nil)
         #expect(surface?.attribute(named: "inputs:metallic") != nil)
         #expect(surface?.attribute(named: "inputs:emissiveColor") != nil)

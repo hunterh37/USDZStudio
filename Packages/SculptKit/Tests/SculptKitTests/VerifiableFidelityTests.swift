@@ -77,11 +77,25 @@ import Testing
     }
 
     @Test func assessmentSetsFloorAndCompliance() {
-        let object = PreSpecAssessment.assess(hints: ["barrel"], width: 512, height: 512)
+        // With an alpha cutout the metric sees the true silhouette — full floors.
+        let object = PreSpecAssessment.assess(hints: ["barrel"], width: 512, height: 512, hasAlpha: true)
         #expect(object.policy.similarityFloor == 0.5)
         #expect(object.policy.requireCompliance == true)
-        let character = PreSpecAssessment.assess(hints: ["character", "hero"], width: 512, height: 512)
+        let character = PreSpecAssessment.assess(hints: ["character", "hero"], width: 512, height: 512, hasAlpha: true)
         #expect(character.policy.similarityFloor == 0.55)
+    }
+
+    @Test func assessmentCalibratesFloorForFlattenedReferences() {
+        // Unknown alpha on a non-scene reference keeps the base floor; an
+        // explicitly flattened reference (hasAlpha: false) relaxes it to the
+        // measured achievable range (issues #157/#145).
+        let unknown = PreSpecAssessment.assess(hints: ["barrel"], width: 512, height: 512)
+        #expect(unknown.policy.similarityFloor == 0.5)
+        let flattened = PreSpecAssessment.assess(hints: ["barrel"], width: 512, height: 512, hasAlpha: false)
+        #expect(flattened.policy.similarityFloor == 0.3)
+        let character = PreSpecAssessment.assess(hints: ["character", "hero"], width: 512, height: 512, hasAlpha: false)
+        #expect(character.policy.similarityFloor == 0.3)
+        #expect(flattened.notes.contains { $0.contains("similarityFloor") })
     }
 
     // MARK: - Form-refinement build steps

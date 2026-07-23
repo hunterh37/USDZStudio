@@ -17,6 +17,14 @@ public enum AgentMCPServer {
         public var workDirectory: URL
         /// Optional live-activity observer for the app's MCP activity panel.
         public var eventSink: (any MCPEventSink)?
+        /// Whether this session's stage is visible anywhere (app-hosted) or
+        /// headless (the CLI server) — surfaced via `capabilities` and used by
+        /// `open_in_app` so agents can reveal results to the user (issue #162).
+        public var stageAttachment: AppTools.StageAttachment
+        /// How `open_in_app` reveals a saved snapshot; nil uses `/usr/bin/open`.
+        /// Injectable for tests and for the app host (which brings its own
+        /// document to the front instead of shelling out).
+        public var appOpener: AppTools.Opener?
 
         public init(
             enabledGroups: Set<ToolGroup> = Set(ToolGroup.allCases),
@@ -26,7 +34,9 @@ public enum AgentMCPServer {
             libraryDirectories: [URL] = [],
             workDirectory: URL = FileManager.default.temporaryDirectory
                 .appendingPathComponent("openusdz-agent", isDirectory: true),
-            eventSink: (any MCPEventSink)? = nil
+            eventSink: (any MCPEventSink)? = nil,
+            stageAttachment: AppTools.StageAttachment = .headless,
+            appOpener: AppTools.Opener? = nil
         ) {
             self.enabledGroups = enabledGroups
             self.renderer = renderer
@@ -35,6 +45,8 @@ public enum AgentMCPServer {
             self.libraryDirectories = libraryDirectories
             self.workDirectory = workDirectory
             self.eventSink = eventSink
+            self.stageAttachment = stageAttachment
+            self.appOpener = appOpener
         }
     }
 
@@ -44,10 +56,14 @@ public enum AgentMCPServer {
             enabledGroups: configuration.enabledGroups,
             eventSink: configuration.eventSink)
 
+        // The sculpt store is shared with the verify tools so the `score`
+        // spatial gate can honor the active spec's declared attachments (#161).
+        let sculptStore = SculptStore(workDirectory: configuration.workDirectory)
+
         ReadTools.register(on: server, session: session)
         MutateTools.register(on: server, session: session)
         JointTools.register(on: server, session: session)
-        VerifyTools.register(on: server, session: session)
+        VerifyTools.register(on: server, session: session, sculptStore: sculptStore)
         RenderTools.register(
             on: server, session: session,
             renderer: configuration.renderer,
@@ -65,12 +81,17 @@ public enum AgentMCPServer {
             workDirectory: configuration.workDirectory)
         SculptTools.register(
             on: server, session: session,
-            store: SculptStore(workDirectory: configuration.workDirectory),
+            store: sculptStore,
             workDirectory: configuration.workDirectory)
         RigTools.register(
             on: server, session: session,
             store: RigStore(workDirectory: configuration.workDirectory),
             workDirectory: configuration.workDirectory)
+        AppTools.register(
+            on: server, session: session,
+            workDirectory: configuration.workDirectory,
+            attachment: configuration.stageAttachment,
+            opener: configuration.appOpener ?? AppTools.systemOpener)
 
         // §3.1 — the same payloads as read tools, exposed as MCP resources so
         // clients that support resources get state readback without burning

@@ -33,7 +33,14 @@ The USD-native analog of img2threejs's spec (`ObjectSculptSpec.swift`):
   `normalMap`, `roughnessMap`, `emissiveMap` asset-path strings and a
   `normalScale`). Every map field is optional and decode-defaulted so specs
   authored before texture support still load; the material pass authors the
-  declared maps as extra shader inputs, not just a flat colour.
+  declared maps as extra shader inputs, not just a flat colour. The pass mints
+  **one shared `/Looks/<materialID>` prim per spec material** (named after the
+  sanitized spec id — `red_paint`, not `Material_7`); every other component
+  using that id, and every repetition copy, *binds* the shared prim (#158/#140).
+  A material-pass replay re-binds the existing prim instead of minting
+  duplicates, and `sculpt_author_spec` (default `clean: true`) removes the
+  previous spec's root prim and any orphaned `/Looks` materials before a
+  rebuild — all through the undoable edit stack.
 - `surfaceProjection: SurfaceProjection?` — optional projected-texture /
   de-light descriptor (a `CameraPose` + target UV set + target component +
   `delight` flag) realized by the surface pass. Decode-defaults to nil.
@@ -147,7 +154,21 @@ processing and stays a pure leaf.
      against a full-colour reference photo regardless of geometric fidelity.
      Deferring the colour-dependent floor to the first textured pass keeps it a
      meaningful, non-deadlocking gate. The floor is the **deterministic fidelity
-     gate** the subjective score cannot bypass (see below).
+     gate** the subjective score cannot bypass (see below). Two calibrations
+     (issues #157/#145/#161-adjacent) keep the gate reachable without weakening
+     it: **(a)** the `interaction` pass is exempt — it authors joints, sockets,
+     and colliders, which change nothing visual and are verified by their own
+     deterministic invariants (`JointInvariants`, the action-ready gate), so
+     articulation is never locked behind an appearance plateau; **(b)** the floor
+     value is calibrated to the reference type at assess time
+     (`PreSpecAssessment.similarityFloor`): with a clean cutout the original
+     floors hold (0.5 object / 0.55 character); a photographic / cluttered /
+     multi-subject reference (scene keywords, or an explicitly absent alpha
+     channel — the silhouette must be inferred against an un-matted background)
+     relaxes the floor to 0.3, matching the measured achievable range from the
+     frozen baselines. `sculpt_assess` decodes the reference's true alpha from
+     `imagePath` and surfaces `policy.similarityFloor` (plus a calibration
+     note) so agents see the enforced floor up front.
 3a. **Similarity floor** (`ImageSimilarity` + `RasterLoader`): `sculpt_comparison_sheet`
    decodes the reference and render PNGs and computes a deterministic fidelity
    score on a fixed 64×64 resample, so it is stable across machines and

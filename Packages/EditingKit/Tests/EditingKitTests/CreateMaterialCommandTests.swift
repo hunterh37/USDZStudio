@@ -67,6 +67,30 @@ struct CreateMaterialCommandTests {
                 == .vector([1, 0, 0]))
     }
 
+    @Test func honoursPreferredName() throws {
+        let s = stage([car()])
+        let cmd = try #require(
+            CreateMaterialCommand.make(bindingTo: carPath, name: "red_paint", in: s))
+        try cmd.execute(on: s)
+        #expect(cmd.materialPath.description == "/Looks/red_paint")
+        #expect(s.prim(at: cmd.materialPath) != nil)
+        // A second material with the same preferred name is uniqued, not clobbered.
+        let cmd2 = try #require(
+            CreateMaterialCommand.make(bindingTo: carPath, name: "red_paint", in: s))
+        #expect(cmd2.materialPath.description == "/Looks/red_paint_1")
+    }
+
+    @Test func sanitizesIllegalPreferredNames() throws {
+        #expect(CreateMaterialCommand.sanitizedPrimName("red_paint") == "red_paint")
+        #expect(CreateMaterialCommand.sanitizedPrimName("shiny chrome!") == "shiny_chrome_")
+        #expect(CreateMaterialCommand.sanitizedPrimName("42nd") == "_42nd")
+        #expect(CreateMaterialCommand.sanitizedPrimName("") == "Material")
+        let s = stage([car()])
+        let cmd = try #require(
+            CreateMaterialCommand.make(bindingTo: carPath, name: "1 bad name", in: s))
+        #expect(cmd.materialPath.description == "/Looks/_1_bad_name")
+    }
+
     // MARK: existing-scope branch
 
     @Test func reusesExistingLooksScopeAndUniquesName() throws {

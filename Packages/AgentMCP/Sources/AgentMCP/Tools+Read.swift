@@ -109,6 +109,9 @@ public enum ReadTools {
         ]
         if let box = GeometryProbe.worldBBox(of: prim.path, in: session.stage) {
             payload["bbox"] = box.asJSON
+            // Explicit space label (issue #160): a world bbox centred at the
+            // origin otherwise reads exactly like a local-space/placement bug.
+            payload["bboxSpace"] = .string("world")
         }
         if let binding = prim.relationships.first(where: { $0.name == "material:binding" }),
            let target = binding.targets.first {

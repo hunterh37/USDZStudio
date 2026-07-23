@@ -341,16 +341,27 @@ public enum BuildPlanner {
     static func materialSteps(_ spec: ObjectSculptSpec) -> [BuildStep] {
         var steps: [BuildStep] = []
         let byID = Dictionary(uniqueKeysWithValues: spec.materials.map { ($0.id, $0) })
+        // First component to use each spec material id — it mints the single
+        // shared /Looks/<materialID> prim; every later user *binds* to it.
+        // One material per spec id (named after it), not one per geometry leaf
+        // (issue #158): deduplication and meaningful names survive into the file.
+        var firstUser: [String: String] = [:]
         walk(spec.root, parent: nil) { node, parentPath in
             let selfPath = path(for: node.name, under: parentPath)
             if let materialID = node.materialID, let material = byID[materialID] {
-                steps.append(.createMaterial(targetPath: selfPath, material: material))
+                if let basePath = firstUser[materialID] {
+                    // The shared material already exists — bind, don't mint.
+                    steps.append(.bindMaterial(targetPath: selfPath, sourcePath: basePath))
+                } else {
+                    firstUser[materialID] = selfPath
+                    steps.append(.createMaterial(targetPath: selfPath, material: material))
+                }
                 // Repetition copies inherit the base's material by *binding* to
                 // the same material prim, not by minting one per copy — otherwise
                 // an N-copy grid produces N identical /Looks/Material_N (#140).
                 for copy in copies(for: node) {
                     let copyPath = path(for: copy.name, under: parentPath)
-                    steps.append(.bindMaterial(targetPath: copyPath, sourcePath: selfPath))
+                    steps.append(.bindMaterial(targetPath: copyPath, sourcePath: firstUser[materialID] ?? selfPath))
                 }
             }
             return selfPath

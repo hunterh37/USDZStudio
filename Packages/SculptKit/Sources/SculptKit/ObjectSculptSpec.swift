@@ -506,6 +506,26 @@ public struct ObjectSculptSpec: Codable, Sendable, Equatable {
         allNodes.filter { $0.children.isEmpty && $0.shape.authorsGeometry }
     }
 
+    /// Names of every buildable component — bases plus expanded repetition
+    /// copies — i.e. the prim names a build pass authors on the stage.
+    public var allComponentNames: Set<String> {
+        Set(allNodes.flatMap { BuildPlanner.geometryNames(for: $0) })
+    }
+
+    /// Names of components whose `attachment` declares an *intended* rigid
+    /// contact with the rest of the object (`root`/`weld`/`socket`/`pin`) —
+    /// parts that are expected to interpenetrate their neighbors by design
+    /// (a window seated into its shell, a hub inside a tire). Repetition
+    /// copies inherit their base's declaration. Consumed by the spatial score
+    /// gate so declared welds stop failing every plausible multi-part object
+    /// (issue #161).
+    public var declaredContactComponentNames: Set<String> {
+        let contact: Set<AttachmentKind> = [.root, .weld, .socket, .pin]
+        return Set(allNodes
+            .filter { node in node.attachment.map(contact.contains) ?? false }
+            .flatMap { BuildPlanner.geometryNames(for: $0) })
+    }
+
     /// Round-trip encode/decode helpers (spec is persisted as JSON between
     /// tool calls, mirroring img2threejs's on-disk spec).
     public func encoded() throws -> Data {

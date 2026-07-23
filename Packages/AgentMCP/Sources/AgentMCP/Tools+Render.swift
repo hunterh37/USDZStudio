@@ -260,6 +260,10 @@ public enum RenderTools {
             var payload: [String: JSONValue] = ["path": .string(path.description)]
             if let box = GeometryProbe.worldBBox(of: path, in: session.stage) {
                 payload["bbox"] = box.asJSON
+                // Label the space explicitly (issue #160): during early passes a
+                // world bbox centred at the origin is indistinguishable from a
+                // local-space report unless the space is stated.
+                payload["bboxSpace"] = .string("world")
             }
             var triangles = 0
             var materials = Set<String>()

@@ -19,14 +19,21 @@ public enum JointTools {
             (prismatic) about the RIGHT edge, not its centre, and keeps its closed placement \
             exactly. Author axis + a pivot point ON the hinge line, both in the part's parent \
             local space; closed is 0 and open is `openValue` (degrees for revolute, scene units \
-            for prismatic). Drive it afterwards with set_joint_state. Returns the pivot path.
+            for prismatic). SIGN CONVENTION: a positive revolute openValue rotates the part \
+            counter-clockwise about `axis` per the right-hand rule (thumb along axis, fingers \
+            curl in +rotation); a positive prismatic openValue slides along +axis. Rather than \
+            reasoning the sign out, pass `openTowards` — a point (same space as pivot) the part \
+            should move TOWARD when opening — and the sign is picked automatically (a hood \
+            opens toward a point above the car, a drawer toward a point in front of the chest). \
+            Drive it afterwards with set_joint_state. Returns the pivot path.
             """,
             inputSchema: Schema.object([
                 "target": Schema.primRef,
                 "kind": Schema.string("revolute (hinge, default) | prismatic (slider)"),
                 "axis": Schema.vec3,
                 "pivot": Schema.vec3,
-                "openValue": Schema.number("open angle in degrees (revolute) or distance in scene units (prismatic)"),
+                "openValue": Schema.number("open angle in degrees (revolute) or distance in scene units (prismatic); sign follows the right-hand rule about axis (auto-corrected when openTowards is given)"),
+                "openTowards": Schema.vec3,
                 "name": Schema.string("optional joint name (default '<part>Hinge' / '<part>Slide')"),
             ], required: ["target", "axis", "pivot", "openValue"])
         ) { args in
@@ -38,8 +45,26 @@ public enum JointTools {
             guard let pivot = args["pivot"].doubleArrayValue, pivot.count == 3 else {
                 throw ToolError.invalidParams("'pivot' must be [x, y, z]")
             }
-            guard let openValue = args["openValue"].doubleValue else {
+            guard var openValue = args["openValue"].doubleValue else {
                 throw ToolError.invalidParams("'openValue' is required")
+            }
+            var signNote: String?
+            if let towards = args["openTowards"].doubleArrayValue {
+                guard towards.count == 3 else {
+                    throw ToolError.invalidParams("'openTowards' must be [x, y, z]")
+                }
+                // Pick the openValue sign that moves the part toward the hint
+                // (issue #160): agents were guessing the right-hand-rule sign
+                // and swinging hoods down through bodies.
+                if let corrected = openSign(
+                    target: target, kind: kind, axis: axis, pivot: pivot,
+                    openValue: openValue, towards: towards, session: session
+                ) {
+                    if corrected != openValue {
+                        signNote = "openValue sign flipped to \(corrected) so the part moves toward openTowards"
+                    }
+                    openValue = corrected
+                }
             }
             let name = args["name"].stringValue
                 ?? "\(target.name)\(kind == .revolute ? "Hinge" : "Slide")"
@@ -51,13 +76,70 @@ public enum JointTools {
                     "cannot add a joint to \(target): the prim must be a non-root part and axis/pivot/openValue must be valid")
             }
             let outcome = try session.mutate(command, moved: [(target, command.movedPartPath)])
-            return outcome.asJSON(extra: [
+            var extra: [String: JSONValue] = [
                 "pivotPath": .string(command.pivotPath.description),
                 "partPath": .string(command.movedPartPath.description),
                 "states": .array(command.joint.states.map { .string($0.name) }),
-            ])
+            ]
+            if let signNote { extra["note"] = .string(signNote) }
+            return outcome.asJSON(extra: extra)
         })
 
+        registerSetJointState(on: server, session: session)
+    }
+
+    /// The openValue whose sign moves the part's centre toward `towards` when
+    /// the joint opens, or nil when the geometry gives no usable signal (no
+    /// bbox, degenerate axis, or both signs land equally close). All inputs
+    /// (`axis`, `pivot`, `towards`) are in the part's parent local space —
+    /// they are converted to world space alongside the part's world-space
+    /// bbox centre before comparing (issue #160).
+    static func openSign(
+        target: PrimPath, kind: JointKind, axis: [Double], pivot: [Double],
+        openValue: Double, towards: [Double], session: EditSession
+    ) -> Double? {
+        guard let box = GeometryProbe.worldBBox(of: target, in: session.stage) else { return nil }
+        let center = box.center
+        let parentMatrix = session.stage.worldMatrix(at: target.parent)
+        let pivotW = GeometryProbe.transform(point: pivot, by: parentMatrix)
+        let towardsW = GeometryProbe.transform(point: towards, by: parentMatrix)
+        // Direction vectors transform as (point + v) - point, dropping translation.
+        let axisTipW = GeometryProbe.transform(
+            point: zip(pivot, axis).map(+), by: parentMatrix)
+        let axisW = zip(axisTipW, pivotW).map(-)
+        let axisLength = axisW.map { $0 * $0 }.reduce(0, +).squareRoot()
+        guard axisLength > 1e-9 else { return nil }
+        let unit = axisW.map { $0 / axisLength }
+
+        func moved(by value: Double) -> [Double] {
+            switch kind {
+            case .prismatic:
+                return zip(center, unit.map { $0 * value }).map(+)
+            case .revolute:
+                // Rodrigues rotation of the centre about (pivotW, unit).
+                let radians = value * .pi / 180
+                let v = zip(center, pivotW).map(-)
+                let c = cos(radians), s = sin(radians)
+                let dot = zip(v, unit).map(*).reduce(0, +)
+                let cross = [unit[1] * v[2] - unit[2] * v[1],
+                             unit[2] * v[0] - unit[0] * v[2],
+                             unit[0] * v[1] - unit[1] * v[0]]
+                let rotated = (0..<3).map { i in
+                    v[i] * c + cross[i] * s + unit[i] * dot * (1 - c)
+                }
+                return zip(rotated, pivotW).map(+)
+            }
+        }
+        func distance(_ p: [Double]) -> Double {
+            zip(p, towardsW).map { ($0 - $1) * ($0 - $1) }.reduce(0, +).squareRoot()
+        }
+        let positive = distance(moved(by: abs(openValue)))
+        let negative = distance(moved(by: -abs(openValue)))
+        if abs(positive - negative) < 1e-9 { return nil }
+        return positive < negative ? abs(openValue) : -abs(openValue)
+    }
+
+    static func registerSetJointState(on server: MCPServer, session: EditSession) {
         server.register(MCPTool(
             name: "set_joint_state", group: .mutate,
             description: """

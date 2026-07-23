@@ -138,7 +138,8 @@ public struct PreSpecAssessment: Codable, Sendable, Equatable {
     ///   - hasAlpha: whether the reference carries a clean transparency channel,
     ///     if known. `false` (a photographic reference with no cutout) relaxes
     ///     the similarity floor, since the silhouette must be inferred from the
-    ///     background and the metric compares subject against sky/scene (#145).
+    ///     background and the metric compares subject against sky/scene
+    ///     (#145/#157).
     public static func assess(
         hints: [String], width: Int, height: Int, hasAlpha: Bool? = nil
     ) -> PreSpecAssessment {
@@ -173,8 +174,9 @@ public struct PreSpecAssessment: Codable, Sendable, Equatable {
             // matte) get a substantially lower floor: the silhouette metric is
             // comparing the render's subject against sky and background, so an
             // otherwise-faithful reconstruction measures far below the base floor
-            // and the gate becomes unreachable (#145). A missing alpha channel
-            // and scene keywords are the two signals; either relaxes the floor.
+            // and the gate becomes unreachable (#145/#157). A missing alpha
+            // channel and scene keywords are the two signals; either relaxes the
+            // floor.
             similarityFloor: similarityFloor(
                 isCharacter: isCharacter, isScene: isScene, hasAlpha: hasAlpha),
             // An assessed object must finish AR-valid — the completion gate runs
@@ -182,6 +184,9 @@ public struct PreSpecAssessment: Codable, Sendable, Equatable {
             requireCompliance: true)
 
         var notes = ["classified as \(objectClass.rawValue)", "complexity \(complexity)"]
+        // Surface the enforced floor up front (issue #157) — agents previously
+        // discovered it only via a failed review.
+        notes.append("similarityFloor \(policy.similarityFloor) — enforced from the material pass (interaction is exempt: joints are gated by their own invariants, not appearance)")
         if hints.isEmpty { notes.append("no hints supplied — assessment is conservative") }
         if isScene || hasAlpha == false {
             notes.append("photographic/cluttered reference — similarity floor relaxed to "
@@ -195,7 +200,7 @@ public struct PreSpecAssessment: Codable, Sendable, Equatable {
     }
 
     /// The measured-similarity floor, calibrated to what the silhouette metric
-    /// can actually reach for the reference type (#145).
+    /// can actually reach for the reference type (#145/#157).
     ///
     /// Base floors: character 0.55, object 0.5. A photographic/cluttered scene
     /// (scene keywords, or an explicitly absent alpha channel) drops the floor to

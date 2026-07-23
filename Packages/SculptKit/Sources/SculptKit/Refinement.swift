@@ -52,6 +52,14 @@ public enum MeshRefinement: Codable, Sendable, Equatable {
     }
     private enum Kind: String, Codable { case inset, subdivide, taper, bevel, extrude }
 
+    /// The wire names of every refinement kind this build of SculptKit can
+    /// decode and execute. Surfaced through the MCP `capabilities` tool so an
+    /// agent can detect the deployed op set up front instead of discovering a
+    /// missing op via an author-time decode failure (issues #155/#156).
+    public static var supportedKindNames: [String] {
+        [Kind.inset, .subdivide, .taper, .bevel, .extrude].map(\.rawValue)
+    }
+
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         switch try c.decode(Kind.self, forKey: .kind) {
