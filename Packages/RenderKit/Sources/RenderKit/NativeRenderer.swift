@@ -24,6 +24,37 @@ public enum NativeRendererSelection {
     }
 }
 
+/// Which backend an MCP host uses for `render_views`. `.viewport` is the unified
+/// RealityKit path — the SAME pipeline the user sees in the app viewport — and
+/// requires a GPU + window server (an app-hosted session). `.native` is the
+/// SceneKit/usdrecord fallback used by the headless CLI server, where there is
+/// no drawable to render RealityKit into. The concrete `.viewport` renderer
+/// lives in the App target (only it may import both ViewportKit and AgentMCP),
+/// so this enum names the choice while the App supplies the instance.
+public enum MCPRenderBackend: Sendable, Equatable {
+    case viewport
+    case native
+}
+
+/// Pure, unit-tested policy for choosing the `render_views` backend. Kept
+/// separate from `NativeRendererSelection` because selecting the RealityKit
+/// backend can't return a `RenderExecuting` from RenderKit (RenderKit may not
+/// import ViewportKit); the App branches on this and injects the instance.
+public enum MCPRenderBackendSelection {
+
+    /// Hardcoded ON: whenever a host can drive the RealityKit viewport
+    /// (app-hosted), unify onto it so the agent sees exactly the user's pixels.
+    /// Flip to `false` to force every host back onto the native SceneKit backend.
+    public static let preferViewportRenderer = true
+
+    /// `.viewport` only when the preference is on AND the host can actually
+    /// render through ViewportKit (`canUseViewport`); otherwise `.native`.
+    public static func backend(canUseViewport: Bool,
+                               preferViewport: Bool = preferViewportRenderer) -> MCPRenderBackend {
+        (preferViewport && canUseViewport) ? .viewport : .native
+    }
+}
+
 /// Pure parsing of the render stage the `render_views` tool hands the renderer.
 ///
 /// The tool always feeds a `USDASerializer`-produced `.usda` (see
@@ -147,7 +178,7 @@ public enum RenderStageParse {
 
     /// The 16 row-major transform values and focal length of the named `Camera`
     /// prim, or `nil` when it is absent or malformed.
-    static func camera(named name: String, usda: String) -> (rows: [Double], focal: Double)? {
+    public static func camera(named name: String, usda: String) -> (rows: [Double], focal: Double)? {
         guard let header = usda.range(of: "def Camera \"\(name)\"") else { return nil }
         // Restrict to this prim's block: from the header to the next top-level
         // `def ` (cameras the tool authors have no children, so this is safe).
@@ -197,7 +228,7 @@ public enum RenderStageParse {
     }
 
     /// Last `/`-separated component of a prim path.
-    static func lastPathComponent(_ path: String) -> String {
+    public static func lastPathComponent(_ path: String) -> String {
         path.split(separator: "/").last.map(String.init) ?? path
     }
 

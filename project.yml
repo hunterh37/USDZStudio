@@ -42,6 +42,8 @@ packages:
     path: Packages/AgentMCP
   RenderKit:
     path: Packages/RenderKit
+  ViewportKit:
+    path: Packages/ViewportKit
   DiagnosticsKit:
     path: Packages/DiagnosticsKit
 
@@ -77,6 +79,11 @@ targets:
       # sculpt review loop (issue #109) — no usdrecord required.
       - package: RenderKit
         product: RenderKit
+      # Unified MCP render path: the app-hosted render_views renders through the
+      # SAME RealityKit viewport pipeline the user sees (ViewportKitRenderer),
+      # not the SceneKit fallback (specs/agent-live-editing.md).
+      - package: ViewportKit
+        product: ViewportKit
       # Finder-level QuickLook extensions, embedded in Contents/PlugIns.
       - target: USDAThumbnailExtension
         embed: true
