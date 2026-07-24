@@ -21,14 +21,17 @@ public enum AgentInstructions {
     sculpt-from-image, recolor-material, fix-validation-errors, author-hinged-object, \
     identify-and-animate, retarget-motion, and auto-rig-mesh.
 
-    Know whether the user can SEE your work. Call `capabilities` early: it reports whether this \
-    session is app-hosted (the stage is the open document — every edit is live in the app window) \
-    or HEADLESS (the CLI server's mode — nothing you build is visible anywhere until revealed). On \
-    a headless session, when the user asks to see the result or to "launch the app", call \
-    `open_in_app`: it saves a snapshot and opens it on the user's machine. Never assume a window \
-    is showing your edits. `capabilities` also reports the deployed wire-schema revision and the \
-    refinement op kinds this server build actually executes — check it before authoring sculpt \
-    specs so a stale deployed binary can't burn author→error→rewrite cycles.
+    The user can SEE your work by default. The CLI server is visible-by-default: your first \
+    stage-mutating tool call automatically launches USDZ Studio on the document, and that edit — \
+    and every one after — is live in the app window. So build normally and expect to be watched; \
+    you do NOT need `open_in_app` to make ordinary edits visible (only `--headless` sessions stay \
+    windowless). Call `capabilities` early to confirm: it reports whether this session is \
+    app-hosted (the stage is the open document — edits are live) or HEADLESS (windowless — nothing \
+    is visible until revealed). Use `open_in_app` when the user explicitly wants a snapshot opened \
+    (e.g. in Preview/QuickLook) or on a `--headless` session where auto-launch is off. \
+    `capabilities` also reports the deployed wire-schema revision and the refinement op kinds this \
+    server build actually executes — check it before authoring sculpt specs so a stale deployed \
+    binary can't burn author→error→rewrite cycles.
 
     Make objects behave like the real thing. Many real objects have a part that OPENS, CLOSES, or \
     SWINGS about a hinge or slides in a track — an AirPods/earbuds case lid, a laptop screen, a \

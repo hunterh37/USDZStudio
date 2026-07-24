@@ -41,16 +41,44 @@ enum AdaptiveTransport {
     // unit-tested. Exercised end-to-end by the agent-live recipe.
     /// Read stdin line-by-line until EOF, routing each request per the live
     /// endpoint. Writes exactly one response line per request that owes one.
+    ///
+    /// When `autoLaunch` is on (the interactive default; `--headless` disables
+    /// it), the FIRST stage-mutating tool call on a session with no editor
+    /// running launches the GUI (`launch`) and waits briefly for it to start
+    /// hosting, so that edit — and everything after — lands live in the viewport
+    /// instead of an invisible in-process stage. The launch is attempted at most
+    /// once; if the app never comes up we fall back to in-process serving.
     static func run(
         endpointURL: URL,
+        autoLaunch: Bool = false,
+        launch: @escaping () -> Void = {},
         makeInProcessServer: () async -> InProcessHost?
     ) async {
         let pump = RelayPump(endpointURL: endpointURL)
         var host: InProcessHost?
         var lastRoute: Route?
+        var didAttemptLaunch = false
 
         while let line = readLine(strippingNewline: true) {
             if line.isEmpty { continue }
+
+            if AutoLaunch.shouldLaunch(
+                line: line,
+                autoLaunchEnabled: autoLaunch,
+                editorLive: RelayPump.liveEndpoint(at: endpointURL) != nil,
+                alreadyAttempted: didAttemptLaunch)
+            {
+                didAttemptLaunch = true
+                FileHandle.standardError.write(Data(
+                    "openusdz mcp: first edit — launching \(AutoLaunch.appName) so you can watch\n".utf8))
+                launch()
+                // Bounded wait for the app to bind its endpoint (~10s), so this
+                // very call relays into the live document rather than racing it.
+                _ = RelayCodec.awaitEndpoint(
+                    attempts: 40,
+                    resolve: { RelayPump.liveEndpoint(at: endpointURL) },
+                    tick: { usleep(250_000) })
+            }
 
             let route = route(editorLive: RelayPump.liveEndpoint(at: endpointURL) != nil)
             if route != lastRoute {

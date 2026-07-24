@@ -8,12 +8,12 @@ import SculptKit
 /// discovering the wire dialect by trial and error. This tool lets an agent
 /// detect the deployed schema revision and op set up front.
 ///
-/// `open_in_app` (issue #162): the CLI-hosted server edits a *headless* stage —
-/// nothing the agent builds is visible anywhere until it is saved and opened.
-/// Users reasonably assume the agent is driving a visible window, so agents
-/// need a first-class way to reveal the current stage in the GUI editor (or
-/// QuickLook) and to know, from the capabilities payload, whether the session
-/// is headless or app-hosted.
+/// `open_in_app` (issue #162): reveals the current stage as a saved snapshot in
+/// the GUI editor (or QuickLook). Note the CLI is now visible-by-default — the
+/// first stage mutation auto-launches USDZ Studio and edits are live from there
+/// (see `AutoLaunch`) — so this is for explicit snapshot opens and for
+/// `--headless` sessions where auto-launch is off. `capabilities` still reports
+/// whether the session is headless or app-hosted so an agent knows the mode.
 public enum AppTools {
 
     /// Monotonic schema revision of the agent-facing wire formats. Bump when a
@@ -83,7 +83,7 @@ public enum AppTools {
 
         server.register(MCPTool(
             name: "open_in_app", group: .render,
-            description: "Reveal the CURRENT stage to the user: saves a snapshot (usdz when the bridge is available, else usda) into the work directory — or to 'url' — and opens it on the user's machine (default app for the type, or 'app' to name one, e.g. 'USDZ Studio' or 'Preview'). Use this whenever the user asks to SEE the result or to 'launch the app': on a headless session (see `capabilities`) nothing is visible until this runs. Note the opened file is a snapshot — later edits need another open_in_app (or save + reopen) to be seen.",
+            description: "Reveal the CURRENT stage as a SNAPSHOT: saves it (usdz when the bridge is available, else usda) into the work directory — or to 'url' — and opens it on the user's machine (default app for the type, or 'app' to name one, e.g. 'USDZ Studio' or 'Preview'). Note that ordinary edits are already visible by default — the CLI auto-launches USDZ Studio on your first mutation, so live editing needs no call here. Use open_in_app when the user explicitly wants a snapshot opened (e.g. in Preview/QuickLook) or on a HEADLESS session (see `capabilities`) where auto-launch is off and nothing is otherwise visible. The opened file is a static snapshot — later edits need another open_in_app (or save + reopen) to be seen.",
             inputSchema: Schema.object([
                 "url": Schema.string("destination file path for the snapshot (optional; default <workDirectory>/live-preview.usda|usdz)"),
                 "app": Schema.string("application name to open with (optional; default the system handler for the file type)"),

@@ -22,6 +22,12 @@ enum McpCommand {
         /// scripted automation that must not attach to whatever document a
         /// developer happens to have open.
         var noRelay: Bool = false
+        /// Suppress auto-launching the GUI. By default an interactive session is
+        /// **visible**: the first stage-mutating tool call brings up USDZ Studio
+        /// so the user can watch. `--headless` keeps the session windowless
+        /// (still relays to an editor the user opens themselves) — for CI,
+        /// scripting, or "don't pop a window" runs. Implied by `--no-relay`.
+        var headless: Bool = false
     }
 
     /// Pure, testable flag parsing. Returns nil (after printing) on usage errors.
@@ -31,12 +37,16 @@ enum McpCommand {
         var strictness = ValidationStrictness.warn
         var libraries: [URL] = []
         var noRelay = false
+        var headless = false
         var index = 0
         while index < arguments.count {
             let argument = arguments[index]
             switch argument {
             case "--no-relay":
                 noRelay = true
+                index += 1
+            case "--headless":
+                headless = true
                 index += 1
             case "--groups":
                 guard index + 1 < arguments.count else {
@@ -83,7 +93,7 @@ enum McpCommand {
             }
         }
         guard positional.count == 1 else {
-            printError("usage: openusdz mcp <file.usd[z|a|c]> [--groups a,b,c] [--strictness off|warn|strict] [--library DIR] [--no-relay]")
+            printError("usage: openusdz mcp <file.usd[z|a|c]> [--groups a,b,c] [--strictness off|warn|strict] [--library DIR] [--headless] [--no-relay]")
             return nil
         }
         return Resolution(
@@ -91,7 +101,8 @@ enum McpCommand {
             groups: groups,
             strictness: strictness,
             libraryDirectories: libraries,
-            noRelay: noRelay)
+            noRelay: noRelay,
+            headless: headless)
     }
 
     // coverage:disable — composition root: opens the real Python bridge, locates usdrecord, and blocks on the stdio loop; each seam (resolve, routing via AdaptiveTransport.route, AgentMCP tools, transport line handling) is unit-tested in isolation.
@@ -120,8 +131,14 @@ enum McpCommand {
         // long-lived server that predates or outlives the app starts relaying the
         // moment the app is open instead of being frozen headless from launch
         // (specs/agent-live-editing.md).
+        // Visible by default: unless `--headless`, the first stage-mutating tool
+        // call launches USDZ Studio on this document so the user watches the
+        // build live. `--headless` keeps it windowless (it still relays to an
+        // editor the user opens themselves).
         await AdaptiveTransport.run(
             endpointURL: endpointURL,
+            autoLaunch: !resolution.headless,
+            launch: { AutoLaunch.launchApp(fileURL: resolution.fileURL) },
             makeInProcessServer: { await makeInProcessHost(resolution, printError: printError) })
         return 0
     }
