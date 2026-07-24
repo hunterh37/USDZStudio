@@ -217,6 +217,31 @@ import Testing
         #expect(try decode(#"{"kind":"library","entryID":"prefab.gear"}"#) == .library(entryID: "prefab.gear"))
     }
 
+    /// #165: a *malformed* legacy payload must report the real inner decoding
+    /// failure, not degrade to the generic "expected a kind" message. The old
+    /// `try? c.nestedContainer(...)` swallowed the error and pointed callers at
+    /// the wrong problem.
+    @Test func shapeKindReportsRealErrorForMalformedLegacyForm() throws {
+        func error(_ json: String) -> Error? {
+            do { _ = try JSONDecoder().decode(ShapeKind.self, from: Data(json.utf8)); return nil }
+            catch { return error }
+        }
+        // Legacy `primitive` present but its inner `_0` is the wrong type.
+        let wrongInner = error(#"{"primitive":{"_0":42}}"#)
+        #expect(wrongInner is DecodingError)
+        if case .typeMismatch = wrongInner as? DecodingError {} else if case .dataCorrupted = wrongInner as? DecodingError {} else {
+            Issue.record("expected a typeMismatch/dataCorrupted for a bad legacy _0, got \(String(describing: wrongInner))")
+        }
+        // Legacy `primitive` present but `_0` missing entirely → keyNotFound,
+        // not the catch-all message.
+        if case .keyNotFound = error(#"{"primitive":{}}"#) as? DecodingError {} else {
+            Issue.record("expected keyNotFound for a legacy primitive with no _0")
+        }
+        // No discriminator at all → the catch-all, which now names both wire forms.
+        let none = error(#"{"nope":1}"#)
+        #expect((none as? DecodingError).map { "\($0)" }?.contains("kind") == true)
+    }
+
     @Test func shapeKindDecodesLegacyAssociatedValueForms() throws {
         func decode(_ json: String) throws -> ShapeKind {
             try JSONDecoder().decode(ShapeKind.self, from: Data(json.utf8))

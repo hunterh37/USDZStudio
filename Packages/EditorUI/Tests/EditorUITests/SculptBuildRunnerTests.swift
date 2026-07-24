@@ -27,18 +27,64 @@ struct SculptBuildRunnerTests {
             step: .createMaterial(targetPath: "/Tower/Body",
                                   material: MaterialSpec(id: "facade_mat", baseColor: [0.1, 0.1, 0.12],
                                                          facade: facade)), to: doc)
-        // EditorUI's CreateMaterialCommand names the material "Material" (it does
-        // not carry the spec id like the MCP path); the baked file stem still
-        // derives from the spec id.
-        #expect(path == "/Looks/Material")
+        // The material prim carries the sanitized spec id (#167), matching the
+        // MCP executor; the baked file stem derives from the same id.
+        #expect(path == "/Looks/facade_mat")
 
-        let surface = doc.snapshot.prim(at: PrimPath("/Looks/Material/Surface")!)
+        let surface = doc.snapshot.prim(at: PrimPath("/Looks/facade_mat/Surface")!)
         func mapPath(_ name: String) -> String? {
             if case let .string(s)? = surface?.attribute(named: name)?.value { return s }
             return nil
         }
         #expect(mapPath("inputs:albedoMap")?.hasSuffix("facade_mat_albedo.png") == true)
         #expect(mapPath("inputs:emissiveMap")?.hasSuffix("facade_mat_emissive.png") == true)
+    }
+
+    /// #167: the in-app executor names the material prim after the spec id and
+    /// mints exactly one `/Looks` prim per spec material, even when several
+    /// components share that id — no `Material_1…Material_N` trail.
+    @Test func createMaterialMintsOnePrimPerSpecID() {
+        let doc = EditorDocument(snapshot: StageSnapshot(rootPrims: []))
+        _ = SculptBuildRunner.apply(step: .createGroup(name: "G", parentPath: nil), to: doc)
+        for name in ["A", "B", "C"] {
+            _ = SculptBuildRunner.apply(
+                step: .createMesh(name: name, parentPath: "/G", primitive: .box,
+                                  width: 1, height: 1, depth: 1, radius: 0.5, segments: 8), to: doc)
+        }
+        let shared = MaterialSpec(id: "red paint", baseColor: [0.8, 0.1, 0.1])
+        let paths = ["A", "B", "C"].map {
+            SculptBuildRunner.apply(step: .createMaterial(targetPath: "/G/\($0)", material: shared), to: doc)
+        }
+
+        // Every component resolved to the same sanitized, spec-named prim.
+        #expect(paths.allSatisfy { $0 == "/Looks/red_paint" })
+        let looks = doc.snapshot.rootPrims.first { $0.name == "Looks" }
+        #expect(looks?.children.count == 1)
+        #expect(looks?.children.first?.name == "red_paint")
+        // Each component still carries the binding.
+        for name in ["A", "B", "C"] {
+            let bound = MaterialBinding.materialPath(for: PrimPath("/G/\(name)")!, in: doc.snapshot)
+            #expect(bound?.description == "/Looks/red_paint")
+        }
+    }
+
+    /// #158/#167 replay hygiene: re-running the material pass (as a refine loop
+    /// does) re-binds the existing prim instead of minting duplicates.
+    @Test func createMaterialReplayReusesExistingPrim() {
+        let doc = EditorDocument(snapshot: StageSnapshot(rootPrims: []))
+        _ = SculptBuildRunner.apply(step: .createGroup(name: "G", parentPath: nil), to: doc)
+        _ = SculptBuildRunner.apply(
+            step: .createMesh(name: "M", parentPath: "/G", primitive: .box,
+                              width: 1, height: 1, depth: 1, radius: 0.5, segments: 8), to: doc)
+        let step = BuildStep.createMaterial(
+            targetPath: "/G/M", material: MaterialSpec(id: "blade_metal", baseColor: [0.6, 0.6, 0.65]))
+
+        let first = SculptBuildRunner.apply(step: step, to: doc)
+        let second = SculptBuildRunner.apply(step: step, to: doc)
+
+        #expect(first == "/Looks/blade_metal")
+        #expect(second == "/Looks/blade_metal")
+        #expect(doc.snapshot.rootPrims.first { $0.name == "Looks" }?.children.count == 1)
     }
 
     /// A material without a facade is authored unchanged (no baked maps).
@@ -51,7 +97,7 @@ struct SculptBuildRunnerTests {
         _ = SculptBuildRunner.apply(
             step: .createMaterial(targetPath: "/G/M",
                                   material: MaterialSpec(id: "plain", baseColor: [0.2, 0.2, 0.2])), to: doc)
-        let surface = doc.snapshot.prim(at: PrimPath("/Looks/Material/Surface")!)
+        let surface = doc.snapshot.prim(at: PrimPath("/Looks/plain/Surface")!)
         #expect(surface?.attribute(named: "inputs:albedoMap") == nil)
     }
 
@@ -220,7 +266,7 @@ struct SculptBuildRunnerTests {
         SculptBuildRunner.apply(pass: .blockout, of: spec, to: doc)
         let materials = SculptBuildRunner.apply(pass: .material, of: spec, to: doc)
         #expect(!materials.isEmpty)
-        let surface = doc.snapshot.prim(at: PrimPath("/Looks/Material/Surface")!)
+        let surface = doc.snapshot.prim(at: PrimPath("/Looks/pbr/Surface")!)
         #expect(surface?.attribute(named: "inputs:roughness") != nil)
         #expect(surface?.attribute(named: "inputs:metallic") != nil)
         #expect(surface?.attribute(named: "inputs:emissiveColor") != nil)

@@ -1,5 +1,4 @@
 import AgentMCP
-import RenderKit
 import Foundation
 import RenderKit
 import ScriptingKit
@@ -185,27 +184,17 @@ enum McpCommand {
                 else { ReferenceImage.remove(at: referenceURL) }
             }
 
-            // `render_views` renders natively by default (SceneKit/Model I/O — the
-            // same Apple frameworks the app's viewport uses), so it returns real
-            // pixels without `usd-core`/`usdrecord`. Storm is opt-in via
-            // `DICYANIN_USDRECORD`.
-            let renderer: (any RenderExecuting)? = NativeRendererSelection.make(
-                environment: ProcessInfo.processInfo.environment,
-                fileExists: { FileManager.default.fileExists(atPath: $0) })
-            let scriptExecutor: (any ScriptExecuting)? = PythonRuntimeLocator().locate()
-                .map { PythonProcessExecutor(pythonPath: $0) }
-
             // Push live tool-call activity to the editor app (if it's running)
             // over its socket; a graceful no-op when it isn't.
             let activitySink = SocketEventSink()
             let server = AgentMCPServer.make(
                 session: session,
-                configuration: AgentMCPServer.Configuration(
-                    enabledGroups: resolution.groups,
-                    renderer: renderer,
-                    scriptExecutor: scriptExecutor,
-                    libraryDirectories: resolution.libraryDirectories,
-                    eventSink: activitySink))
+                configuration: makeConfiguration(
+                    resolution: resolution,
+                    eventSink: activitySink,
+                    environment: ProcessInfo.processInfo.environment,
+                    fileExists: { FileManager.default.fileExists(atPath: $0) },
+                    pythonPath: PythonRuntimeLocator().locate()))
             FileHandle.standardError.write(Data(
                 "openusdz mcp: serving \(resolution.fileURL.lastPathComponent) (\(server.toolNames.count) tools) headless\n".utf8))
             return AdaptiveTransport.InProcessHost(
@@ -216,6 +205,31 @@ enum McpCommand {
         }
     }
     // coverage:enable
+
+    /// Builds the headless server configuration.
+    ///
+    /// Extracted from `makeInProcessHost` (which is a `coverage:disable`
+    /// composition root) purely so the renderer wiring is assertable in a unit
+    /// test: issue #166 was filed because nobody could confirm `renderer != nil`
+    /// without spawning a process and reading the JSON, and a stale binary looked
+    /// exactly like missing code. `render_views` renders natively by default
+    /// (SceneKit/Model I/O), so it returns real pixels with no
+    /// `usd-core`/`usdrecord`; Storm is opt-in via `DICYANIN_USDRECORD`.
+    static func makeConfiguration(
+        resolution: Resolution,
+        eventSink: (any MCPEventSink)?,
+        environment: [String: String],
+        fileExists: (String) -> Bool,
+        pythonPath: String?
+    ) -> AgentMCPServer.Configuration {
+        AgentMCPServer.Configuration(
+            enabledGroups: resolution.groups,
+            renderer: NativeRendererSelection.make(
+                environment: environment, fileExists: fileExists),
+            scriptExecutor: pythonPath.map { PythonProcessExecutor(pythonPath: $0) },
+            libraryDirectories: resolution.libraryDirectories,
+            eventSink: eventSink)
+    }
 }
 
 /// Python-subprocess `ScriptExecuting` for AgentMCP's `run_script`.

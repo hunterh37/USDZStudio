@@ -680,9 +680,15 @@ public enum SculptTools {
             // existing prim instead of minting `<id>_1`, `<id>_2`… garbage.
             let existingName = CreateMaterialCommand.sanitizedPrimName(material.id)
             if let existing = try? resolvePath("/Looks/\(existingName)", session: session),
-               let bind = BindMaterialCommand.make(
-                   materialPath: existing, bindingTo: primPath, in: session.stage) {
-                _ = try session.mutate(bind)
+               session.stage.prim(at: existing)?.typeName == "Material" {
+                // Bind only when needed: `make` returns nil when this target
+                // already binds that exact material (the replay case). Return the
+                // existing path either way, so a replay can't fall through and
+                // mint `<id>_1` (#167).
+                if let bind = BindMaterialCommand.make(
+                    materialPath: existing, bindingTo: primPath, in: session.stage) {
+                    _ = try session.mutate(bind)
+                }
                 return existing.description
             }
             guard let command = CreateMaterialCommand.make(
