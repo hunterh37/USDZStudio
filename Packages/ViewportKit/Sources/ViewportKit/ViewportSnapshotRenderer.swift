@@ -99,22 +99,26 @@ public struct ViewportSnapshotRenderer {
         // banned from async contexts) hands the main thread back to that loop.
         try await Task.sleep(nanoseconds: 150_000_000)
 
-        let image: NSImage = try await withCheckedThrowingContinuation { continuation in
+        // Encode to PNG *inside* the snapshot callback: NSImage is not Sendable, so
+        // resuming the continuation with it would send a non-Sendable value across
+        // isolation boundaries (a strict-concurrency error). `Data` is Sendable, so
+        // the image never leaves the callback.
+        let png: Data = try await withCheckedThrowingContinuation { continuation in
             arView.snapshot(saveToHDR: false) { image in
-                if let image {
-                    continuation.resume(returning: image)
-                } else {
+                guard let image else {
                     continuation.resume(throwing: SnapshotError.noImage)
+                    return
                 }
+                guard let tiff = image.tiffRepresentation,
+                      let rep = NSBitmapImageRep(data: tiff),
+                      let data = rep.representation(using: .png, properties: [:]) else {
+                    continuation.resume(throwing: SnapshotError.encodeFailed)
+                    return
+                }
+                continuation.resume(returning: data)
             }
         }
         window.contentView = nil
-
-        guard let tiff = image.tiffRepresentation,
-              let rep = NSBitmapImageRep(data: tiff),
-              let png = rep.representation(using: .png, properties: [:]) else {
-            throw SnapshotError.encodeFailed
-        }
         return png
     }
     // coverage:enable
