@@ -32,7 +32,10 @@ public enum RenderTools {
             orbit shots as {azimuth, elevation, distance} (degrees; azimuth orbits the up axis, \
             elevation tilts above the horizon, distance scales the auto-framed dolly, default 1). \
             Cameras auto-frame the subject so any angle stays in shot. statsOnly returns \
-            bbox/tri-count/material summaries instead of pixels.
+            bbox/tri-count/material summaries instead of pixels. If the host wired no renderer, \
+            a call that omits statsOnly degrades to that summary and sets degraded/degradedReason \
+            — treat that as a host misconfiguration (commonly a stale binary; check `capabilities`), \
+            not as an empty stage.
             """,
             inputSchema: Schema.object([
                 "paths": Schema.array(of: Schema.primRef, "isolate these subtrees (default whole stage)"),
@@ -60,9 +63,19 @@ public enum RenderTools {
                 throw ToolError.invalidParams("provide at least one of 'views' or 'angles'")
             }
 
-            let statsOnly = args["statsOnly"].boolValue ?? (renderer == nil)
-            if statsOnly {
+            // Issue #166: a renderer-less host used to fall back to stats *silently*
+            // when the caller omitted `statsOnly`, so a mis-wired server looked
+            // indistinguishable from a deliberate stats request. Honour the implicit
+            // fallback (callers depend on getting *something*) but say so loudly, so
+            // "my renders are stats-only" is self-diagnosing rather than a bug hunt.
+            let requestedStatsOnly = args["statsOnly"].boolValue
+            if requestedStatsOnly == true {
                 return statsSummary(session: session, isolate: isolate)
+            }
+            if requestedStatsOnly == nil, renderer == nil {
+                return statsSummary(
+                    session: session, isolate: isolate,
+                    degradedReason: "no renderer is configured on this MCP host, so pixels are unavailable and this call degraded to statsOnly. This is a host wiring problem, not a stage problem — a stale `openusdz` binary is the usual cause; rebuild the CLI (swift build -c release) and check `capabilities`.")
             }
             guard let renderer else {
                 // The native SceneKit renderer needs no usdrecord and is the
@@ -252,7 +265,12 @@ public enum RenderTools {
 
     // MARK: - stats_only summary (freecad-mcp's token-saving toggle)
 
-    static func statsSummary(session: EditSession, isolate: [PrimPath]) -> JSONValue {
+    /// - Parameter degradedReason: set when stats are a *fallback* rather than a
+    ///   request, surfaced as `degraded`/`degradedReason` so the caller can tell a
+    ///   mis-wired host from a deliberate `statsOnly: true` call (#166).
+    static func statsSummary(
+        session: EditSession, isolate: [PrimPath], degradedReason: String? = nil
+    ) -> JSONValue {
         let targets: [PrimPath] = isolate.isEmpty
             ? session.stage.rootPrims.map(\.path) : isolate
         var summaries: [JSONValue] = []
@@ -282,7 +300,14 @@ public enum RenderTools {
             payload["materials"] = .array(materials.sorted().map { .string($0) })
             summaries.append(.object(payload))
         }
-        return .object(["statsOnly": .bool(true), "subjects": .array(summaries)])
+        var result: [String: JSONValue] = [
+            "statsOnly": .bool(true), "subjects": .array(summaries),
+        ]
+        if let degradedReason {
+            result["degraded"] = .bool(true)
+            result["degradedReason"] = .string(degradedReason)
+        }
+        return .object(result)
     }
 
     // MARK: - Real rendering (isolated-object render via a temp sub-stage)

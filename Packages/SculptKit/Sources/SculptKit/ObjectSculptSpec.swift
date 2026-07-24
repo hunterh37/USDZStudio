@@ -72,17 +72,22 @@ public enum ShapeKind: Codable, Sendable, Equatable {
             }
             return
         }
-        // Legacy fallback: Swift's default associated-value coding.
+        // Legacy fallback: Swift's default associated-value coding. Note the
+        // `contains` checks rather than `try?` on the nested container (#165): a
+        // swallowed error turned a *malformed* legacy payload into the generic
+        // "expected a kind" message below, which points at the wrong problem.
         if c.contains(.group) {
             self = .group
-        } else if let nested = try? c.nestedContainer(keyedBy: LegacyPrimitiveKeys.self, forKey: .primitive) {
+        } else if c.contains(.primitive) {
+            let nested = try c.nestedContainer(keyedBy: LegacyPrimitiveKeys.self, forKey: .primitive)
             self = .primitive(try nested.decode(Primitive.self, forKey: ._0))
-        } else if let nested = try? c.nestedContainer(keyedBy: LegacyLibraryKeys.self, forKey: .library) {
+        } else if c.contains(.library) {
+            let nested = try c.nestedContainer(keyedBy: LegacyLibraryKeys.self, forKey: .library)
             self = .library(entryID: try nested.decode(String.self, forKey: .entryID))
         } else {
             throw DecodingError.dataCorrupted(.init(
                 codingPath: decoder.codingPath,
-                debugDescription: "ShapeKind: expected a \"kind\" of group/primitive/library"))
+                debugDescription: #"ShapeKind: expected a "kind" of group/primitive/library, e.g. {"kind":"group"} or {"kind":"primitive","primitive":"box"}"#))
         }
     }
 }
