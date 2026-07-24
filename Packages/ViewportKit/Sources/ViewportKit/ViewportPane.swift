@@ -1994,6 +1994,35 @@ final class ViewportCoordinator {
         if let descriptor = scaleDescriptor { layoutScaleGizmo(descriptor) }
     }
 
+    // MARK: Headless snapshot hooks (unified MCP render path)
+    // coverage:disable — RealityKit entity/camera mutation for the offscreen
+    // snapshot renderer; needs a GPU + window server. Exercised through the
+    // ViewportSnapshotRenderer (verified on a real machine via the `verify`
+    // skill / golden-image harness); the pure camera math is unit-tested.
+
+    /// Load a file's entities into the model anchor for a one-shot offscreen
+    /// snapshot. Unlike ``load(url:)`` this is synchronous and does NOT
+    /// auto-frame — the snapshot renderer sets an explicit agent-authored camera
+    /// via ``applyCameraMatrix(_:fovDegrees:)`` immediately afterwards, so the
+    /// rendered pose matches what `render_views` requested exactly.
+    func loadEntitiesForSnapshot(url: URL) throws {
+        let entity = try Self.loadEntity(url)
+        modelAnchor.children.removeAll()
+        modelAnchor.addChild(entity)
+        let bounds = entity.visualBounds(relativeTo: nil)
+        modelBounds = (bounds.center, max(bounds.boundingRadius, 1e-4))
+        loadedRoot = entity
+    }
+
+    /// Position the camera from an explicit column-major camera-to-world matrix
+    /// and vertical field of view (degrees), bypassing the orbit model. Used by
+    /// the headless snapshot renderer to reproduce an agent-authored camera pose.
+    func applyCameraMatrix(_ cameraToWorld: float4x4, fovDegrees: Float) {
+        cameraEntity.camera.fieldOfViewInDegrees = fovDegrees
+        cameraEntity.transform = Transform(matrix: cameraToWorld)
+    }
+    // coverage:enable
+
     private func rebuildGrid(halfExtent: Float) {
         gridAnchor.children.removeAll()
         let lineMaterial = UnlitMaterial(color: NSColor(white: 1, alpha: 0.12))
