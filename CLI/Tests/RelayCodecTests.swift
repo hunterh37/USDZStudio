@@ -51,6 +51,22 @@ import Testing
         #expect(!RelayCodec.isNotification("{\"id\":1,\"method\":\"x\"}"))
     }
 
+    @Test func extractsToolCallName() {
+        // A tools/call yields its params.name…
+        #expect(RelayCodec.toolCallName(
+            "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\",\"params\":{\"name\":\"create_mesh\",\"arguments\":{}}}")
+            == "create_mesh")
+        // …every other method (and notifications / non-tools/call) is nil.
+        #expect(RelayCodec.toolCallName(
+            "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/list\"}") == nil)
+        #expect(RelayCodec.toolCallName(
+            "{\"jsonrpc\":\"2.0\",\"method\":\"initialize\",\"params\":{}}") == nil)
+        // Malformed / missing params.name → nil, never a crash.
+        #expect(RelayCodec.toolCallName(
+            "{\"method\":\"tools/call\",\"params\":{}}") == nil)
+        #expect(RelayCodec.toolCallName("not json") == nil)
+    }
+
     @Test func buildsSpecShapedErrorResponse() throws {
         let line = RelayCodec.errorResponse(idFragment: "4", code: -32001, message: "editor \"gone\"")
         let obj = try JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any]

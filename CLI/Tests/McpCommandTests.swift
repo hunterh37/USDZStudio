@@ -19,11 +19,21 @@ import Testing
         #expect(resolution?.libraryDirectories.isEmpty == true)
         // Relaying to a live editor is the default; opt out explicitly.
         #expect(resolution?.noRelay == false)
+        // Visible by default: auto-launch is on unless --headless.
+        #expect(resolution?.headless == false)
     }
 
     @Test func parsesNoRelay() {
         let (resolution, _) = resolve(["scene.usda", "--no-relay"])
         #expect(resolution?.noRelay == true)
+        #expect(resolution?.fileURL.lastPathComponent == "scene.usda")
+    }
+
+    @Test func parsesHeadless() {
+        let (resolution, _) = resolve(["scene.usda", "--headless"])
+        #expect(resolution?.headless == true)
+        // --headless is independent of --no-relay.
+        #expect(resolution?.noRelay == false)
         #expect(resolution?.fileURL.lastPathComponent == "scene.usda")
     }
 

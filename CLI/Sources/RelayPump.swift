@@ -65,6 +65,19 @@ enum RelayCodec {
         jsonrpcIDFragment(line) == "null"
     }
 
+    /// The tool name of a `tools/call` request line, or nil for any other method
+    /// (`initialize`, `tools/list`, notifications, unparseable). Used to decide
+    /// whether an incoming call is a stage mutation worth revealing in the GUI.
+    static func toolCallName(_ line: String) -> String? {
+        guard let data = line.data(using: .utf8),
+              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              obj["method"] as? String == "tools/call",
+              let params = obj["params"] as? [String: Any],
+              let name = params["name"] as? String
+        else { return nil }
+        return name
+    }
+
     /// A spec-shaped JSON-RPC error response addressed to `idFragment`, so a
     /// dropped editor surfaces as a correctable error, never a hang.
     static func errorResponse(idFragment: String, code: Int, message: String) -> String {
