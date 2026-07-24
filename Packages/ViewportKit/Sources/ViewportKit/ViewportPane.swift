@@ -148,6 +148,9 @@ public struct ViewportPane: View {
     /// T". `nil` leaves the model at its default (rest) pose. The transport does
     /// the time-code→seconds conversion (honouring `timeCodesPerSecond`).
     let animationTime: Double?
+    /// One-shot "frame this prim" request (double-click in the outliner). See
+    /// ``FramePrimRequest`` for why it carries a token.
+    let frameRequest: FramePrimRequest?
     @State private var stats: SceneStats?
     @State private var showStats = true
     @State private var loadError: String?
@@ -193,6 +196,7 @@ public struct ViewportPane: View {
                 materialOverrides: [String: MaterialOverride]? = nil,
                 environment: EnvironmentSettings = EnvironmentSettings(),
                 animationTime: Double? = nil,
+                frameRequest: FramePrimRequest? = nil,
                 cameraLink: ViewportCameraLink? = nil) {
         self.injectedCameraLink = cameraLink
         self.modelURL = modelURL
@@ -224,6 +228,7 @@ public struct ViewportPane: View {
         self.materialOverrides = materialOverrides
         self.environment = environment
         self.animationTime = animationTime
+        self.frameRequest = frameRequest
     }
 
     public var body: some View {
@@ -253,6 +258,7 @@ public struct ViewportPane: View {
                                   materialOverrides: materialOverrides,
                                   environment: environment,
                                   animationTime: animationTime,
+                                  frameRequest: frameRequest,
                                   debugMode: debugMode,
                                   stats: $stats, loadError: $loadError)
             VStack(alignment: .leading, spacing: 6) {
@@ -353,6 +359,7 @@ struct ViewportRepresentable: NSViewRepresentable {
     let materialOverrides: [String: MaterialOverride]?
     let environment: EnvironmentSettings
     let animationTime: Double?
+    let frameRequest: FramePrimRequest?
     let debugMode: DebugViewMode
     @Binding var stats: SceneStats?
     @Binding var loadError: String?
@@ -396,6 +403,7 @@ struct ViewportRepresentable: NSViewRepresentable {
         context.coordinator.applyMaterialOverrides(materialOverrides)
         context.coordinator.applyEnvironment(environment)
         context.coordinator.applyAnimationTime(animationTime)
+        context.coordinator.applyFrameRequest(frameRequest)
         context.coordinator.applyDebugMode(debugMode)
     }
 }
@@ -430,6 +438,8 @@ final class ViewportCoordinator {
     private var isLoading = false
     private var loadTask: Task<Void, Never>?
     private var modelBounds: (center: SIMD3<Float>, radius: Float)?
+    /// Last outliner frame request honoured — token de-duplication.
+    private var appliedFrameRequest: FramePrimRequest?
 
     var onStats: ((SceneStats?) -> Void)?
     var onError: ((String?) -> Void)?
@@ -1973,6 +1983,32 @@ final class ViewportCoordinator {
         return CGPoint(x: x, y: y)
     }
     // coverage:enable
+
+    /// Honours a one-shot outliner "frame this prim" request: recenters the
+    /// orbit camera on the named entity's world-space bounding sphere, reusing
+    /// the same ``OrbitCamera/frame(center:radius:)`` fit as the `F` key. Falls
+    /// back to whole-model framing when the prim has no renderable entity yet
+    /// (e.g. an Xform-only group whose children haven't loaded).
+    func applyFrameRequest(_ request: FramePrimRequest?) {
+        guard let request, request.shouldApply(lastApplied: appliedFrameRequest) else { return }
+        appliedFrameRequest = request
+        // A scripted pose owns the camera; framing would fight it.
+        guard appliedPose == nil else { return }
+        guard let path = request.path,
+              let entity = modelAnchor.findEntity(primPath: path) else {
+            frameModel()
+            return
+        }
+        let bounds = entity.visualBounds(relativeTo: nil)
+        // A zero-extent bound (empty Xform, point light) would collapse the
+        // dolly distance to the near clip; fall back to the model radius so the
+        // camera still recenters on the prim at a sane standoff.
+        let radius = bounds.boundingRadius > 1e-5
+            ? bounds.boundingRadius
+            : (modelBounds?.radius ?? 1)
+        camera.frame(center: SIMD3<Double>(bounds.center), radius: Double(radius))
+        applyCamera()
+    }
 
     private func frameModel() {
         // A scripted pose owns the camera; auto-framing would fight it.

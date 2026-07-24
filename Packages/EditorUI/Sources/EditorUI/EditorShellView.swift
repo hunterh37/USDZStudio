@@ -115,6 +115,9 @@ public struct EditorShellView: View {
     /// When set, jumps the viewport to this pose once (then cleared so the user
     /// regains free camera control and the same bookmark can be re-applied).
     @State private var appliedBookmarkPose: ViewportCameraPose?
+    /// Latest outliner double-click "frame this prim" request. Token-bumped so
+    /// framing the same prim repeatedly still fires (see ``FramePrimRequest``).
+    @State private var frameRequest: FramePrimRequest?
     @State private var activeSheet: Sheet?
     /// The console controller for the currently-open console sheet (built via
     /// `makeConsoleController` when the console opens).
@@ -735,6 +738,12 @@ public struct EditorShellView: View {
                               lineWidth: 1)
         )
         .contentShape(Rectangle())
+        // Double-click frames the row's prim in the viewport (DCC convention),
+        // reusing the same camera fit as the viewport's `F` key. Declared before
+        // the single-tap handler so SwiftUI resolves the two-click gesture first.
+        .onTapGesture(count: 2) {
+            frameInViewport(row.path)
+        }
         .onTapGesture {
             // ⇧-click extends the multi-selection; a plain click replaces it.
             select(row.path, additive: NSEvent.modifierFlags.contains(.shift))
@@ -900,6 +909,14 @@ public struct EditorShellView: View {
         .padding(8)
     }
 
+    /// Frames a prim in the viewport (outliner double-click). Also selects it,
+    /// so the framed prim is the one the inspector and gizmos act on — matching
+    /// what a double-click implies everywhere else in the editor.
+    private func frameInViewport(_ path: PrimPath) {
+        select(path, additive: false)
+        frameRequest = .next(after: frameRequest, path: path.description)
+    }
+
     /// Jumps to a bookmark: set the pose, then clear it on the next runloop tick
     /// so the user regains free camera control and re-applying the same bookmark
     /// works (the coordinator only re-asserts a *changed* pose).
@@ -978,6 +995,7 @@ public struct EditorShellView: View {
                 materialOverrides: document?.viewportMaterialOverrides,
                 environment: environment,
                 animationTime: playback.animationTime,
+                frameRequest: frameRequest,
                 cameraLink: cameraLink)
                 .overlay(alignment: .topTrailing) {
                     HStack(spacing: 0) {
