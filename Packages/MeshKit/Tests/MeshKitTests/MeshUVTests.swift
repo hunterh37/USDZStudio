@@ -95,6 +95,37 @@ struct MeshUVTests {
         #expect(repaired.faceVaryingUVs.count == repaired.faceVertexIndices.count)
     }
 
+    /// The honest boundary of the #170 fix, worth pinning explicitly: ops that
+    /// already carry UVs through (solidify/mirror/decimate) keep the *original*
+    /// values, and the fill patches only what the op left bare. The fill is a
+    /// safety net, not a silent full re-unwrap that would discard whatever UVs
+    /// an op took care to preserve.
+    @Test func fillPatchesOnlyOpMintedFacesAndKeepsPreservedOnes() throws {
+        // An open surface, so solidify has a boundary to bridge.
+        let plane = try Primitives.plane(width: 2, depth: 2, segmentsX: 2, segmentsZ: 2)
+        #expect(plane.faceCornerUVs.count == 4)
+
+        // Solidify preserves UVs on the faces it shells and mints new rim faces
+        // without them — a real mixed case rather than a synthetic one.
+        let solid = try Solidify.apply(
+            plane, selection: .faces(Set(plane.faceOrder)),
+            params: .init(thickness: 0.1)).mesh
+        let preserved = solid.faceOrder.filter { solid.faceCornerUVs[$0] != nil }
+        #expect(!preserved.isEmpty, "solidify should carry some UVs through")
+
+        // After the fill, every face has UVs and the carried-through ones are
+        // byte-identical to what the op produced.
+        var filled = solid
+        MeshUV.fillMissing(&filled)
+        #expect(MeshUV.isFullyUnwrapped(filled))
+        for face in preserved {
+            #expect(filled.faceCornerUVs[face] == solid.faceCornerUVs[face],
+                    "fill must not rewrite a UV the op preserved")
+        }
+        // And the whole channel now exports.
+        #expect(MeshIO.flat(from: filled).faceVaryingUVs.isEmpty == false)
+    }
+
     @Test func fillMissingLeavesExistingUVsUntouched() throws {
         var mesh = try Primitives.plane(width: 1, depth: 1)
         let face = mesh.faceOrder[0]
