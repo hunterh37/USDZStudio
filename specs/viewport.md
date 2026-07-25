@@ -16,6 +16,7 @@ The center viewport: rendering, camera, selection, gizmos, environments, debug m
 
 - Turntable orbit (LMB-drag / one-finger), pan (⇧ or two-finger), dolly (scroll/pinch), first-person WASD fly mode (toggle).
 - `F` frame selection, `A` frame all; numpad-style ortho presets (front/top/right, ⌘1/2/3); perspective/ortho toggle.
+- **Framing.** Double-clicking an outliner row selects that prim and frames it: the camera recenters on the entity's world-space bounding sphere using the same `OrbitCamera.frame(center:radius:)` fit as the `F` key. Delivered as a token-bumped `FramePrimRequest` value (so re-framing the same prim fires again, while unrelated SwiftUI updates do not); a prim with no renderable entity, or a zero-extent bound, falls back to whole-model framing. A scripted camera pose (guided tour) suppresses it.
 - FOV, near/far clip in View menu; camera bookmarks (save/recall named views — feeds thumbnailing).
 
 ## Environment & Lighting
