@@ -82,9 +82,29 @@ public enum SculptBuildRunner {
             // in a temp dir so the live preview shows lit-window detail. Falls
             // back to the flat material when there is no facade or the bake fails.
             let material = bakeFacadeIfNeeded(rawMaterial)
-            guard let primPath = PrimPath(targetPath),
-                  let command = CreateMaterialCommand.make(
-                    bindingTo: primPath, baseColor: material.baseColor, in: document.snapshot)
+            guard let primPath = PrimPath(targetPath) else { return nil }
+            // Re-run hygiene (#158/#167): if this spec material already exists
+            // under /Looks (a material-pass replay after a refine loop), bind the
+            // existing prim instead of minting `<id>_1`, `<id>_2`… garbage. Mirrors
+            // the MCP executor in AgentMCP/Tools+Sculpt.swift.
+            let existingName = CreateMaterialCommand.sanitizedPrimName(material.id)
+            if let existing = PrimPath("/Looks/\(existingName)"),
+               document.snapshot.prim(at: existing)?.typeName == "Material" {
+                // Bind only when needed: `make` returns nil when this target is
+                // *already* bound to that exact material, which is the common
+                // replay case. Returning early regardless is what keeps a replay
+                // from minting `<id>_1` (the bug the guard-chain form still had).
+                if let bind = BindMaterialCommand.make(
+                    materialPath: existing, bindingTo: primPath, in: document.snapshot) {
+                    _ = document.run(bind)
+                }
+                return existing.description
+            }
+            // `name:` keeps the prim named after the spec id (`red_paint`), not
+            // the generic `Material_7` trail (#167).
+            guard let command = CreateMaterialCommand.make(
+                bindingTo: primPath, baseColor: material.baseColor,
+                name: material.id, in: document.snapshot)
             else { return nil }
             guard document.run(command) != nil else { return nil }
             // Author the remaining PBR channels (scalars + texture maps) onto

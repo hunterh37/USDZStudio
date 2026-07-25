@@ -10,12 +10,13 @@ let package = Package(
         .package(path: "../Packages/USDCore"),
         .package(path: "../Packages/AgentMCP"),
         .package(path: "../Packages/RenderKit"),
+        .package(path: "../Packages/ViewportKit"),
         .package(path: "../Packages/DiagnosticsKit"),
     ],
     targets: [
         .executableTarget(
             name: "USDZStudioApp",
-            dependencies: ["EditorUI", "USDBridge", "USDCore", "AgentMCP", "RenderKit", "DiagnosticsKit"],
+            dependencies: ["EditorUI", "USDBridge", "USDCore", "AgentMCP", "RenderKit", "ViewportKit", "DiagnosticsKit"],
             path: "Sources")
     ]
 )

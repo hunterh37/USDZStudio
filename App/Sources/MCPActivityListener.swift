@@ -317,10 +317,21 @@ final class MCPActivityListener: ObservableObject {
         hostSession = session
         // Wire a renderer the same way the CLI-hosted server does (issue #109):
         // without one, `render_views` (and the whole sculpt review loop) is dead
-        // in-app. The native SceneKit renderer needs no usd-core/usdrecord.
-        let renderer = NativeRendererSelection.make(
-            environment: ProcessInfo.processInfo.environment,
-            fileExists: { FileManager.default.fileExists(atPath: $0) })
+        // in-app. Because THIS host is app-hosted (a live window/GPU context),
+        // we unify onto the RealityKit viewport renderer so the agent sees
+        // exactly the pixels the user sees — the same pipeline as the on-screen
+        // viewport — rather than the separate SceneKit approximation. The
+        // headless CLI server keeps the native SceneKit backend (no drawable
+        // there). Flag: RenderKit.MCPRenderBackendSelection.preferViewportRenderer.
+        let renderer: any RenderExecuting
+        switch MCPRenderBackendSelection.backend(canUseViewport: true) {
+        case .viewport:
+            renderer = ViewportKitRenderer()
+        case .native:
+            renderer = NativeRendererSelection.make(
+                environment: ProcessInfo.processInfo.environment,
+                fileExists: { FileManager.default.fileExists(atPath: $0) })
+        }
         hostServer = AgentMCPServer.make(
             session: session,
             configuration: AgentMCPServer.Configuration(

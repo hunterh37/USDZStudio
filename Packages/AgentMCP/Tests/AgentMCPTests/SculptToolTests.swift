@@ -48,6 +48,46 @@ import USDCore
 
     // MARK: - Author + validate
 
+    /// #165: pin the *documented* wire text for `ShapeKind`, not an
+    /// encoder-generated payload. Every other spec test feeds
+    /// `JSONValue.parse(spec.encoded())`, so a regression in the hand-written
+    /// `"kind"` discriminator (or in the legacy fallback) would slip through —
+    /// which is exactly the shape of the bug #165 reported. Both forms decode
+    /// through the full MCP dispatch path.
+    @Test func authorSpecAcceptsLiteralShapeKindWireForms() async {
+        // Preferred friendly form: {"kind": ...}.
+        let kindForm = #"""
+        {"name":"WireKind","objectClass":"object",
+         "root":{"name":"root","shape":{"kind":"group"},
+          "children":[
+            {"name":"body","shape":{"kind":"primitive","primitive":"box"},"attachment":"root"},
+            {"name":"knob","shape":{"kind":"library","entryID":"sphere"},"attachment":"root"}]}}
+        """#
+        let byKind = await callOK(Fixtures.server(session: Fixtures.session()),
+            "sculpt_author_spec", ["spec": try! JSONValue.parse(Data(kindForm.utf8))])
+        #expect(byKind["name"].stringValue == "WireKind")
+        #expect(byKind["componentCount"].doubleValue == 3)
+
+        // Legacy form: Swift's synthesized associated-value coding, still accepted.
+        let legacyForm = #"""
+        {"name":"WireLegacy","objectClass":"object",
+         "root":{"name":"root","shape":{"group":{}},
+          "children":[
+            {"name":"body","shape":{"primitive":{"_0":"box"}},"attachment":"root"},
+            {"name":"knob","shape":{"library":{"entryID":"sphere"}},"attachment":"root"}]}}
+        """#
+        let byLegacy = await callOK(Fixtures.server(session: Fixtures.session()),
+            "sculpt_author_spec", ["spec": try! JSONValue.parse(Data(legacyForm.utf8))])
+        #expect(byLegacy["name"].stringValue == "WireLegacy")
+        #expect(byLegacy["componentCount"].doubleValue == 3)
+
+        // A shape with no recognizable discriminator fails loudly.
+        let bogus = #"{"name":"X","objectClass":"object","root":{"name":"root","shape":{"nope":1}}}"#
+        let message = await callError(Fixtures.server(session: Fixtures.session()),
+            "sculpt_author_spec", ["spec": try! JSONValue.parse(Data(bogus.utf8))])
+        #expect(message.contains("kind"))
+    }
+
     @Test func authorValidateAndReject() async {
         let session = Fixtures.session()
         let server = Fixtures.server(session: session)

@@ -23,6 +23,39 @@ import Testing
         #expect(resolution?.headless == false)
     }
 
+    /// #166 was filed as "the CLI-hosted MCP server never wires a renderer, so
+    /// render_views is stats-only". It was actually a stale binary — but nobody
+    /// could *prove* the wiring without spawning a process and reading JSON,
+    /// which is why the report was plausible. These assert the composition root
+    /// directly, so a genuine regression fails in CI instead of turning into a
+    /// field bug hunt.
+    @Test func configurationAlwaysWiresARenderer() {
+        let (resolution, _) = resolve(["scene.usdz"])
+        let configuration = McpCommand.makeConfiguration(
+            resolution: resolution!, eventSink: nil,
+            environment: [:], fileExists: { _ in false }, pythonPath: nil)
+        // The native renderer needs no usdrecord and no Python, so a bare
+        // environment must still yield real pixels.
+        #expect(configuration.renderer != nil)
+        #expect(configuration.enabledGroups == Set(ToolGroup.allCases))
+        // No Python located → no script executor, but that must not take the
+        // renderer down with it.
+        #expect(configuration.scriptExecutor == nil)
+    }
+
+    /// The renderer survives a narrowed tool surface and custom libraries, and
+    /// a located Python adds the script executor without disturbing it.
+    @Test func configurationCarriesResolutionAndPython() {
+        let (resolution, _) = resolve(["scene.usda", "--groups", "render", "--library", "/tmp/lib"])
+        let configuration = McpCommand.makeConfiguration(
+            resolution: resolution!, eventSink: nil,
+            environment: [:], fileExists: { _ in false }, pythonPath: "/usr/bin/python3")
+        #expect(configuration.renderer != nil)
+        #expect(configuration.enabledGroups == [.render])
+        #expect(configuration.scriptExecutor != nil)
+        #expect(configuration.libraryDirectories.map(\.path) == ["/tmp/lib"])
+    }
+
     @Test func parsesNoRelay() {
         let (resolution, _) = resolve(["scene.usda", "--no-relay"])
         #expect(resolution?.noRelay == true)

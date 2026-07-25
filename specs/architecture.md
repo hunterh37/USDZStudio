@@ -57,7 +57,8 @@ EditorUI ─▶ CaptureKit            (capture-import sheet: the detail/profile 
 App ─▶ AgentMCP                    (composition root hosts the in-app MCP editing session on the open document; specs/agent-live-editing.md. EditorUI still must NOT import AgentMCP)
 AgentMCP ─▶ {USDBridge, EditingKit, ValidationKit, ConversionKit, ScriptingKit, MeshKit, SculptKit} ─▶ USDCore   (thin MCP adapter, docs/AGENT_MCP_PLAN.md; never EditorUI)
 RenderKit ─▶ {AgentMCP, USDBridge}   (implements AgentMCP.RenderExecuting with a native SceneKit renderer + opt-in usdrecord; consumed by BOTH App and CLI so each hosted MCP server gets a renderer — issue #109)
-{App, CLI} ─▶ RenderKit               (composition roots inject the native renderer into their AgentMCPServer.Configuration)
+{App, CLI} ─▶ RenderKit               (composition roots inject a renderer into their AgentMCPServer.Configuration; RenderKit.MCPRenderBackendSelection is the pure ON-flag policy for viewport-vs-native)
+App ─▶ ViewportKit                    (already; App also adapts ViewportKit's headless RealityKit snapshot onto AgentMCP.RenderExecuting — ViewportKitRenderer — so the app-hosted MCP render_views uses the SAME pipeline the user sees. Only the App may bridge ViewportKit↔AgentMCP; neither kit imports the other. SceneKit stays the headless-CLI fallback. specs/agent-live-editing.md)
 ```
 
 The authoritative, machine-checked form of this graph is the policy table in

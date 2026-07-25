@@ -112,12 +112,19 @@ struct StubRenderer: RenderExecuting {
         let server = Fixtures.server(session: Fixtures.session())
         let stats = await callOK(server, "render_views")
         #expect(stats["statsOnly"].boolValue == true)
+        // #166: the implicit renderer-less fallback must announce itself, so
+        // "my renders came back stats-only" is self-diagnosing rather than
+        // indistinguishable from a deliberate statsOnly request.
+        #expect(stats["degraded"].boolValue == true)
+        #expect(stats["degradedReason"].stringValue?.contains("no renderer is configured") == true)
         let subjects = stats["subjects"].arrayValue!
         #expect(subjects.count == 1)
         #expect(subjects[0]["triangles"].intValue == 24)  // 2 boxes × 6 quads × 2 tris
         // Isolated subtree.
         let isolated = await callOK(server, "render_views", ["paths": ["/Root/Box"], "statsOnly": true])
         #expect(isolated["subjects"].arrayValue?.first?["triangles"].intValue == 12)
+        // An *explicit* statsOnly:true is not a degradation — no marker (#166).
+        #expect(isolated["degraded"].boolValue == nil)
         // statsOnly=false with no renderer → structured unsupported error.
         let message = await callError(server, "render_views", ["statsOnly": false])
         #expect(message.contains("without a renderer"))
