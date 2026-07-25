@@ -68,13 +68,28 @@ public struct CreateMaterialCommand: EditCommand {
               let surfacePath = materialPath.appending("Surface") else { return nil }
 
         // 3. Build the material + shader subtree.
+        //
+        // Types are stated explicitly: `UsdPreviewSurface.inputs:diffuseColor`
+        // is `color3f`, and `info:id` is a `uniform token`. Authoring them as
+        // the wire-inferred `double3`/`token` produced a shader the schema
+        // rejects (#171). The material's `outputs:surface` terminal is wired to
+        // the shader's, without which nothing downstream can find the surface
+        // at all.
         let shader = Prim(
             path: surfacePath, typeName: "Shader",
             attributes: [
-                Attribute(name: "info:id", value: .token(MaterialBinding.previewSurfaceID)),
-                Attribute(name: "inputs:diffuseColor", value: .vector(baseColor)),
+                .typed(name: "info:id", type: "token",
+                       value: .token(MaterialBinding.previewSurfaceID), isUniform: true),
+                .typed(name: "inputs:diffuseColor", type: "color3f", value: .vector(baseColor)),
+                .connected(name: "outputs:surface", type: "token", to: []),
             ])
-        let material = Prim(path: materialPath, typeName: "Material", children: [shader])
+        let material = Prim(
+            path: materialPath, typeName: "Material",
+            attributes: [
+                .connected(name: "outputs:surface", type: "token",
+                           to: ["\(surfacePath.description).outputs:surface"]),
+            ],
+            children: [shader])
 
         // 4. The target copy carrying the binding (any prior binding replaced).
         var boundTarget = targetPrim

@@ -111,7 +111,7 @@ spec fields are absent):
 | blockout | Coarse geometry for every node + repetition copies (real prims). |
 | structural | `set_transform` placement for every authored prim. |
 | formRefinement | Applies real MeshKit geometry ops (v1: `inset`, `subdivide`) declared per-node in `refinements` — the prim is read back into a `HalfEdgeMesh`, the ops are applied over the whole mesh, and the result is re-authored. Review-only when no node declares refinements. |
-| material | `create_material` for each painted node, plus the extra PBR channels (roughness/metallic scalars, emissive, and any texture maps + normalScale) as shader inputs on the created surface. Each repetition-system copy then `bind_material`s the base component's single material rather than minting a duplicate per copy (#140). |
+| material | `create_material` for each painted node, then `PreviewSurfaceNetwork` authors that material's **full UsdPreviewSurface network** (see below). Each repetition-system copy then `bind_material`s the base component's single material rather than minting a duplicate per copy (#140). |
 | surface | Authors a projected-texture / de-light descriptor (`sculptProjectedTexture` string attribute on the root) when the spec declares a `surfaceProjection` targeting a real component. |
 | lighting | Authors a real `UsdLux` light prim (with `inputs:intensity` + `inputs:color`) plus its placement for each declared `LightSpec`, under the sculpt root. |
 | interaction | Authors the action-ready runtime manifest (`sculptRuntime` string attribute on the root) when the spec exposes a socket, collider, or joint. |
@@ -121,6 +121,47 @@ spec fields are absent):
 same read-back/re-author path (`SculptTools.applyMeshTransform` in AgentMCP,
 `SculptBuildRunner.applyMeshTransform` in EditorUI), so "refine" and "optimize"
 change real topology rather than only annotating the root.
+
+### Materials author a real shader network (#170/#171)
+
+The material pass once wrote texture maps as plain `string` attributes on the
+surface shader (`inputs:albedoMap`, `inputs:normalMap`, …). Those are not
+`UsdPreviewSurface` schema inputs, no `UsdUVTexture` node was ever created, and
+nothing was connected — so every map was inert in our viewport, in QuickLook, in
+Reality Composer, and in every DCC. Colours were authored as `double3` and
+scalars as `double`, which the schema also rejects. Renders came back flat with
+every map "bound".
+
+`SculptKit.PreviewSurfaceNetwork` is the single source of the graph shape, shared
+verbatim by the MCP executor (`SculptTools.authorMaterialNetwork`) and the in-app
+runner (`SculptBuildRunner.authorMaterialNetwork`) so the headless and visible
+paths cannot drift. Per material it authors:
+
+- typed scalar/colour inputs — `color3f` for `diffuseColor`/`emissiveColor`,
+  `float` for `roughness`/`metallic`;
+- one shared `UsdPrimvarReader_float2` (`inputs:varname = "st"`);
+- one `UsdUVTexture` per map, `inputs:file` as an **`asset`**, `inputs:st`
+  connected to the reader, `sourceColorSpace` `sRGB` for albedo/emissive and
+  `raw` for roughness/normal;
+- the surface input **connected** to `outputs:rgb` (or `outputs:r` for a
+  single-channel map) rather than carrying a competing value — USD ignores an
+  authored value alongside a connection, so leaving one in makes the file lie
+  about what renders;
+- for normal maps, the schema's `scale (2,2,2,1)` / `bias (-1,-1,-1,0)` remap
+  from packed [0,1] texture space into [-1,1] tangent space, attenuated by
+  `normalScale`;
+- the material's own `outputs:surface` terminal wired to the shader's.
+
+None of that renders without texture coordinates, so `MeshKit.MeshUV` authors
+face-varying `primvars:st` on every generated primitive (box/plane/cylinder/
+cone/sphere), and `MeshIO.flatTextured` fills UVs for faces minted by topology
+ops. That second half matters more than it looks: `MeshIO.flat` exports the UV
+channel only when *every* face has UVs, so a single extruded face used to discard
+the entire set.
+
+The sculpt executor also declares the root group as the stage `defaultPrim`
+(`declareDefaultPrimIfNeeded`) — AR QuickLook cannot pick a root prim without
+one, and `specs/validation.md` now reports its absence as a hard error.
 
 The surface pass mirrors img2threejs's `bake_projected_texture` +
 `delight_albedo`: SculptKit emits only the declarative descriptor (camera pose
@@ -157,11 +198,12 @@ processing and stays a pure leaf.
      judgeable, so the score is gated.
    - **Similarity floor** (`SculptPass.enforcesSimilarityFloor`, deterministic
      `measuredSimilarity` ≥ `policy.similarityFloor` when the floor is > 0):
-     engages only from the **`material`** pass onward. The metric blends
-     silhouette IoU with SSIM and luminance correlation — pixel-intensity
-     comparisons — so the untextured geometry passes (`blockout`, `structural`,
-     `formRefinement`) render as uniform clay and would score arbitrarily low
-     against a full-colour reference photo regardless of geometric fidelity.
+     engages only from the **`material`** pass onward. The metric blends a
+     concavity-preserving shape term with an appearance term — the latter a
+     pixel-intensity comparison — so the untextured geometry passes (`blockout`,
+     `structural`, `formRefinement`) render as uniform clay and would score
+     arbitrarily low against a full-colour reference photo regardless of
+     geometric fidelity.
      Deferring the colour-dependent floor to the first textured pass keeps it a
      meaningful, non-deadlocking gate. The floor is the **deterministic fidelity
      gate** the subjective score cannot bypass (see below). Two calibrations

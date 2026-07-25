@@ -157,6 +157,14 @@ public struct HalfEdgeMesh: Equatable, Sendable {
         faceCornerUVs.removeValue(forKey: id)
     }
 
+    /// Replace one face's per-corner UVs (used by `MeshUV` unwrapping).
+    /// Ignored when the UV count doesn't match the face loop, so the channel
+    /// can never fall out of parallel with the topology.
+    public mutating func setFaceUVs(_ uvs: [SIMD2<Double>], for id: FaceID) {
+        guard let loop = faceLoops[id], loop.count == uvs.count else { return }
+        faceCornerUVs[id] = uvs
+    }
+
     public mutating func addFaceToSubset(_ face: FaceID, subset: String) {
         subsets[subset, default: []].insert(face)
     }

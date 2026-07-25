@@ -1,0 +1,79 @@
+#usda 1.0
+(
+    defaultPrim = "Textured"
+    metersPerUnit = 1
+    upAxis = "Y"
+)
+
+# A complete UsdPreviewSurface shading network: a UsdPrimvarReader_float2 feeding
+# two UsdUVTexture nodes, whose outputs are connected into the surface's
+# diffuseColor and roughness, with the material's terminal wired to the surface.
+#
+# This fixture exists because opening and saving a textured asset used to strip
+# every connection and every texture node — plain data loss on a no-op
+# open → save (#174). The round-trip gate now enforces that the graph survives.
+
+def Xform "Textured"
+{
+    def Mesh "Geom" (
+        prepend apiSchemas = ["MaterialBindingAPI"]
+    )
+    {
+        int[] faceVertexCounts = [4]
+        int[] faceVertexIndices = [0, 1, 2, 3]
+        point3f[] points = [(-1, 0, -1), (1, 0, -1), (1, 0, 1), (-1, 0, 1)]
+        texCoord2f[] primvars:st = [(0, 0), (1, 0), (1, 1), (0, 1)] (
+            interpolation = "faceVarying"
+        )
+        uniform token subdivisionScheme = "none"
+        rel material:binding = </Looks/Painted>
+    }
+}
+
+def Scope "Looks"
+{
+    def Material "Painted"
+    {
+        token outputs:surface.connect = </Looks/Painted/Surface.outputs:surface>
+
+        def Shader "Surface"
+        {
+            uniform token info:id = "UsdPreviewSurface"
+            color3f inputs:diffuseColor.connect = </Looks/Painted/albedoTexture.outputs:rgb>
+            float inputs:metallic = 0
+            float inputs:roughness.connect = </Looks/Painted/roughnessTexture.outputs:r>
+            token outputs:surface
+        }
+
+        def Shader "stReader"
+        {
+            uniform token info:id = "UsdPrimvarReader_float2"
+            token inputs:varname = "st"
+            float2 outputs:result
+        }
+
+        def Shader "albedoTexture"
+        {
+            uniform token info:id = "UsdUVTexture"
+            asset inputs:file = @textures/albedo.png@
+            float2 inputs:st.connect = </Looks/Painted/stReader.outputs:result>
+            token inputs:sourceColorSpace = "sRGB"
+            token inputs:wrapS = "repeat"
+            token inputs:wrapT = "repeat"
+            float3 outputs:rgb
+            float outputs:r
+        }
+
+        def Shader "roughnessTexture"
+        {
+            uniform token info:id = "UsdUVTexture"
+            asset inputs:file = @textures/roughness.png@
+            float2 inputs:st.connect = </Looks/Painted/stReader.outputs:result>
+            token inputs:sourceColorSpace = "raw"
+            token inputs:wrapS = "repeat"
+            token inputs:wrapT = "repeat"
+            float3 outputs:rgb
+            float outputs:r
+        }
+    }
+}

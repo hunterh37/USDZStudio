@@ -24,12 +24,20 @@ public struct ViewPose: Sendable, Equatable, Codable {
         self.elevationDegrees = elevationDegrees
     }
 
+    /// A degree delta wrapped into (-180, 180] — the shortest signed way round
+    /// the orbit, so 350° and 10° are 20° apart rather than 340°.
+    public static func wrappedDegrees(_ delta: Double) -> Double {
+        let wrapped = delta.truncatingRemainder(dividingBy: 360)
+        if wrapped > 180 { return wrapped - 360 }
+        if wrapped <= -180 { return wrapped + 360 }
+        return wrapped
+    }
+
     /// Great-circle-ish angular distance between two poses, in degrees. Azimuth
     /// wraps at 360°; the two axes are combined in quadrature so a pure-azimuth
     /// and a pure-elevation error of equal size weigh equally.
     public func angularDistance(to other: ViewPose) -> Double {
-        let rawAz = abs(azimuthDegrees - other.azimuthDegrees).truncatingRemainder(dividingBy: 360)
-        let az = min(rawAz, 360 - rawAz)
+        let az = abs(Self.wrappedDegrees(azimuthDegrees - other.azimuthDegrees))
         let el = abs(elevationDegrees - other.elevationDegrees)
         return (az * az + el * el).squareRoot()
     }

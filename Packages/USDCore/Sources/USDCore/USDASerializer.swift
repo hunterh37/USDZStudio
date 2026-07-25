@@ -101,8 +101,31 @@ public enum USDASerializer {
     /// attribute metadata — or `nil` for a value type USD can't express (so the
     /// caller emits an "omitted" comment).
     static func attributeLines(for attribute: Attribute, pad inner: String) -> [String]? {
-        guard let type = typeToken(for: attribute.value, name: attribute.name) else { return nil }
+        guard let type = typeToken(for: attribute) else { return nil }
         let uniform = attribute.isUniform ? "uniform " : ""
+
+        // Connections are authored as their own `type name.connect = <target>`
+        // statement. The type token is mandatory on that line — USD's text
+        // parser rejects a bare `name.connect = …`, which is what makes this a
+        // separate concern from the value line rather than a suffix on it.
+        //
+        // Connections must survive even when no value is authored: a connected
+        // shader input is exactly that shape, and dropping it silently unwires
+        // the material network (#174).
+        let connectLines: [String] = attribute.connections.isEmpty ? [] : {
+            let targets = attribute.connections.map { "<\($0)>" }
+            let rhs = targets.count == 1 ? targets[0] : "[\(targets.joined(separator: ", "))]"
+            return ["\(inner)\(uniform)\(type) \(attribute.name).connect = \(rhs)"]
+        }()
+
+        if attribute.value.isUnauthored {
+            // A declaration carrying a connection needs only the connect
+            // statement; it already declares the type. Emitting both would
+            // redeclare the same property twice, which USD rejects.
+            return connectLines.isEmpty
+                ? ["\(inner)\(uniform)\(type) \(attribute.name)"]
+                : connectLines
+        }
 
         if attribute.isAnimated, let samples = attribute.timeSamples {
             var lines = ["\(inner)\(uniform)\(type) \(attribute.name).timeSamples = {"]
@@ -111,12 +134,12 @@ public enum USDASerializer {
                 lines.append("\(inner)    \(number(sample.time)): \(literal),")
             }
             lines.append("\(inner)}")
-            return lines
+            return lines + connectLines
         }
 
         guard let literal = valueLiteral(for: attribute.value, name: attribute.name) else { return nil }
         let head = "\(inner)\(uniform)\(type) \(attribute.name) = \(literal)"
-        guard !attribute.metadata.isEmpty else { return [head] }
+        guard !attribute.metadata.isEmpty else { return [head] + connectLines }
         // Attribute metadata (e.g. `elementSize`, `interpolation`) is authored
         // verbatim; callers pre-format each value (quoting tokens themselves).
         var lines = [head + " ("]
@@ -124,15 +147,26 @@ public enum USDASerializer {
             lines.append("\(inner)    \(key) = \(attribute.metadata[key]!)")
         }
         lines.append("\(inner))")
-        return lines
+        return lines + connectLines
     }
 
     /// One `type name = value` declaration, or nil for `.unsupported`. Retained
     /// for callers that only need the flat static form (no uniform/metadata).
     static func declaration(for attribute: Attribute) -> String? {
-        guard let type = typeToken(for: attribute.value, name: attribute.name),
-              let literal = valueLiteral(for: attribute.value, name: attribute.name) else { return nil }
+        guard let type = typeToken(for: attribute) else { return nil }
+        if attribute.value.isUnauthored { return "\(type) \(attribute.name)" }
+        guard let literal = valueLiteral(for: attribute.value, name: attribute.name) else { return nil }
         return "\(type) \(attribute.name) = \(literal)"
+    }
+
+    /// The type token for an attribute: the type declared in the source file
+    /// when we have it, otherwise inferred from the value. The declared type
+    /// wins because the wire value set is narrower than USD's — a `color3f` and
+    /// a `double3` both arrive as `.vector`, and only the declaration
+    /// distinguishes them.
+    static func typeToken(for attribute: Attribute) -> String? {
+        if let declared = attribute.declaredType, !declared.isEmpty { return declared }
+        return typeToken(for: attribute.value, name: attribute.name)
     }
 
     /// The leading USD type token for a value (e.g. `float3[]`, `color3f`), or
@@ -171,6 +205,8 @@ public enum USDASerializer {
         case .quatfArray(let v): return v.count % 4 == 0 ? "quatf[]" : nil
         case .matrix4dArray(let v): return !v.isEmpty && v.count % 16 == 0 ? "matrix4d[]" : nil
         case .unsupported: return nil
+        // A declaration carries its own type; there is no value to infer from.
+        case .declaredOnly(let typeName): return typeName
         }
     }
 
@@ -208,7 +244,7 @@ public enum USDASerializer {
                 .map { matrixLiteral(v, base: $0) }
                 .joined(separator: ", ")
             return "[\(matrices)]"
-        case .unsupported: return nil
+        case .unsupported, .declaredOnly: return nil
         }
     }
 

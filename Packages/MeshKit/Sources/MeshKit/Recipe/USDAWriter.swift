@@ -81,6 +81,16 @@ public enum USDAWriter {
         out.add("            int[] faceVertexCounts = [\(flat.faceVertexCounts.map(String.init).joined(separator: ", "))]")
         out.add("            int[] faceVertexIndices = [\(flat.faceVertexIndices.map(String.init).joined(separator: ", "))]")
         out.add("            point3f[] points = [\(flat.points.map(point3).joined(separator: ", "))]")
+        // Face-varying texture coordinates. Without them a bound material's
+        // texture maps have no parametrization and cannot render at all (#170).
+        if !flat.faceVaryingUVs.isEmpty {
+            let uvs = flat.faceVaryingUVs
+                .map { "(\(format($0.x)), \(format($0.y)))" }
+                .joined(separator: ", ")
+            out.add("            texCoord2f[] primvars:st = [\(uvs)] (")
+            out.add("                interpolation = \"faceVarying\"")
+            out.add("            )")
+        }
         if let material = boundMaterial, let spec = materials[material] {
             let c = spec.diffuseColor
             out.add("            color3f[] primvars:displayColor = [(\(format(c[0])), \(format(c[1])), \(format(c[2])))]")

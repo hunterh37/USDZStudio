@@ -127,14 +127,30 @@ import Testing
         let reference = EvalCorpus.render(car).matted
 
         @Sendable func rendered(at pose: ViewPose) -> RasterImage {
-            // Pose error shifts the silhouette in the frame (a small-angle
-            // stand-in for reprojection): 90° of azimuth ≈ half a frame.
-            let dx = (pose.azimuthDegrees - car.pose.azimuthDegrees) / 180
-            let dy = (pose.elevationDegrees - car.pose.elevationDegrees) / 180
-            let shifted = SilhouetteSpec(name: "shifted", pose: pose) { nx, ny in
-                car.isForeground(nx - dx, ny - dy)
+            // Pose error *deforms* the silhouette — it does not merely slide it
+            // across the frame. That distinction matters: since #173 the metric
+            // deliberately normalizes away where a subject sits, because
+            // framing is a camera property rather than a fidelity signal, so a
+            // pure-translation stand-in would present a perfectly flat score
+            // surface with no pose information in it at all.
+            //
+            // Orbiting foreshortens the subject along the axis being rotated
+            // about, which is the real, measurable signal. Modelled here as a
+            // signed anisotropic stretch so the optimum at zero pose error is
+            // unique (a symmetric one would tie the ±error mirror poses).
+            let dAzimuth = ViewPose.wrappedDegrees(
+                pose.azimuthDegrees - car.pose.azimuthDegrees) / 180
+            // Elevation is searched over a ~90° band against azimuth's 360°, so
+            // it is normalized by its own span; otherwise a degree of elevation
+            // error would deform the silhouette a quarter as much as a degree of
+            // azimuth error and the search would under-resolve it.
+            let dElevation = (pose.elevationDegrees - car.pose.elevationDegrees) / 90
+            let sx = 1 + 0.6 * dAzimuth
+            let sy = 1 + 0.6 * dElevation
+            let deformed = SilhouetteSpec(name: "deformed", pose: pose) { nx, ny in
+                car.isForeground(nx / sx, ny / sy)
             }
-            return EvalCorpus.render(shifted).matted
+            return EvalCorpus.render(deformed).matted
         }
 
         let result = await PoseAlignment.estimate { pose in

@@ -310,6 +310,9 @@ enum ValueFormatter {
         case .quatfArray(let a): return "quatf[\(a.count / 4)]"
         case .matrix4dArray(let a): return "matrix4d[\(a.count / 16)]"
         case .unsupported(let name): return "‹\(name)›"
+        // Declared, unauthored (a connected shader input): show the type, and
+        // let the connection row alongside it carry the actual wiring.
+        case .declaredOnly(let name): return "\(name) (connected)"
         }
     }
 

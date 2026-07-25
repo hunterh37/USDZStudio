@@ -8,13 +8,51 @@ import json
 import sys
 
 
+# USD value types the editor models. An attribute whose declared type is in
+# this set is round-trippable even when it holds no authored value, so it is
+# emitted as a `declared` row rather than `unsupported:` — that is what keeps a
+# connected shader input (which never has a value) alive through open→save.
+_KNOWN_TYPES = frozenset((
+    "bool", "int", "uint", "int64", "float", "double", "half", "string",
+    "token", "asset", "float2", "double2", "float3", "double3", "color3f",
+    "normal3f", "point3f", "vector3f", "float4", "double4", "quatf", "quatd",
+    "texCoord2f", "matrix4d", "point3f[]", "normal3f[]", "vector3f[]",
+    "float3[]", "double3[]", "color3f[]", "texCoord2f[]", "float2[]",
+    "double2[]", "int[]", "uint[]", "float[]", "double[]", "string[]",
+    "token[]",
+))
+
+
 def attribute_payload(attr):
     """Map a Usd.Attribute to the closed wire type set; exotic types are
-    preserved by name as unsupported (never silently dropped)."""
+    preserved by name as unsupported (never silently dropped).
+
+    Two things travel alongside the value and matter for UsdShade round-tripping
+    (#174): `declaredType`, the type token as written in the file (the wire value
+    set is narrower than USD's, so `color3f` and `double3` are otherwise
+    indistinguishable on the way back out), and `connections`, the attribute's
+    `.connect` targets — the edges of a shader network.
+    """
     type_name = str(attr.GetTypeName())
     value = attr.Get()
-    out = {"name": attr.GetName(), "type": "unsupported:" + type_name}
+    out = {"name": attr.GetName(), "type": "unsupported:" + type_name,
+           "declaredType": type_name}
+    connections = attr.GetConnections()
+    if connections:
+        out["connections"] = [str(p) for p in connections]
+    # `interpolation` decides whether a UV set is per-vertex or per-face-corner;
+    # losing it turns a valid primvars:st into a mis-indexed one (#170).
+    interpolation = attr.GetMetadata("interpolation")
+    if interpolation:
+        out["metadata"] = {"interpolation": '"%s"' % interpolation}
+    from pxr import Sdf
+    if attr.GetVariability() == Sdf.VariabilityUniform:
+        out["uniform"] = True
     if value is None:
+        # Declared, unauthored: keep the declaration (and its connections) as a
+        # first-class row when we understand the type.
+        if type_name in _KNOWN_TYPES:
+            out["type"] = "declared"
         return out
     try:
         if type_name == "bool":

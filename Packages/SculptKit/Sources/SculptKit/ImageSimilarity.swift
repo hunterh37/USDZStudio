@@ -49,15 +49,46 @@ public struct SimilarityReport: Sendable, Equatable, Codable {
     /// Shape-dominant blend of `shapeScore` and `appearanceScore`, clamped to
     /// 0...1 — the single number the continue-gate compares to the floor.
     public var aggregate: Double
+    /// Silhouette IoU measured in *raw image space*, with no alignment. Kept
+    /// for diagnostics only: it collapses to 0 for any translated or scaled
+    /// subject, which is exactly the defect that made `silhouetteIoU` useless
+    /// as a score (#173).
+    public var rawSilhouetteIoU: Double
+    /// `true` when the measurement could not be trusted: both images have a
+    /// non-empty silhouette, yet the aligned masks do not intersect at all.
+    /// That is a measurement failure, not a fidelity of zero — the gate must
+    /// not read `aggregate` as a verdict when this is set.
+    public var measurementFailed: Bool
 
     public init(silhouetteIoU: Double, luminanceCorrelation: Double, ssim: Double,
-                shapeScore: Double, appearanceScore: Double, aggregate: Double) {
+                shapeScore: Double, appearanceScore: Double, aggregate: Double,
+                rawSilhouetteIoU: Double = 0, measurementFailed: Bool = false) {
         self.silhouetteIoU = silhouetteIoU
         self.luminanceCorrelation = luminanceCorrelation
         self.ssim = ssim
         self.shapeScore = shapeScore
         self.appearanceScore = appearanceScore
         self.aggregate = aggregate
+        self.rawSilhouetteIoU = rawSilhouetteIoU
+        self.measurementFailed = measurementFailed
+    }
+
+    // Decode-defaulted so reports written before these fields existed still load.
+    private enum CodingKeys: String, CodingKey {
+        case silhouetteIoU, luminanceCorrelation, ssim, shapeScore, appearanceScore
+        case aggregate, rawSilhouetteIoU, measurementFailed
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        silhouetteIoU = try c.decode(Double.self, forKey: .silhouetteIoU)
+        luminanceCorrelation = try c.decode(Double.self, forKey: .luminanceCorrelation)
+        ssim = try c.decode(Double.self, forKey: .ssim)
+        shapeScore = try c.decode(Double.self, forKey: .shapeScore)
+        appearanceScore = try c.decode(Double.self, forKey: .appearanceScore)
+        aggregate = try c.decode(Double.self, forKey: .aggregate)
+        rawSilhouetteIoU = try c.decodeIfPresent(Double.self, forKey: .rawSilhouetteIoU) ?? 0
+        measurementFailed = try c.decodeIfPresent(Bool.self, forKey: .measurementFailed) ?? false
     }
 }
 
@@ -92,27 +123,55 @@ public enum ImageSimilarity {
     /// Compare a reference image to a render, returning the fidelity report.
     /// The reported `shapeScore`/`appearanceScore` are the split the gate
     /// consumes; `aggregate` is their shape-dominant blend.
+    /// Compare a reference image to a render, returning the fidelity report.
+    ///
+    /// Both images are first **subject-centered**: each is resampled about its
+    /// own silhouette centroid rather than about the frame. Without that, a
+    /// render whose subject sits a little left of the reference's produced
+    /// `silhouetteIoU == 0` on shapes that visibly overlap, because the masks
+    /// were compared in raw image space (#173). Where the subject sits is a
+    /// property of the camera, not of the model, so it must not be scored.
+    ///
+    /// Scale is deliberately *not* normalized: a model built at the wrong size
+    /// is a genuine fidelity error, and erasing it would make the gate blind to
+    /// exactly the defect it exists to catch.
+    ///
+    /// The appearance term is likewise restricted to the **union of the two
+    /// masks**, so page background can't dominate it. Previously a correct dark
+    /// anodised material scored *below* untextured grey clay purely because the
+    /// reference sat on a bright background and the render on a dark one.
     public static func compare(reference: RasterImage, render: RasterImage) -> SimilarityReport {
         let side = gridSide
-        let ref = Grid(image: reference, side: side)
-        let ren = Grid(image: render, side: side)
+        // Raw, frame-space grids — diagnostics only.
+        let rawRef = Grid(image: reference, side: side)
+        let rawRen = Grid(image: render, side: side)
+        let rawIoU = silhouetteIoU(rawRef, rawRen)
 
-        // Legacy per-metric diagnostics (unchanged formulas, still reported).
+        // Subject-normalized grids: the actual measurement surface.
+        let ref = Grid(image: reference, side: side, cropTo: rawRef.subjectCenteredRect(in: reference))
+        let ren = Grid(image: render, side: side, cropTo: rawRen.subjectCenteredRect(in: render))
+
         let iou = silhouetteIoU(ref, ren)
-        let luma = luminanceCorrelation(ref, ren)
-        let ssimValue = ssim(ref, ren)
+        let bothPresent = ref.foreground.contains(true) && ren.foreground.contains(true)
+        // Aligned masks that share no cell at all, while both subjects exist,
+        // means the alignment (not the model) failed. Reported, never scored.
+        let measurementFailed = bothPresent && iou == 0
 
-        // Shape / appearance split. Both reuse the already-resampled grids so
-        // there is no redundant sampling. `appearance` is the same renormalised
-        // SSIM/luma blend `ShapeMetric.appearanceScore` computes.
-        let shape = ShapeMetric.shapeScore(reference: ref.foreground, render: ren.foreground, side: side).score
+        // Appearance is measured inside the union of the two silhouettes only.
+        let mask = zip(ref.foreground, ren.foreground).map { $0 || $1 }
+        let luma = luminanceCorrelation(ref, ren, within: mask)
+        let ssimValue = ssim(ref, ren, within: mask)
+
+        let shape = ShapeMetric.shapeScore(
+            reference: ref.foreground, render: ren.foreground, side: side).score
         let appearance = clamp01(
             (weightSSIM * ssimValue + weightLuma * luma) / (weightSSIM + weightLuma))
         let aggregate = clamp01(weightShape * shape + weightAppearance * appearance)
 
         return SimilarityReport(
             silhouetteIoU: iou, luminanceCorrelation: luma, ssim: ssimValue,
-            shapeScore: shape, appearanceScore: appearance, aggregate: aggregate)
+            shapeScore: shape, appearanceScore: appearance, aggregate: aggregate,
+            rawSilhouetteIoU: rawIoU, measurementFailed: measurementFailed)
     }
 
     /// The worst (minimum-aggregate) report across a set of reference/render
@@ -149,12 +208,18 @@ public enum ImageSimilarity {
     /// Pearson correlation of the luminance fields, remapped from [-1, 1] to
     /// [0, 1]. When either field is flat (zero variance) correlation is
     /// undefined, so we fall back to 1 minus their mean-luminance gap.
-    static func luminanceCorrelation(_ a: Grid, _ b: Grid) -> Double {
-        let n = Double(a.luma.count)
-        let meanA = a.luma.reduce(0, +) / n
-        let meanB = b.luma.reduce(0, +) / n
+    ///
+    /// `mask`, when given, restricts the comparison to the cells it marks — the
+    /// union of the two silhouettes, so background luminance cannot dominate
+    /// the appearance term (#173).
+    static func luminanceCorrelation(_ a: Grid, _ b: Grid, within mask: [Bool]? = nil) -> Double {
+        let cells = Self.cells(count: a.luma.count, mask: mask)
+        guard !cells.isEmpty else { return 1 }
+        let n = Double(cells.count)
+        let meanA = cells.reduce(0.0) { $0 + a.luma[$1] } / n
+        let meanB = cells.reduce(0.0) { $0 + b.luma[$1] } / n
         var cov = 0.0, varA = 0.0, varB = 0.0
-        for i in 0..<a.luma.count {
+        for i in cells {
             let da = a.luma[i] - meanA
             let db = b.luma[i] - meanB
             cov += da * db
@@ -168,13 +233,16 @@ public enum ImageSimilarity {
         return clamp01((r + 1) / 2)
     }
 
-    /// Global SSIM on the luminance fields (single window over the whole grid).
-    static func ssim(_ a: Grid, _ b: Grid) -> Double {
-        let n = Double(a.luma.count)
-        let muA = a.luma.reduce(0, +) / n
-        let muB = b.luma.reduce(0, +) / n
+    /// Global SSIM on the luminance fields (single window), optionally
+    /// restricted to `mask` — see `luminanceCorrelation(_:_:within:)`.
+    static func ssim(_ a: Grid, _ b: Grid, within mask: [Bool]? = nil) -> Double {
+        let cells = Self.cells(count: a.luma.count, mask: mask)
+        guard !cells.isEmpty else { return 1 }
+        let n = Double(cells.count)
+        let muA = cells.reduce(0.0) { $0 + a.luma[$1] } / n
+        let muB = cells.reduce(0.0) { $0 + b.luma[$1] } / n
         var varA = 0.0, varB = 0.0, cov = 0.0
-        for i in 0..<a.luma.count {
+        for i in cells {
             let da = a.luma[i] - muA
             let db = b.luma[i] - muB
             varA += da * da
@@ -191,6 +259,15 @@ public enum ImageSimilarity {
 
     static func clamp01(_ x: Double) -> Double { min(1, max(0, x)) }
 
+    /// Indices to measure over: every cell, or only those `mask` marks. An
+    /// all-false mask falls back to the full grid rather than measuring
+    /// nothing.
+    static func cells(count: Int, mask: [Bool]?) -> [Int] {
+        guard let mask, mask.count == count else { return Array(0..<count) }
+        let selected = (0..<count).filter { mask[$0] }
+        return selected.isEmpty ? Array(0..<count) : selected
+    }
+
     // MARK: - Resampled grid
 
     /// A `side × side` resample of an image into a normalized luminance field
@@ -201,17 +278,38 @@ public enum ImageSimilarity {
         var luma: [Double]
         var foreground: [Bool]
 
+        /// A pixel rectangle of the source image to sample from.
+        struct Rect: Equatable {
+            var x: Int, y: Int, width: Int, height: Int
+        }
+
         init(image: RasterImage, side: Int) {
+            self.init(image: image, side: side,
+                      cropTo: Rect(x: 0, y: 0, width: image.width, height: image.height))
+        }
+
+        /// Resample `crop` (a pixel rect of `image`) into the grid.
+        ///
+        /// Passing each image's own silhouette bounding box is what makes the
+        /// comparison translation- and scale-invariant: both subjects land in
+        /// the same normalized box regardless of where the camera framed them
+        /// (#173).
+        init(image: RasterImage, side: Int, cropTo crop: Rect) {
             self.side = side
             var luma = [Double](repeating: 0, count: side * side)
             var alpha = [Double](repeating: 0, count: side * side)
             var rgb = [(Double, Double, Double)](repeating: (0, 0, 0), count: side * side)
             let usesAlpha = Grid.hasMeaningfulAlpha(image)
+            let cropWidth = max(1, crop.width)
+            let cropHeight = max(1, crop.height)
 
+            // The crop rect may extend past the image (the subject-normalized
+            // box is squared up and padded), so every sample is clamped into
+            // bounds — sampling the edge pixel, which is background.
             for gy in 0..<side {
-                let sy = min(image.height - 1, gy * image.height / side)
+                let sy = max(0, min(image.height - 1, crop.y + gy * cropHeight / side))
                 for gx in 0..<side {
-                    let sx = min(image.width - 1, gx * image.width / side)
+                    let sx = max(0, min(image.width - 1, crop.x + gx * cropWidth / side))
                     let base = (sy * image.width + sx) * 4
                     let r = Double(image.rgba[base]) / 255
                     let g = Double(image.rgba[base + 1]) / 255
@@ -237,6 +335,35 @@ public enum ImageSimilarity {
                     abs(px.0 - bg.0) > delta || abs(px.1 - bg.1) > delta || abs(px.2 - bg.2) > delta
                 }
             }
+        }
+
+        /// A full-size crop rect re-centered on this grid's foreground centroid.
+        ///
+        /// This normalizes **translation only** — the rect keeps the image's own
+        /// dimensions, so the subject's apparent size is untouched. That split
+        /// is deliberate: where a subject sits in frame is a property of the
+        /// camera, and scoring it produced `silhouetteIoU == 0` on silhouettes
+        /// that visibly overlapped (#173). How *big* it is, by contrast, is a
+        /// real fidelity signal — a model built at half scale is wrong — so
+        /// scale is deliberately left in the measurement.
+        ///
+        /// Falls back to the untranslated frame when there is no foreground.
+        func subjectCenteredRect(in image: RasterImage) -> Rect {
+            let full = Rect(x: 0, y: 0, width: image.width, height: image.height)
+            var sumX = 0, sumY = 0, count = 0
+            for y in 0..<side {
+                for x in 0..<side where foreground[y * side + x] {
+                    sumX += x; sumY += y; count += 1
+                }
+            }
+            guard count > 0 else { return full }
+            // Grid centroid → source pixels, then offset so the crop is centered
+            // on the subject instead of on the frame.
+            let centroidX = (Double(sumX) / Double(count) + 0.5) * Double(image.width) / Double(side)
+            let centroidY = (Double(sumY) / Double(count) + 0.5) * Double(image.height) / Double(side)
+            return Rect(x: Int((centroidX - Double(image.width) / 2).rounded()),
+                        y: Int((centroidY - Double(image.height) / 2).rounded()),
+                        width: image.width, height: image.height)
         }
 
         /// An image has a meaningful alpha channel when at least one pixel is

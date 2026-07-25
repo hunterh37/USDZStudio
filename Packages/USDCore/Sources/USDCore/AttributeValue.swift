@@ -31,6 +31,14 @@ public enum AttributeValue: Hashable, Sendable, Codable {
     case matrix4dArray([Double])
     /// A value whose USD type the editor does not model; preserved by name.
     case unsupported(typeName: String)
+    /// A *declared but unauthored* attribute: the USD type is known, no value
+    /// is authored. This is the normal shape of a connected shader input
+    /// (`inputs:diffuseColor.connect = <…>` with no fallback) and of a shader
+    /// output (`token outputs:surface`). Modelling it explicitly is what keeps
+    /// `open → save` from destroying a UsdShade network (#174): before, a
+    /// value-less attribute arrived as `.unsupported` and the serializer
+    /// dropped it, taking its connection with it.
+    case declaredOnly(typeName: String)
 
     /// A short human-readable type label for inspector display.
     public var typeLabel: String {
@@ -51,14 +59,25 @@ public enum AttributeValue: Hashable, Sendable, Codable {
         case .quatfArray: return "quatf[]"
         case .matrix4dArray: return "matrix4d[]"
         case .unsupported(let typeName): return typeName
+        case .declaredOnly(let typeName): return typeName
         }
     }
 
     /// `true` when the editor can round-trip and author this value type
     /// (everything except `.unsupported`).
+    ///
+    /// `.declaredOnly` counts as editable: the type is known, so the value can
+    /// be authored onto it and the attribute survives a save.
     public var isEditable: Bool {
         if case .unsupported = self { return false }
         return true
+    }
+
+    /// `true` when no value is authored (a declaration, usually carrying a
+    /// connection instead).
+    public var isUnauthored: Bool {
+        if case .declaredOnly = self { return true }
+        return false
     }
 }
 
@@ -89,23 +108,75 @@ public struct Attribute: Hashable, Sendable, Codable {
     public var metadata: [String: String]
     /// Time samples, sorted by time when authored; `nil` for static attributes.
     public var timeSamples: [TimeSample]?
+    /// The USD type token as *declared in the file* (e.g. `color3f`, `float`,
+    /// `asset`, `normal3f`). `nil` for attributes the editor authored without
+    /// stating a type, in which case the serializer infers one from the value.
+    ///
+    /// Carrying the declared type is what stops a `color3f` from being rewritten
+    /// as `double3` and a `float` as `double` on save (#171/#174): the wire
+    /// value set is deliberately narrow, so the *type* has to travel alongside
+    /// it rather than being guessed back from the payload.
+    public var declaredType: String?
+    /// Outgoing attribute connections (`name.connect = <path>`), as full USD
+    /// property paths, e.g. `/Looks/M/albedo.outputs:rgb`. Empty for the vast
+    /// majority of attributes; non-empty is what makes a shader *network* a
+    /// network rather than a pile of unrelated prims.
+    public var connections: [String]
 
     public init(
         name: String,
         value: AttributeValue,
         isUniform: Bool = false,
         metadata: [String: String] = [:],
-        timeSamples: [TimeSample]? = nil
+        timeSamples: [TimeSample]? = nil,
+        declaredType: String? = nil,
+        connections: [String] = []
     ) {
         self.name = name
         self.value = value
         self.isUniform = isUniform
         self.metadata = metadata
         self.timeSamples = timeSamples
+        self.declaredType = declaredType
+        self.connections = connections
     }
 
     /// `true` when the attribute carries time samples.
     public var isAnimated: Bool { timeSamples?.isEmpty == false }
+
+    /// A declaration-only attribute of `type` carrying `connections` — the
+    /// shape of every connected shader input.
+    public static func connected(
+        name: String, type: String, to connections: [String]
+    ) -> Attribute {
+        Attribute(name: name, value: .declaredOnly(typeName: type),
+                  declaredType: type, connections: connections)
+    }
+
+    /// A value-carrying attribute with an explicit USD type token.
+    public static func typed(
+        name: String, type: String, value: AttributeValue, isUniform: Bool = false
+    ) -> Attribute {
+        Attribute(name: name, value: value, isUniform: isUniform, declaredType: type)
+    }
+
+    // `declaredType`/`connections` are late additions, so decoding tolerates
+    // their absence — previously-encoded payloads (session snapshots on disk)
+    // must keep loading rather than failing the whole document.
+    private enum CodingKeys: String, CodingKey {
+        case name, value, isUniform, metadata, timeSamples, declaredType, connections
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        name = try c.decode(String.self, forKey: .name)
+        value = try c.decode(AttributeValue.self, forKey: .value)
+        isUniform = try c.decodeIfPresent(Bool.self, forKey: .isUniform) ?? false
+        metadata = try c.decodeIfPresent([String: String].self, forKey: .metadata) ?? [:]
+        timeSamples = try c.decodeIfPresent([TimeSample].self, forKey: .timeSamples)
+        declaredType = try c.decodeIfPresent(String.self, forKey: .declaredType)
+        connections = try c.decodeIfPresent([String].self, forKey: .connections) ?? []
+    }
 }
 
 /// A USD relationship: a named, typed pointer from one prim to others

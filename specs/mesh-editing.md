@@ -73,6 +73,26 @@ Checked by every op's test suite and available as a debug assertion after every 
 
 Golden-mesh fixtures (committed .usda) cover the known nasty cases: bowtie verts, mixed tri/quad regions, UV seams crossing selection boundaries, subset borders.
 
+### UV generation (`MeshUV`, #170)
+
+Generated primitives now ship a **complete face-varying UV channel**
+(`primvars:st`, `faceVarying` interpolation): a per-face planar unwrap for
+box/plane, cylindrical for cylinder/cone with a disc projection on the caps, and
+spherical for the sphere. Angular projections repair the wrap seam by lifting the
+low side past 1, which is precisely what per-face-corner (rather than per-vertex)
+UVs exist to express.
+
+Note the interaction with invariant 6 above. `MeshIO.flat` exports the UV channel
+only when *every* face carries UVs parallel to its loop, so an op that mints a
+face used to discard **the entire set**, not just the new face's. Generation and
+sculpt paths therefore go through `MeshIO.flatTextured`, which fills the gaps
+first; plain `flat` stays byte-faithful for the import → export round-trip
+invariant, which must not gain attributes the source file never had.
+
+Without this, every `MaterialSpec` texture map is unrenderable regardless of how
+correct the shader network is — the maps have nothing to map onto. See
+`specs/sculpt-pipeline.md` for the material-network half.
+
 ## Editor Integration
 
 ### Component mode

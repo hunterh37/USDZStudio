@@ -55,6 +55,22 @@ import UniformTypeIdentifiers
     static func transparentPNG(_ url: URL, dim: Int = 64) {
         writePNG(url, dim: dim) { _, _ in (0, 0, 0, 0) }
     }
+
+    /// Two opaque blobs at opposite edges: the silhouette centroid lands in the
+    /// empty middle, so centroid alignment can leave this genuinely disjoint
+    /// from a centred subject — the measurement-failure case (#173).
+    static func barbellPNG(_ url: URL, dim: Int = 64) {
+        writePNG(url, dim: dim) { x, y in
+            let band = y >= dim / 2 - 4 && y <= dim / 2 + 3
+            let left = x >= 2 && x <= 9, right = x >= dim - 10 && x <= dim - 3
+            return (band && (left || right)) ? (200, 200, 200, 255) : (0, 0, 0, 0)
+        }
+    }
+
+    /// A small centred dot.
+    static func dotPNG(_ url: URL, dim: Int = 64) {
+        centeredSquarePNG(url, dim: dim, side: 8)
+    }
     #endif
 
     // MARK: - RasterLoader
@@ -275,6 +291,43 @@ import UniformTypeIdentifiers
         #expect(out["measuredSimilarity"].doubleValue ?? 0 > 0.99)
         #expect(out["viewCount"].doubleValue == 1)
         #expect(out["similarity"]["silhouetteIoU"].doubleValue == 1)
+    }
+
+    /// #173: when both silhouettes are non-empty yet the aligned masks still do
+    /// not intersect, the tool must say the *measurement* failed rather than
+    /// hand the agent a 0.0 to optimise against. Optimising a broken metric is
+    /// how the balisong build was pushed to make the model worse.
+    @Test func comparisonSheetFlagsAMeasurementFailure() async throws {
+        let dir = Fixtures.tempDirectory()
+        let ref = dir.appendingPathComponent("ref.png")
+        let render = dir.appendingPathComponent("render.png")
+        Self.barbellPNG(ref)
+        Self.dotPNG(render)
+        let server = Fixtures.server(session: Fixtures.session(), configuration: .init(workDirectory: dir))
+        _ = await callOK(server, "sculpt_author_spec", ["spec": Self.specArg(SculptToolTests.richSpec())])
+        let out = await callOK(server, "sculpt_comparison_sheet",
+            ["referencePath": .string(ref.path), "renderPath": .string(render.path)])
+        #expect(out["similarity"]["measurementFailed"].boolValue == true)
+        #expect(out["similarity"]["measurementNote"].stringValue?
+            .contains("not a fidelity of zero") == true)
+        // The raw, frame-space IoU is reported alongside for diagnosis.
+        #expect(out["similarity"]["rawSilhouetteIoU"].doubleValue != nil)
+    }
+
+    /// The counterweight: a normal comparison must not carry the failure flag,
+    /// or the signal would be noise.
+    @Test func comparisonSheetOmitsTheFlagOnAValidMeasurement() async throws {
+        let dir = Fixtures.tempDirectory()
+        let ref = dir.appendingPathComponent("ref.png")
+        let render = dir.appendingPathComponent("render.png")
+        Self.centeredSquarePNG(ref)
+        Self.centeredSquarePNG(render, side: 20)
+        let server = Fixtures.server(session: Fixtures.session(), configuration: .init(workDirectory: dir))
+        _ = await callOK(server, "sculpt_author_spec", ["spec": Self.specArg(SculptToolTests.richSpec())])
+        let out = await callOK(server, "sculpt_comparison_sheet",
+            ["referencePath": .string(ref.path), "renderPath": .string(render.path)])
+        #expect(out["similarity"]["measurementFailed"].boolValue == nil)
+        #expect(out["similarity"]["measurementNote"].stringValue == nil)
     }
 
     @Test func comparisonSheetMultiViewWorstWins() async throws {

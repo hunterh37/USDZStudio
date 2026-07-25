@@ -21,6 +21,12 @@ struct SnapshotDTO: Decodable {
         var doubles: [Double]?
         var ints: [Int]?
         var strings: [String]?
+        /// The USD type token as declared in the source file.
+        var declaredType: String?
+        /// `.connect` targets — the edges of a shader network (#174).
+        var connections: [String]?
+        var metadata: [String: String]?
+        var uniform: Bool?
     }
     struct VariantSetDTO: Decodable {
         var name: String
@@ -166,11 +172,21 @@ public enum StageSnapshotDecoder {
         case "string[]", "token[]":
             guard let v = dto.strings else { throw missingValue(dto) }
             value = .stringArray(v)
+        case "declared":
+            // Declared with a known type but no authored value — the shape of
+            // every connected shader input. Preserved so save re-emits the
+            // declaration *and* its connection (#174).
+            value = .declaredOnly(typeName: dto.declaredType ?? "token")
         default:
             // Exotic types are preserved by name, never dropped (PRD pillar 2).
             value = .unsupported(typeName: dto.type)
         }
-        return Attribute(name: dto.name, value: value)
+        return Attribute(
+            name: dto.name, value: value,
+            isUniform: dto.uniform ?? false,
+            metadata: dto.metadata ?? [:],
+            declaredType: dto.declaredType,
+            connections: dto.connections ?? [])
     }
 
     private static func missingValue(_ dto: SnapshotDTO.AttributeDTO) -> BridgeError {

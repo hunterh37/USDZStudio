@@ -114,10 +114,19 @@ public enum GeometryProbe {
         }
         let skinned = prim.relationships.contains { $0.name == "skel:skeleton" }
             || prim.attribute(named: "primvars:skel:jointIndices") != nil
+        // Read the UV channel back too, so an op that round-trips a mesh
+        // through the stage doesn't quietly strip its texture coordinates.
+        var uvs: [SIMD2<Double>] = []
+        if case .doubleArray(let flatUVs)? = prim.attribute(named: "primvars:st")?.value,
+           flatUVs.count == indices.count * 2 {
+            uvs = stride(from: 0, to: flatUVs.count, by: 2)
+                .map { SIMD2(flatUVs[$0], flatUVs[$0 + 1]) }
+        }
         return FlatMesh(
             points: pts.map { SIMD3($0[0], $0[1], $0[2]) },
             faceVertexCounts: counts,
             faceVertexIndices: indices,
+            faceVaryingUVs: uvs,
             hasSkeletalBinding: skinned)
     }
 
@@ -146,6 +155,17 @@ public enum GeometryProbe {
         // lives once in `MeshKit.VertexNormals`; an empty result means the
         // topology can't be honestly interpreted, in which case authoring no
         // normals is the truthful answer.
+        // Face-varying UVs (#170). Without `primvars:st` no texture in a
+        // material can map onto the mesh, so every MaterialSpec map channel is
+        // silently inert. `texCoord2f[]` + `faceVarying` is what the
+        // UsdPrimvarReader_float2 in the shader network reads.
+        if !flat.faceVaryingUVs.isEmpty {
+            attributes.append(Attribute(
+                name: "primvars:st",
+                value: .doubleArray(flat.faceVaryingUVs.flatMap { [$0.x, $0.y] }),
+                metadata: ["interpolation": "\"faceVarying\""],
+                declaredType: "texCoord2f[]"))
+        }
         let normals = VertexNormals.smoothFlat(for: flat)
         if !normals.isEmpty {
             attributes.append(Attribute(

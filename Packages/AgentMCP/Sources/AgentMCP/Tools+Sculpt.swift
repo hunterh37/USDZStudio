@@ -586,16 +586,27 @@ public enum SculptTools {
     }
 
     static func similarityReportJSON(_ report: SimilarityReport) -> JSONValue {
-        .object([
+        var payload: [String: JSONValue] = [
             "aggregate": .number(report.aggregate),
             // Shape / appearance split (#93): the gate's `aggregate` is a
             // shape-dominant blend of these two, so the sheet surfaces both.
             "shapeScore": .number(report.shapeScore),
             "appearanceScore": .number(report.appearanceScore),
+            // Measured on subject-normalized silhouettes (#173) — framing no
+            // longer counts against fidelity.
             "silhouetteIoU": .number(report.silhouetteIoU),
+            "rawSilhouetteIoU": .number(report.rawSilhouetteIoU),
             "ssim": .number(report.ssim),
             "luminanceCorrelation": .number(report.luminanceCorrelation),
-        ])
+        ]
+        if report.measurementFailed {
+            payload["measurementFailed"] = .bool(true)
+            payload["measurementNote"] = .string(
+                "both silhouettes are non-empty yet the aligned masks do not intersect — "
+                + "this is a measurement failure, not a fidelity of zero. Do not optimise "
+                + "against this number; re-render with the subject fully in frame.")
+        }
+        return .object(payload)
     }
 
     static func writeComparisonSheet(_ sheet: ComparisonSheet, to workDirectory: URL) throws -> String {
@@ -628,6 +639,7 @@ public enum SculptTools {
             let args = insertArgs(name: name, parent: parentPath)
             let built = try MutateTools.makeInsert(args: args, session: session, extraAttributes: [])
             _ = try session.mutate(built.command)
+            try declareDefaultPrimIfNeeded(built.path, session: session)
             return built.path.description
 
         case let .createMesh(name, parentPath, primitive, width, height, depth, radius, segments):
@@ -699,11 +711,12 @@ public enum SculptTools {
                 // coverage:enable
             }
             _ = try session.mutate(command)
-            // Author the remaining PBR channels (scalars + texture maps) onto
-            // the surface shader created above, each as its own undoable edit.
-            for attribute in materialChannelAttributes(material) {
-                try authorAttribute(attribute, on: command.surfacePath, session: session)
-            }
+            // Author the full UsdPreviewSurface network (scalars, and a real
+            // UsdUVTexture graph for any texture maps) onto the material
+            // created above, each step its own undoable edit.
+            try authorMaterialNetwork(
+                material, materialPath: command.materialPath,
+                surfacePath: command.surfacePath, session: session)
             return command.materialPath.description
 
         case let .bindMaterial(targetPath, sourcePath):
@@ -810,34 +823,52 @@ public enum SculptTools {
         } catch {
             throw ToolError.failed("mesh op failed at \(rawPath): \(error)")
         }
-        for attribute in GeometryProbe.meshAttributes(from: MeshIO.flat(from: result)) {
+        for attribute in GeometryProbe.meshAttributes(from: MeshIO.flatTextured(from: result)) {
             try authorAttribute(attribute, on: primPath, session: session)
         }
         return primPath.description
     }
 
-    /// The extra shader-input attributes for a material beyond the base colour
-    /// authored by `CreateMaterialCommand`: roughness/metallic scalars, an
-    /// optional emissive colour, and any texture-map asset paths + normal scale.
-    static func materialChannelAttributes(_ material: MaterialSpec) -> [Attribute] {
-        var attributes: [Attribute] = [
-            Attribute(name: "inputs:roughness", value: .double(material.roughness)),
-            Attribute(name: "inputs:metallic", value: .double(material.metallic)),
-        ]
-        if let emissive = material.emissive {
-            attributes.append(Attribute(name: "inputs:emissiveColor", value: .vector(emissive)))
+    /// Author the material's full `UsdPreviewSurface` network: typed scalar and
+    /// colour inputs on the surface shader, the material's `outputs:surface`
+    /// terminal, and — for a textured material — a `UsdPrimvarReader_float2`
+    /// plus one `UsdUVTexture` per map, connected into the right surface inputs.
+    ///
+    /// The graph shape lives in `SculptKit.PreviewSurfaceNetwork` so the in-app
+    /// runner and this MCP executor cannot drift apart.
+    static func authorMaterialNetwork(
+        _ material: MaterialSpec, materialPath: PrimPath, surfacePath: PrimPath,
+        session: EditSession
+    ) throws {
+        let network = PreviewSurfaceNetwork.build(material: material, at: materialPath)
+        for attribute in network.surfaceAttributes {
+            try authorAttribute(attribute, on: surfacePath, session: session)
         }
-        let maps: [(String?, String)] = [
-            (material.albedoMap, "inputs:albedoMap"), (material.normalMap, "inputs:normalMap"),
-            (material.roughnessMap, "inputs:roughnessMap"), (material.emissiveMap, "inputs:emissiveMap"),
-        ]
-        for (path, name) in maps {
-            if let path { attributes.append(Attribute(name: name, value: .string(path))) }
+        for attribute in network.materialAttributes {
+            try authorAttribute(attribute, on: materialPath, session: session)
         }
-        if let scale = material.normalScale {
-            attributes.append(Attribute(name: "inputs:normalScale", value: .double(scale)))
+        for (offset, shader) in network.shaderPrims.enumerated() {
+            // Appended after the surface shader, so indices are stable across a
+            // rebuild and the undo stack stays exactly reversible.
+            _ = try session.mutate(InsertPrimCommand(
+                prim: shader, parent: materialPath, index: 1 + offset))
         }
-        return attributes
+    }
+
+    /// Name the sculpt's root group as the stage `defaultPrim`, if the stage
+    /// doesn't already declare one.
+    ///
+    /// AR QuickLook fails to pick a root prim without it, which is why a
+    /// missing `defaultPrim` is a hard error on the ARKit profile (#172) —
+    /// so a sculpt that never declares one is not shippable, however good the
+    /// geometry is. Only root-level groups qualify, and an existing declaration
+    /// is never overwritten.
+    static func declareDefaultPrimIfNeeded(_ path: PrimPath, session: EditSession) throws {
+        guard path.depth == 1, session.stage.metadata.defaultPrim == nil else { return }
+        var metadata = session.stage.metadata
+        metadata.defaultPrim = path.name
+        _ = try session.mutate(SetStageMetadataCommand(
+            newMetadata: metadata, oldMetadata: session.stage.metadata))
     }
 
     /// Set one attribute on an existing prim through the mutation funnel.
@@ -855,7 +886,7 @@ public enum SculptTools {
     }
 
     static func insertMesh(_ mesh: HalfEdgeMesh, name: String, parentPath: String?, session: EditSession) throws -> String {
-        let flat = MeshIO.flat(from: mesh)
+        let flat = MeshIO.flatTextured(from: mesh)
         let args = insertArgs(name: name, parent: parentPath)
         let built = try MutateTools.makeInsert(
             args: args, session: session,
