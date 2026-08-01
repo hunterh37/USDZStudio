@@ -247,6 +247,7 @@ public struct StageDiff: Equatable, Sendable, Codable {
         case .quatfArray(let a): return "[" + a.map(number).joined(separator: ", ") + "]"
         case .matrix4dArray(let a): return "[" + a.map(number).joined(separator: ", ") + "]"
         case .unsupported(let t): return "<\(t)>"
+        case .declaredOnly(let t): return "<\(t) unauthored>"
         }
     }
 

@@ -72,6 +72,44 @@ Design rules:
 - Bulk geometry (points/normals/UVs for the viewport) crosses the boundary as `Data` buffers via Python `memoryview` → zero-copy where possible, one copy worst case.
 - `Tf.Notice.ObjectsChanged` registered per stage → forwarded as `StageChange` events (resynced paths) → drives viewport diffing.
 
+### The wire carries types and connections, not just values (#174)
+
+`AttributeValue` is a deliberately closed, RealityKit-relevant subset, so the
+wire type set is **narrower than USD's** — a `color3f` and a `double3` both
+arrive as `.vector`. Two fields travel alongside every value so nothing is lost
+to that narrowing:
+
+- **`Attribute.declaredType`** — the type token as written in the file. The
+  serializer prefers it over inference, which is what stops `color3f` being
+  rewritten as `double3` and `float` as `double` on save.
+- **`Attribute.connections`** — the attribute's `.connect` targets. These are the
+  *edges* of a shader network; without them a material is a pile of unrelated
+  prims.
+
+A third addition covers the value-less case: **`AttributeValue.declaredOnly`**, a
+declared-but-unauthored attribute. This is the normal shape of a connected shader
+input (`inputs:diffuseColor.connect = <…>` with no fallback) and of a shader
+output (`token outputs:surface`). Previously such an attribute arrived as
+`.unsupported` and the serializer wrote it as an "omitted" comment, so a plain
+open → save of a textured USDZ **deleted its entire texture network** — `grep -c
+UsdUVTexture` returned 0 on the output against 4 on the input. Unlike
+`.unsupported`, `.declaredOnly` is `isEditable`: the type is known, so a value
+can be authored onto it and the attribute survives a save.
+
+Two syntax details the round-trip gate enforces, both of which produce
+*unopenable layers* when got wrong:
+
+- the type token is **mandatory** on a `.connect` line — USD's text parser
+  rejects a bare `name.connect = …`;
+- a declaration carrying a connection emits **only** the connect statement, since
+  that already declares the type. Emitting both redeclares the same property.
+
+`Fixtures/Corpus/textured.usda` carries a full `UsdPreviewSurface` +
+`UsdUVTexture` graph so `scripts/roundtrip-gate.sh` holds this. Closing the gap
+also made `animated.usda` idempotent — a time-sampled channel's *declaration* now
+survives (its sample values remain Phase 10 work), so the gate's ratchet was
+tightened accordingly.
+
 ## Key usd-core capabilities we lean on
 
 | Feature | API |

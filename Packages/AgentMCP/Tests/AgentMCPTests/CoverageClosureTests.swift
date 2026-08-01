@@ -35,6 +35,42 @@ import USDCore
         #expect(stats["subjects"].arrayValue?.first?["materials"].arrayValue?.isEmpty == false)
     }
 
+    /// #174: `get_prim` must expose attribute *connections* and report the
+    /// declared USD type, or an agent can't introspect a material at all — the
+    /// old output leaked `unsupported:` placeholders instead of the graph.
+    @Test func getPrimReportsConnectionsAndDeclaredTypes() async {
+        let session = Fixtures.session()
+        let server = Fixtures.server(session: session)
+        _ = await callOK(server, "create_material", ["target": "/Root/Box"])
+
+        let detail = await callOK(server, "get_prim", ["path": "/Looks/Material/Surface"])
+        let attributes = detail["attributes"].arrayValue!
+
+        // The colour input reports its schema type, not the narrower wire type.
+        let diffuse = attributes.first { $0["name"].stringValue == "inputs:diffuseColor" }!
+        #expect(diffuse["type"].stringValue == "color3f")
+
+        // The surface output is a declaration: a real type, and an explicitly
+        // null value rather than a fabricated zero.
+        let output = attributes.first { $0["name"].stringValue == "outputs:surface" }!
+        #expect(output["type"].stringValue == "token")
+        if case .null = output["value"] {} else {
+            Issue.record("declared-only value should report as null, got \(output["value"])")
+        }
+
+        // The material's terminal exposes where it reads from.
+        let material = await callOK(server, "get_prim", ["path": "/Looks/Material"])
+        let terminal = material["attributes"].arrayValue!
+            .first { $0["name"].stringValue == "outputs:surface" }!
+        #expect(terminal["connections"].arrayValue?.compactMap { $0.stringValue }
+                == ["/Looks/Material/Surface.outputs:surface"])
+
+        // Attributes with no connections omit the key rather than shipping an
+        // empty array on every row.
+        let info = attributes.first { $0["name"].stringValue == "info:id" }!
+        #expect(info["connections"].arrayValue == nil)
+    }
+
     @Test func multiRootBoundsUnion() async {
         let server = Fixtures.server(session: Fixtures.session())
         _ = await callOK(server, "create_mesh", ["name": "Outlier", "shape": "box"])

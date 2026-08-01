@@ -43,6 +43,11 @@ public struct ValidationEngine: Sendable {
             DuplicatePrimNameRule(),
             MeshTopologyRule(),
             EmptyMeshRule(),
+            // Shader-network validity (#172): without these the profile
+            // reported a broken UsdPreviewSurface graph as fully compliant.
+            ShaderGraphRule(),
+            TextureWiringRule(),
+            MissingUVRule(),
             UnboundMeshRule(),
             MissingNormalsRule(),
             MissingSubdivisionSchemeRule(),

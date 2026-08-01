@@ -31,13 +31,16 @@ struct SculptBuildRunnerTests {
         // MCP executor; the baked file stem derives from the same id.
         #expect(path == "/Looks/facade_mat")
 
-        let surface = doc.snapshot.prim(at: PrimPath("/Looks/facade_mat/Surface")!)
-        func mapPath(_ name: String) -> String? {
-            if case let .string(s)? = surface?.attribute(named: name)?.value { return s }
-            return nil
+        // Baked maps land on real UsdUVTexture nodes as `asset` inputs (#171),
+        // not as unschema'd `string` attributes on the surface shader.
+        func mapPath(_ node: String) -> String? {
+            guard let texture = doc.snapshot.prim(at: PrimPath("/Looks/facade_mat/\(node)")!),
+                  case let .asset(path)? = texture.attribute(named: "inputs:file")?.value
+            else { return nil }
+            return path
         }
-        #expect(mapPath("inputs:albedoMap")?.hasSuffix("facade_mat_albedo.png") == true)
-        #expect(mapPath("inputs:emissiveMap")?.hasSuffix("facade_mat_emissive.png") == true)
+        #expect(mapPath("albedoTexture")?.hasSuffix("facade_mat_albedo.png") == true)
+        #expect(mapPath("emissiveTexture")?.hasSuffix("facade_mat_emissive.png") == true)
     }
 
     /// #167: the in-app executor names the material prim after the spec id and
@@ -260,21 +263,30 @@ struct SculptBuildRunnerTests {
                 roughnessMap: "rough.png", emissiveMap: "emit.png", normalScale: 0.75)])
     }
 
-    @Test func materialPassAuthorsTextureChannels() {
+    /// The in-app runner authors the same real UsdPreviewSurface network as the
+    /// MCP executor (#171) — both go through `PreviewSurfaceNetwork`, so this
+    /// asserts they cannot drift.
+    @Test func materialPassAuthorsTextureChannels() throws {
         let doc = EditorDocument(snapshot: StageSnapshot(rootPrims: []))
         let spec = texturedSpec()
         SculptBuildRunner.apply(pass: .blockout, of: spec, to: doc)
         let materials = SculptBuildRunner.apply(pass: .material, of: spec, to: doc)
         #expect(!materials.isEmpty)
-        let surface = doc.snapshot.prim(at: PrimPath("/Looks/pbr/Surface")!)
-        #expect(surface?.attribute(named: "inputs:roughness") != nil)
-        #expect(surface?.attribute(named: "inputs:metallic") != nil)
-        #expect(surface?.attribute(named: "inputs:emissiveColor") != nil)
-        #expect(surface?.attribute(named: "inputs:albedoMap") != nil)
-        #expect(surface?.attribute(named: "inputs:normalMap") != nil)
-        #expect(surface?.attribute(named: "inputs:roughnessMap") != nil)
-        #expect(surface?.attribute(named: "inputs:emissiveMap") != nil)
-        #expect(surface?.attribute(named: "inputs:normalScale") != nil)
+        let surface = try #require(doc.snapshot.prim(at: PrimPath("/Looks/pbr/Surface")!))
+        #expect(surface.attribute(named: "inputs:metallic")?.declaredType == "float")
+        #expect(surface.attribute(named: "inputs:emissiveColor")?.declaredType == "color3f")
+        // Mapped channels are connected to texture nodes, not valued.
+        #expect(surface.attribute(named: "inputs:diffuseColor")?.connections
+                == ["/Looks/pbr/albedoTexture.outputs:rgb"])
+        #expect(surface.attribute(named: "inputs:roughness")?.connections
+                == ["/Looks/pbr/roughnessTexture.outputs:r"])
+        // The legacy unschema'd pseudo-inputs are gone entirely.
+        for legacy in ["inputs:albedoMap", "inputs:normalMap",
+                       "inputs:roughnessMap", "inputs:emissiveMap", "inputs:normalScale"] {
+            #expect(surface.attribute(named: legacy) == nil)
+        }
+        let reader = try #require(doc.snapshot.prim(at: PrimPath("/Looks/pbr/stReader")!))
+        #expect(reader.attribute(named: "inputs:varname")?.value == .token("st"))
     }
 
     @Test func surfacePassAuthorsProjectedTextureDescriptor() {

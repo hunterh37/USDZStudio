@@ -37,8 +37,13 @@ struct EditorDocumentConsoleTests {
     }
 
     @Test func exportComplianceAllowsCleanStage() {
-        let result = doc().exportCompliance()
-        #expect(result.isExportAllowed)
+        // A `defaultPrim` is required for export since #172 — AR QuickLook
+        // cannot pick a root prim without one — so a genuinely clean stage
+        // declares it.
+        let clean = StageSnapshot(
+            metadata: StageMetadata(defaultPrim: "Root"),
+            rootPrims: [Prim(path: PrimPath("/Root")!, typeName: "Xform")])
+        #expect(EditorDocument(snapshot: clean).exportCompliance().isExportAllowed)
     }
 
     @Test func exportComplianceBlocksOnError() {

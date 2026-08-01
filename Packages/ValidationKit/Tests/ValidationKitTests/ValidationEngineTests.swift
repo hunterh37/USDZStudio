@@ -45,8 +45,19 @@ struct StageRuleTests {
         #expect(UpAxisRule().evaluate(stage: stage(upAxis: .y)).isEmpty)
     }
 
-    @Test func defaultPrimMissingIsWarning() {
+    /// A missing `defaultPrim` blocks the AR export gate (#172): AR QuickLook
+    /// genuinely fails to pick a root without one, so it is an error by default.
+    @Test func defaultPrimMissingIsError() {
         let diag = DefaultPrimRule().evaluate(stage: stage(defaultPrim: nil))
+        #expect(diag.count == 1)
+        #expect(diag[0].severity == .error)
+    }
+
+    /// Callers running the catalog as advisory lint rather than as an export
+    /// gate can still demote it.
+    @Test func defaultPrimMissingSeverityIsConfigurable() {
+        let diag = DefaultPrimRule(missingSeverity: .warning)
+            .evaluate(stage: stage(defaultPrim: nil))
         #expect(diag.count == 1)
         #expect(diag[0].severity == .warning)
     }

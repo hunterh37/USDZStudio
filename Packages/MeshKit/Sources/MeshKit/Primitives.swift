@@ -45,6 +45,7 @@ public enum Primitives {
                 mesh.addFace([grid[i][k], grid[i][k + 1], grid[i + 1][k + 1], grid[i + 1][k]])
             }
         }
+        MeshUV.unwrap(&mesh, using: .box)
         return mesh
     }
 
@@ -102,6 +103,7 @@ public enum Primitives {
         side(s.z, s.x, flip: true) { ($1, 0, $0) }      // −Y
         side(s.x, s.y, flip: false) { ($0, $1, s.z) }   // +Z: x then y → outward
         side(s.x, s.y, flip: true) { ($0, $1, 0) }      // −Z
+        MeshUV.unwrap(&mesh, using: .box)
         return mesh
     }
 
@@ -130,6 +132,16 @@ public enum Primitives {
             mesh.addFace(rings[0])                              // bottom: +θ order → −Y
             mesh.addFace(rings[heightSegments].reversed())      // top: reversed → +Y
         }
+        // Side walls take the cylindrical wrap; the caps are disc-shaped and
+        // read far better as a planar (box) projection, which `fillMissing`
+        // supplies for the two faces the wrap left alone.
+        MeshUV.unwrap(&mesh, using: .cylindrical)
+        if capped {
+            mesh.setFaceUVs(capUVs(mesh, face: mesh.faceOrder[mesh.faceCount - 2], radius: radius),
+                            for: mesh.faceOrder[mesh.faceCount - 2])
+            mesh.setFaceUVs(capUVs(mesh, face: mesh.faceOrder[mesh.faceCount - 1], radius: radius),
+                            for: mesh.faceOrder[mesh.faceCount - 1])
+        }
         return mesh
     }
 
@@ -150,6 +162,9 @@ public enum Primitives {
             mesh.addFace([base[j], base[i], apex])   // outward (verified by tests)
         }
         mesh.addFace(base)                           // base: +θ order → −Y
+        MeshUV.unwrap(&mesh, using: .cylindrical)
+        mesh.setFaceUVs(capUVs(mesh, face: mesh.faceOrder[mesh.faceCount - 1], radius: radius),
+                        for: mesh.faceOrder[mesh.faceCount - 1])
         return mesh
     }
 
@@ -186,10 +201,23 @@ public enum Primitives {
             let j = (i + 1) % segments
             mesh.addFace([bottom, latitudes.last![i], latitudes.last![j]])
         }
+        MeshUV.unwrap(&mesh, using: .spherical)
         return mesh
     }
 
     // MARK: - Shared helpers
+
+    /// Disc UVs for a cap n-gon: the circle mapped into the unit square about
+    /// (0.5, 0.5). A cylindrical wrap would smear a cap into a single line of
+    /// texels, since every cap corner shares the same height.
+    private static func capUVs(_ mesh: HalfEdgeMesh, face: FaceID,
+                               radius: Double) -> [SIMD2<Double>] {
+        guard let loop = mesh.faceLoops[face] else { return [] }
+        return loop.map { v in
+            guard let p = mesh.positions[v] else { return SIMD2(0.5, 0.5) }
+            return SIMD2(0.5 + p.x / (2 * radius), 0.5 + p.z / (2 * radius))
+        }
+    }
 
     /// Circle of `count` vertices at height `y`, θ increasing +X → +Z.
     private static func ring(_ mesh: inout HalfEdgeMesh, radius: Double, y: Double,

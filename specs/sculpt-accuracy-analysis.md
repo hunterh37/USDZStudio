@@ -67,6 +67,49 @@ against a colour photo regardless of geometric fidelity. PRs #76/#78 already
 deferred the deterministic floor to the `material` pass for this reason, but the
 blended metric still mixes appearance into what is conceptually a shape check.
 
+### F7 — The metric was measured in raw frame space, and appearance included background (fixed, #173)
+Reported from a real 38-component balisong build, three separate inversions:
+
+| stage | measuredSimilarity | silhouetteIoU |
+|---|---|---|
+| blockout, arbitrary pose | 0.285 | **0.000** |
+| blockout, `sculpt_align_pose` pose | 0.484 | 0.182 |
+| material (correct PBR), aligned | **0.386** | 0.132 |
+| material, the pose a human judged the best match | **0.294** | **0.000** |
+
+1. **`silhouetteIoU == 0.0` on visibly overlapping silhouettes.** The masks were
+   compared in raw image space with no alignment, so any translation offset
+   yielded an empty intersection. Where a subject sits in frame is a property of
+   the *camera*, not of the model, and scoring it made the number meaningless.
+2. **Correct materials *lowered* the score** (0.484 → 0.386). `appearanceScore`
+   was computed over the full frame including background: the reference was
+   bright green on navy, the render dark green on near-black, so correctly dark
+   anodised handles were penalised for the *backdrop*.
+3. **The best-matching pose scored worst** — a consequence of (1).
+
+The gate was therefore unpassable at the assessed `similarityFloor: 0.5`, and an
+agent optimising the number was pushed to brighten materials *away* from the
+reference and pick a pose that didn't match it.
+
+Fixed by:
+
+- **subject-centering** both grids on their own silhouette centroid before
+  comparison, so translation is normalized away. Scale is deliberately *not*
+  normalized — a model built at the wrong size is a genuine fidelity error, and
+  erasing it would blind the gate to exactly what it exists to catch;
+- measuring appearance **inside the union of the two masks only**, so background
+  luminance cannot dominate;
+- reporting the components separately (`rawSilhouetteIoU` alongside the aligned
+  `silhouetteIoU`) so a shape win isn't silently cancelled by a framing artefact;
+- treating a zero IoU between two *non-empty* aligned masks as
+  `measurementFailed`, surfaced with an explicit note telling the agent not to
+  optimise against the number — a measurement error is not a fidelity of zero.
+
+`PoseAlignment`'s depressed `shapeScore` shared this root cause. Note the
+knock-on for tests: a pose-error stand-in modelled as pure *translation* now
+presents a flat score surface by design, so `PoseAlignmentTests` models pose
+error as the anisotropic foreshortening a real orbit produces instead.
+
 ### F4 — Viewpoint was brute-forced, not estimated
 Comparison angle was chosen by rendering a 16-entry azimuth/elevation grid and
 keeping the best IoU. There is no estimate of the reference camera pose, so IoU

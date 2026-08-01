@@ -82,6 +82,22 @@ public enum MeshIO {
         return mesh
     }
 
+    /// `flat(from:)` with the UV channel guaranteed present: any face lacking
+    /// UVs is unwrapped first.
+    ///
+    /// Topology ops mint faces without UVs, and `flat` exports the channel only
+    /// when *every* face has them — so one extruded face used to discard the
+    /// whole texture-coordinate set (#170). Generation and sculpt paths use this
+    /// entry point; the plain `flat` stays byte-faithful for the import →
+    /// export round-trip invariant, which must not gain attributes the source
+    /// file never had.
+    public static func flatTextured(from mesh: HalfEdgeMesh,
+                                    projection: MeshUV.Projection = .box) -> FlatMesh {
+        var copy = mesh
+        MeshUV.fillMissing(&copy, using: projection)
+        return flat(from: copy)
+    }
+
     public static func flat(from mesh: HalfEdgeMesh) -> FlatMesh {
         var pointIndex: [VertexID: Int] = [:]
         var points: [SIMD3<Double>] = []

@@ -137,7 +137,7 @@ public enum RecipeEngine {
             // as a hard backstop for future ops that bypass per-op verification.
             throw RecipeError(part: part.name, message: "final mesh unhealthy — \(violation)")
         }
-        return BuiltPart(name: part.name, mesh: mesh, flat: MeshIO.flat(from: mesh),
+        return BuiltPart(name: part.name, mesh: mesh, flat: MeshIO.flatTextured(from: mesh),
                          transform: part.transform, material: part.material,
                          stepReports: reports)
     }

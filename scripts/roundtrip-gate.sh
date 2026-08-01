@@ -24,16 +24,17 @@ BIN="CLI/.build/debug/openusdz"
 
 # ── Expectations: "<file>|<idempotent>|<editundo>|<strict>"   (yes | no)
 #
-# Two known, pre-existing model gaps keep `strict` at "no" across the board and
-# `idempotent` at "no" for two fixtures. Both are authoring-phase work, tracked
+# Known, pre-existing model gaps keep `strict` at "no" across the board and
+# `idempotent` at "no" for one fixture. Both are authoring-phase work, tracked
 # in ROADMAP Phases 10/12 — not Milestone 4 scope. They are recorded here so the
 # loss is enforced and visible rather than silent:
 #
 #   • USDASerializer emits no `variantSet` blocks, so variant sets are dropped on
 #     save (variants.usda). — ROADMAP Phase 12 (advanced composition).
-#   • Attributes the bridge surfaces as `.unsupported` (a purely time-sampled
-#     channel has no default-time value) are written as an "omitted" comment, so
-#     their values are dropped on save (animated.usda). — ROADMAP Phase 10.
+#   • A purely time-sampled channel has no default-time value, so the bridge
+#     surfaces it as a typed *declaration* and save re-emits the declaration
+#     without its samples (animated.usda). — ROADMAP Phase 10. (Before #174 the
+#     declaration itself was dropped too, deleting the xformOp outright.)
 #
 # `strict` is "no" everywhere because the editor's model is a deliberate subset
 # of USD: re-serializing materializes computed attributes (purpose, visibility)
@@ -45,8 +46,9 @@ EXPECTATIONS=(
   "variants.usda|no|yes|no"     # variant sets dropped on save — Phase 12
   "skel.usda|yes|yes|no"
   "skel.usdz|yes|yes|no"
-  "animated.usda|no|yes|no"     # time-sampled values dropped on save — Phase 10
+  "animated.usda|yes|yes|no"    # sample *values* still dropped on save (declaration survives since #174) — Phase 10
   "capture-object.usda|yes|yes|no"   # photogrammetry capture result — geometry-only mesh (specs/capture-import.md)
+  "textured.usda|yes|yes|no"    # full UsdPreviewSurface + UsdUVTexture graph — #174 (open→save must not strip connections)
 )
 # Files that must FAIL to open at all (malformed input must never be silently
 # accepted, and must never crash the harness).

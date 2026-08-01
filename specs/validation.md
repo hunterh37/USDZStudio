@@ -28,6 +28,31 @@ Profiles selected in a toolbar picker; diagnostics update live (debounced) as th
 
 **Default profile is `.realityKitIOS` + `.quickLook` combined** — every document is validated against "will this render correctly in a RealityKit app?" from the moment it opens. The `.generic` profile exists for USD-pipeline users but is opt-in. Anything in the stage that RealityKit cannot render (non-PreviewSurface shader networks, unsupported schemas) is a standing warning with a conversion quick-fix where feasible (e.g. "Bake MaterialX to PreviewSurface approximation") — the app actively pushes files *toward* RealityKit compatibility, not just reports on it.
 
+### Shader networks are validated, not assumed (#170/#171/#172)
+
+The catalog once reported a stage **fully compliant with 0 errors** while it held
+an invalid `UsdPreviewSurface` network — unschema'd `string` map inputs,
+`double3` colours, no `UsdUVTexture` nodes — and meshes with no UVs for textures
+that were nominally bound. `score` agreed and returned 1.0.
+
+That is worse than having no gate. The MCP instructions tell agents to trust the
+verification loop ("mutate, then `validate` / `score` / `check_compliance`"), so
+a false green actively confirmed a material pass whose textures could not render,
+and an agent spent its cycles authoring texture intent that silently produced
+flat colour.
+
+`ShaderGraphRule`, `TextureWiringRule`, and `MissingUVRule` close it by checking
+the parts of the UsdShade contract a consumer actually depends on: node identity,
+input names, input types, and the presence of the texture coordinates a sampled
+texture reads. The rules are deliberately paired with tests asserting a
+*correctly* authored textured stage still passes cleanly — replacing false green
+with false red would be no better.
+
+A missing `defaultPrim` is likewise an **error**, not a warning: AR QuickLook
+genuinely fails to pick a root prim without one, so the asset is not shippable.
+`DefaultPrimRule(missingSeverity:)` stays configurable for callers running the
+catalog as advisory lint rather than as an export gate.
+
 ## v1 Rule Catalog (target profiles)
 
 | Rule | Profile | Severity | Quick-fix |
@@ -42,6 +67,10 @@ Profiles selected in a toolbar picker; diagnostics update live (debounced) as th
 | Prim names with illegal/duplicate identifiers | all | error | Sanitize |
 | Unbound meshes (no material) | all | info | Assign default |
 | Non-PreviewSurface shader networks | quickLook | warning | — |
+| Shader with no/unknown `info:id`, or an authored input that is not a schema input of that node (e.g. `inputs:albedoMap` on a `UsdPreviewSurface`) | all | error | — |
+| Shader input typed against the schema (`double3` where `color3f` is declared, `double` where `float` is) | all | error | — |
+| `UsdUVTexture` with no `inputs:file`, a non-`asset` file, or an unconnected `inputs:st` | all | error | — |
+| Mesh bound to a material whose network samples textures but carrying no `primvars:st` | all | error | — |
 | Opacity + doubleSided combination pitfalls | quickLook | info | — |
 | Missing/oversized velocity of file (>25MB warning for web AR) | ecommerce | warning | — |
 | Skeleton bound outside SkelRoot | RealityKit | error | Wrap in SkelRoot |

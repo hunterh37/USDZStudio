@@ -394,13 +394,16 @@ import USDCore
             session: session)
         #expect(mat == "/Looks/facade_mat")
 
-        func mapPath(_ name: String) -> String? {
-            guard let surface = session.stage.prim(at: PrimPath("/Looks/facade_mat/Surface")!),
-                  case let .string(s)? = surface.attribute(named: name)?.value else { return nil }
-            return s
+        // Maps live on real UsdUVTexture nodes now, as `asset` inputs (#171) —
+        // not as unschema'd `string` attributes on the surface shader.
+        func mapPath(_ node: String) -> String? {
+            guard let texture = session.stage.prim(at: PrimPath("/Looks/facade_mat/\(node)")!),
+                  case let .asset(path)? = texture.attribute(named: "inputs:file")?.value
+            else { return nil }
+            return path
         }
-        let albedo = mapPath("inputs:albedoMap")
-        let emissive = mapPath("inputs:emissiveMap")
+        let albedo = mapPath("albedoTexture")
+        let emissive = mapPath("emissiveTexture")
         #expect(albedo?.hasSuffix("facade_mat_facade_albedo.png") == true)
         #expect(emissive?.hasSuffix("facade_mat_facade_emissive.png") == true)
         // The baked files really exist and decode.
@@ -408,7 +411,7 @@ import USDCore
         #expect(RasterLoader.load(path: emissive ?? "") != nil)
     }
 
-    @Test func materialPassAuthorsTextureChannels() async {
+    @Test func materialPassAuthorsTextureChannels() async throws {
         let session = Fixtures.session()
         let server = Fixtures.server(session: session)
         _ = await callOK(server, "sculpt_author_spec", ["spec": Self.specArg(Self.texturedSpec())])
@@ -420,16 +423,53 @@ import USDCore
         let material = await callOK(server, "sculpt_build_pass")
         #expect(material["stepCount"].doubleValue == 1)
 
-        // Every extra channel landed on the surface shader.
-        let surface = session.stage.prim(at: PrimPath("/Looks/pbr/Surface")!)
-        #expect(surface?.attribute(named: "inputs:roughness") != nil)
-        #expect(surface?.attribute(named: "inputs:metallic") != nil)
-        #expect(surface?.attribute(named: "inputs:emissiveColor") != nil)
-        #expect(surface?.attribute(named: "inputs:albedoMap") != nil)
-        #expect(surface?.attribute(named: "inputs:normalMap") != nil)
-        #expect(surface?.attribute(named: "inputs:roughnessMap") != nil)
-        #expect(surface?.attribute(named: "inputs:emissiveMap") != nil)
-        #expect(surface?.attribute(named: "inputs:normalScale") != nil)
+        // The material pass authors a real UsdPreviewSurface network (#171):
+        // typed scalar inputs on the surface, one UsdUVTexture per map wired to
+        // a shared UV reader, and the surface input connected to it — not the
+        // old pile of unschema'd `string` attributes that rendered as nothing.
+        let surface = try #require(session.stage.prim(at: PrimPath("/Looks/pbr/Surface")!))
+        #expect(surface.attribute(named: "inputs:metallic")?.declaredType == "float")
+        #expect(surface.attribute(named: "inputs:emissiveColor")?.declaredType == "color3f")
+        // Every legacy pseudo-input is gone.
+        for legacy in ["inputs:albedoMap", "inputs:normalMap",
+                       "inputs:roughnessMap", "inputs:emissiveMap", "inputs:normalScale"] {
+            #expect(surface.attribute(named: legacy) == nil)
+        }
+
+        // Mapped channels are connected, not valued.
+        let diffuse = try #require(surface.attribute(named: "inputs:diffuseColor"))
+        #expect(diffuse.declaredType == "color3f")
+        #expect(diffuse.connections == ["/Looks/pbr/albedoTexture.outputs:rgb"])
+        // A single-channel map reads the red output, not rgb.
+        #expect(surface.attribute(named: "inputs:roughness")?.connections
+                == ["/Looks/pbr/roughnessTexture.outputs:r"])
+        #expect(surface.attribute(named: "inputs:normal")?.declaredType == "normal3f")
+
+        // The shared UV reader exists and names the primvar the meshes carry.
+        let reader = try #require(session.stage.prim(at: PrimPath("/Looks/pbr/stReader")!))
+        #expect(reader.attribute(named: "info:id")?.value == .token("UsdPrimvarReader_float2"))
+        #expect(reader.attribute(named: "inputs:varname")?.value == .token("st"))
+
+        // Each texture node samples an asset through that reader, in the right
+        // colour space for its channel.
+        let albedo = try #require(session.stage.prim(at: PrimPath("/Looks/pbr/albedoTexture")!))
+        #expect(albedo.attribute(named: "info:id")?.value == .token("UsdUVTexture"))
+        #expect(albedo.attribute(named: "inputs:file")?.declaredType == "asset")
+        #expect(albedo.attribute(named: "inputs:st")?.connections
+                == ["/Looks/pbr/stReader.outputs:result"])
+        #expect(albedo.attribute(named: "inputs:sourceColorSpace")?.value == .token("sRGB"))
+        let roughness = try #require(session.stage.prim(at: PrimPath("/Looks/pbr/roughnessTexture")!))
+        #expect(roughness.attribute(named: "inputs:sourceColorSpace")?.value == .token("raw"))
+
+        // Normal maps carry the [0,1] → [-1,1] remap the schema specifies.
+        let normal = try #require(session.stage.prim(at: PrimPath("/Looks/pbr/normalTexture")!))
+        #expect(normal.attribute(named: "inputs:scale")?.declaredType == "float4")
+        #expect(normal.attribute(named: "inputs:bias")?.declaredType == "float4")
+
+        // The material's terminal is wired to the surface.
+        let materialPrim = try #require(session.stage.prim(at: PrimPath("/Looks/pbr")!))
+        #expect(materialPrim.attribute(named: "outputs:surface")?.connections
+                == ["/Looks/pbr/Surface.outputs:surface"])
     }
 
     // MARK: - Surface pass (projected-texture descriptor)

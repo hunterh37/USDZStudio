@@ -129,12 +129,19 @@ public enum ReadTools {
             "active": .bool(prim.isActive),
             "visibility": .string(prim.visibility.rawValue),
             "attributes": .array(prim.attributes.map { attr in
-                .object([
+                // `type` reports the *declared* USD type when the file states
+                // one, so an agent introspecting a material sees `color3f` and
+                // `asset` rather than the narrower wire type (#174).
+                var row: [String: JSONValue] = [
                     "name": .string(attr.name),
-                    "type": .string(attr.value.typeLabel),
+                    "type": .string(attr.declaredType ?? attr.value.typeLabel),
                     "value": attributeJSON(attr.value),
                     "animated": .bool(attr.isAnimated),
-                ])
+                ]
+                if !attr.connections.isEmpty {
+                    row["connections"] = .array(attr.connections.map { .string($0) })
+                }
+                return .object(row)
             }),
             "relationships": .array(prim.relationships.map { rel in
                 .object([
@@ -224,6 +231,10 @@ public enum ReadTools {
             return .array(v.map { .string($0) })
         case .unsupported(let typeName):
             return .object(["unsupported": .string(typeName)])
+        // Declared but unauthored — the honest answer is "no value", not a
+        // fabricated zero. The sibling `connections` row says where it reads from.
+        case .declaredOnly:
+            return .null
         }
     }
 

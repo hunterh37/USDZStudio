@@ -21,18 +21,27 @@ public struct UpAxisRule: ValidationRule {
 }
 
 /// A single-asset usdz needs a `defaultPrim` so AR QuickLook knows which root to
-/// instantiate. Missing → warning; naming a prim that does not exist → error.
+/// instantiate. Naming a prim that does not exist is always an error.
+///
+/// A *missing* `defaultPrim` is an error too on the AR export gate: QuickLook
+/// genuinely fails to pick a root without it, so shipping the asset is not a
+/// judgement call (#172). `missingSeverity` stays configurable for callers
+/// running the catalog as advisory lint rather than as an export gate.
 public struct DefaultPrimRule: ValidationRule {
     public let id = "stage.defaultPrim"
     public let severity = DiagnosticSeverity.error
+    /// Severity for "no defaultPrim declared at all".
+    public let missingSeverity: DiagnosticSeverity
 
-    public init() {}
+    public init(missingSeverity: DiagnosticSeverity = .error) {
+        self.missingSeverity = missingSeverity
+    }
 
     public func evaluate(stage: any USDStageProtocol) -> [Diagnostic] {
         guard let name = stage.metadata.defaultPrim else {
             return [Diagnostic(
-                ruleID: id, severity: .warning,
-                message: "No defaultPrim declared; AR QuickLook may fail to pick a root prim.")]
+                ruleID: id, severity: missingSeverity,
+                message: "No defaultPrim declared; AR QuickLook fails to pick a root prim.")]
         }
         guard !stage.rootPrims.contains(where: { $0.name == name }) else { return [] }
         return [Diagnostic(

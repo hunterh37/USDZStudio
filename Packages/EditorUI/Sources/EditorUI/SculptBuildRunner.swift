@@ -56,7 +56,11 @@ public enum SculptBuildRunner {
     static func apply(step: BuildStep, to document: EditorDocument) -> String? {
         switch step {
         case .createGroup(let name, let parentPath):
-            return insert(prim: group(at: fullPath(name, under: parentPath)), to: document)
+            let created = insert(prim: group(at: fullPath(name, under: parentPath)), to: document)
+            if let created, let path = PrimPath(created) {
+                declareDefaultPrimIfNeeded(path, to: document)
+            }
+            return created
 
         case let .createMesh(name, parentPath, primitive, width, height, depth, radius, segments):
             guard let mesh = try? buildPrimitive(primitive, width: width, height: height,
@@ -107,11 +111,11 @@ public enum SculptBuildRunner {
                 name: material.id, in: document.snapshot)
             else { return nil }
             guard document.run(command) != nil else { return nil }
-            // Author the remaining PBR channels (scalars + texture maps) onto
-            // the surface shader; best-effort, mirroring the MCP executor.
-            for attribute in materialChannelAttributes(material) {
-                authorAttribute(attribute, on: command.surfacePath, to: document)
-            }
+            // Author the full UsdPreviewSurface network (typed scalars, and a
+            // real UsdUVTexture graph for any texture maps); best-effort,
+            // mirroring the MCP executor.
+            authorMaterialNetwork(material, materialPath: command.materialPath,
+                                  surfacePath: command.surfacePath, to: document)
             return command.materialPath.description
 
         case let .bindMaterial(targetPath, sourcePath):
@@ -282,28 +286,39 @@ public enum SculptBuildRunner {
         #endif
     }
 
-    /// The extra shader-input attributes beyond the base colour authored by
-    /// `CreateMaterialCommand`: roughness/metallic scalars, optional emissive,
-    /// texture-map asset paths, and normal scale.
-    static func materialChannelAttributes(_ material: MaterialSpec) -> [Attribute] {
-        var attributes: [Attribute] = [
-            Attribute(name: "inputs:roughness", value: .double(material.roughness)),
-            Attribute(name: "inputs:metallic", value: .double(material.metallic)),
-        ]
-        if let emissive = material.emissive {
-            attributes.append(Attribute(name: "inputs:emissiveColor", value: .vector(emissive)))
+    /// Author the material's full `UsdPreviewSurface` network onto the document:
+    /// typed inputs on the surface shader, the material's `outputs:surface`
+    /// terminal, and — when the spec carries maps — a `UsdPrimvarReader_float2`
+    /// plus one connected `UsdUVTexture` per map.
+    ///
+    /// The graph shape is `SculptKit.PreviewSurfaceNetwork`, shared verbatim
+    /// with the MCP executor so the in-app and headless paths cannot drift.
+    static func authorMaterialNetwork(
+        _ material: MaterialSpec, materialPath: PrimPath, surfacePath: PrimPath,
+        to document: EditorDocument
+    ) {
+        let network = PreviewSurfaceNetwork.build(material: material, at: materialPath)
+        for attribute in network.surfaceAttributes {
+            authorAttribute(attribute, on: surfacePath, to: document)
         }
-        let maps: [(String?, String)] = [
-            (material.albedoMap, "inputs:albedoMap"), (material.normalMap, "inputs:normalMap"),
-            (material.roughnessMap, "inputs:roughnessMap"), (material.emissiveMap, "inputs:emissiveMap"),
-        ]
-        for (path, name) in maps {
-            if let path { attributes.append(Attribute(name: name, value: .string(path))) }
+        for attribute in network.materialAttributes {
+            authorAttribute(attribute, on: materialPath, to: document)
         }
-        if let scale = material.normalScale {
-            attributes.append(Attribute(name: "inputs:normalScale", value: .double(scale)))
+        for shader in network.shaderPrims {
+            _ = insert(prim: shader, to: document)
         }
-        return attributes
+    }
+
+    /// Name the sculpt's root group as the stage `defaultPrim` when the stage
+    /// declares none. AR QuickLook cannot pick a root prim without one, which
+    /// the ARKit profile now reports as a hard error (#172). Mirrors the MCP
+    /// executor exactly.
+    static func declareDefaultPrimIfNeeded(_ path: PrimPath, to document: EditorDocument) {
+        guard path.depth == 1, document.snapshot.metadata.defaultPrim == nil else { return }
+        var metadata = document.snapshot.metadata
+        metadata.defaultPrim = path.name
+        _ = document.run(SetStageMetadataCommand(
+            newMetadata: metadata, oldMetadata: document.snapshot.metadata))
     }
 
     /// Set one attribute on an existing prim through the document command stack
@@ -351,7 +366,7 @@ public enum SculptBuildRunner {
 
     static func meshPrim(at path: String, from mesh: HalfEdgeMesh) -> Prim? {
         guard let xformPath = PrimPath(path), let meshPath = xformPath.appending("Geo") else { return nil }
-        let flat = MeshIO.flat(from: mesh)
+        let flat = MeshIO.flatTextured(from: mesh)
         var points: [Double] = []
         points.reserveCapacity(flat.points.count * 3)
         for p in flat.points { points += [p.x, p.y, p.z] }
@@ -364,6 +379,15 @@ public enum SculptBuildRunner {
             Attribute(name: "faceVertexIndices", value: .intArray(flat.faceVertexIndices)),
             Attribute(name: "subdivisionScheme", value: .token("none"), isUniform: true),
         ]
+        // Face-varying UVs, so the material pass's texture maps have somewhere
+        // to land (#170).
+        if !flat.faceVaryingUVs.isEmpty {
+            attributes.append(Attribute(
+                name: "primvars:st",
+                value: .doubleArray(flat.faceVaryingUVs.flatMap { [$0.x, $0.y] }),
+                metadata: ["interpolation": "\"faceVarying\""],
+                declaredType: "texCoord2f[]"))
+        }
         let normals = VertexNormals.smoothFlat(for: flat)
         if !normals.isEmpty {
             attributes.append(Attribute(name: "normals", value: .float3Array(normals)))

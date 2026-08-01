@@ -34,6 +34,14 @@ struct RealCorpus {
             "Packages/USDBridge/Tests/USDBridgeTests/Fixtures/Corpus", isDirectory: true)
     }
 
+    /// A fresh scratch directory. Shared by both real-usd-core suites, which
+    /// each need somewhere to save into.
+    static func tempDir() throws -> URL {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
+    }
+
     /// A real process executor, or `nil` when usd-core isn't importable.
     ///
     /// The interpreter is resolved the same way the app resolves it, but with
@@ -119,13 +127,18 @@ struct BridgeCorpusTests {
     ///
     /// `stage_snapshot.py` reads attribute values at the *default* time only, so
     /// a purely time-sampled attribute has no default value and is surfaced as
-    /// `.unsupported(typeName:)` — **preserved by name, never silently dropped**
-    /// (PRD §4.2). Structure and prim tree survive intact.
+    /// `.declaredOnly(typeName:)` — the declaration is **preserved with its real
+    /// USD type**, never silently dropped (PRD §4.2). Structure and prim tree
+    /// survive intact.
     ///
-    /// This is a known bridge gap, not a bug in the corpus: reading time samples
-    /// across the wire is animation-phase work. If the bridge later learns to
-    /// emit `timeSamples`, this test should flip to asserting `isAnimated` —
-    /// which is exactly the regression signal the corpus exists to give.
+    /// Before #174 this arrived as `.unsupported("unsupported:double3")`, which
+    /// the serializer refused to write at all: an open→save of an animated
+    /// stage deleted the xformOp outright. A typed declaration round-trips.
+    ///
+    /// Reading the samples themselves across the wire is still animation-phase
+    /// work. If the bridge later learns to emit `timeSamples`, this test should
+    /// flip to asserting `isAnimated` — exactly the regression signal the
+    /// corpus exists to give.
     @Test func animatedStagePreservesTimeSampledAttributes() async throws {
         guard let exec = await RealCorpus.executorOrSkip() else { return }
         let stage = try await BridgedStage.open(url: RealCorpus.fixture("animated.usda"), executor: exec)
@@ -134,8 +147,72 @@ struct BridgeCorpusTests {
 
         let mover = try #require(stage.prim(at: PrimPath("/Mover")!))
         let translate = try #require(mover.attribute(named: "xformOp:translate"))
-        #expect(translate.value == .unsupported(typeName: "unsupported:double3"))
-        #expect(translate.value.isEditable == false)
+        #expect(translate.value == .declaredOnly(typeName: "double3"))
+        #expect(translate.declaredType == "double3")
+        // Typed and therefore writable — the declaration survives a save.
+        #expect(translate.value.isEditable)
+    }
+
+    /// #174: opening a textured asset and saving it must not destroy its
+    /// `UsdShade` network.
+    ///
+    /// The reported failure was total data loss on a *no-op* open → save: the
+    /// four `UsdUVTexture` prims and every `.connect` vanished, silently
+    /// reverting a textured asset to flat colour. `grep -c UsdUVTexture` on the
+    /// output returned 0 against the input's 4.
+    ///
+    /// This asserts the graph survives structurally — the nodes, their
+    /// `asset`-typed file inputs, the connections between them, and the declared
+    /// shader-input types — through a full bridge round-trip.
+    @Test func openSaveReopenPreservesShaderNetwork() async throws {
+        guard let exec = await RealCorpus.executorOrSkip() else { return }
+        let opened = try await BridgedStage.open(
+            url: RealCorpus.fixture("textured.usda"), executor: exec)
+
+        let dir = try RealCorpus.tempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let out = dir.appendingPathComponent("resaved.usda")
+        try await StageSaver.save(opened.snapshot, to: out, executor: exec)
+
+        // The written text itself must still contain the network: this is the
+        // exact grep from the issue report.
+        let text = try String(contentsOf: out, encoding: .utf8)
+        #expect(text.components(separatedBy: "UsdUVTexture").count - 1 == 2)
+        #expect(text.contains("UsdPrimvarReader_float2"))
+        #expect(text.contains("primvars:st"))
+
+        // And it must reopen with the graph intact, not merely parse.
+        let reopened = try await BridgedStage.open(url: out, executor: exec)
+        let surface = try #require(reopened.prim(at: PrimPath("/Looks/Painted/Surface")!))
+        // Types are the schema's, not the wire's narrower guesses.
+        #expect(surface.attribute(named: "inputs:metallic")?.declaredType == "float")
+        // The connections — the thing that was being dropped.
+        #expect(surface.attribute(named: "inputs:diffuseColor")?.connections
+                == ["/Looks/Painted/albedoTexture.outputs:rgb"])
+        #expect(surface.attribute(named: "inputs:roughness")?.connections
+                == ["/Looks/Painted/roughnessTexture.outputs:r"])
+        let material = try #require(reopened.prim(at: PrimPath("/Looks/Painted")!))
+        #expect(material.attribute(named: "outputs:surface")?.connections
+                == ["/Looks/Painted/Surface.outputs:surface"])
+
+        // Both texture nodes survive with resolvable asset paths and UV wiring.
+        for node in ["albedoTexture", "roughnessTexture"] {
+            let texture = try #require(
+                reopened.prim(at: PrimPath("/Looks/Painted/\(node)")!))
+            #expect(texture.attribute(named: "info:id")?.value == .token("UsdUVTexture"))
+            let file = try #require(texture.attribute(named: "inputs:file"))
+            #expect(file.declaredType == "asset")
+            #expect(file.value.isEditable)
+            #expect(texture.attribute(named: "inputs:st")?.connections
+                    == ["/Looks/Painted/stReader.outputs:result"])
+        }
+
+        // The mesh keeps its face-varying UVs, without which the textures above
+        // would have nothing to map through (#170).
+        let mesh = try #require(reopened.prim(at: PrimPath("/Textured/Geom")!))
+        let st = try #require(mesh.attribute(named: "primvars:st"))
+        #expect(st.declaredType == "texCoord2f[]")
+        #expect(st.metadata["interpolation"] == "\"faceVarying\"")
     }
 
     /// Same contract on the UsdSkel side: the SkelAnimation prim ships with its
@@ -171,16 +248,10 @@ struct StageSaverRoundTripTests {
         return StageSnapshot(metadata: StageMetadata(defaultPrim: "Root"), rootPrims: [root])
     }
 
-    private func tempDir() throws -> URL {
-        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        return dir
-    }
-
     @Test(arguments: ["usda", "usdc", "usdz"])
     func authorSaveReopenPreservesStructure(_ ext: String) async throws {
         guard let exec = await RealCorpus.executorOrSkip() else { return }
-        let dir = try tempDir()
+        let dir = try RealCorpus.tempDir()
         defer { try? FileManager.default.removeItem(at: dir) }
         let out = dir.appendingPathComponent("model.\(ext)")
 
@@ -194,7 +265,7 @@ struct StageSaverRoundTripTests {
 
     @Test func overwritingExistingUsdzReplacesInPlace() async throws {
         guard let exec = await RealCorpus.executorOrSkip() else { return }
-        let dir = try tempDir()
+        let dir = try RealCorpus.tempDir()
         defer { try? FileManager.default.removeItem(at: dir) }
         let out = dir.appendingPathComponent("model.usdz")
 
